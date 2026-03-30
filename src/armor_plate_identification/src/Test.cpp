@@ -20,7 +20,7 @@ private:
     int selected_param_ = 0; // 0~5 对应6个匹配参数
     int play_delay_ms_ = 100; // 播放延迟，越大越慢
     const std::vector<std::string> param_names_ = {
-        "MIN_PARALLEL",
+        "MAX_ANGLE_DIFF",
         "MAX_Y_DIFF_RATIO",
         "MIN_DISTANCE_RATIO",
         "MAX_DISTANCE_RATIO",
@@ -33,8 +33,8 @@ private:
         cv::Mat mask = findTargetColor(image);
         cv::Mat img_thre = preProcessing(mask);
         
-        std::vector<std::vector<cv::Point>> valued_contours = lights.findLightsContours(img_thre);
-        std::vector<std::vector<cv::Point2f>> all_lights = lights.findLightLines(valued_contours);
+        // 直接调用 findPairedLights 完成检测和匹配
+        lights.findPairedLights(img_thre);
         // ===== 测试 ==== 
         // 预处理四图拼接显示
         // 绘制目标区域
@@ -43,7 +43,6 @@ private:
         std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
         std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
         showMultiImages("PreProcessions-View", images, labels);
-        lights.findPairedLights(img_thre);
         lights.drawPairedLights(img_show);
 
         // 在img_show显示6个参数
@@ -51,7 +50,7 @@ private:
         for (int i = 0; i < 6; ++i) {
             float val = 0.0f;
             switch (i) {
-                case 0: val = lights.MIN_PARALLEL; break;
+                case 0: val = lights.MAX_ANGLE_DIFF; break;
                 case 1: val = lights.MAX_Y_DIFF_RATIO; break;
                 case 2: val = lights.MIN_DISTANCE_RATIO; break;
                 case 3: val = lights.MAX_DISTANCE_RATIO; break;
@@ -98,8 +97,8 @@ private:
 
         float dir = up ? 1.0f : -1.0f;
         switch (selected_param_) {
-            case 0: // MIN_PARALLEL
-                lights.MIN_PARALLEL = std::clamp(lights.MIN_PARALLEL + dir * 0.05f, 0.0f, 1.0f);
+            case 0: // MAX_ANGLE_DIFF (角度差，范围 0-30 度)
+                lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
                 break;
             case 1: // MAX_Y_DIFF_RATIO
                 lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);

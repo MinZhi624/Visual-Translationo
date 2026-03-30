@@ -2,17 +2,25 @@
 #include "armor_plate_identification/DrawTarget.hpp"
 #include <opencv2/imgproc.hpp>
 
-#include <iostream>
+Lights::Lights() :
+    center_(0, 0), top_(0, 0), bottom_(0, 0),
+    angle_(0), length_(0), width_(0), area_(0),
+    is_paired_(false)
+{}
 
 void PairedLights::findPairedLights(cv::Mat& img_thre)
 {
     // 找到灯条然后拟合成直线
     std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre);
-    std::vector<std::vector<cv::Point2f>> all_lights = findLightLines(valued_contours);
+    find_lights_ = findLightLines(valued_contours);
+    // 拿到灯条后匹配 按x轴排序,从左到右
+    std::sort(find_lights_.begin(), find_lights_.end(), [](const Lights& a, const Lights& b) {
+        return a.center_.x < b.center_.x;
+    });
     // 匹配灯条
-    paired_light_points_ = matchLights(all_lights);
+    paired_lights_ = matchLights(find_lights_);
     // 更新灯条数量
-    num_lights_ = paired_light_points_.size();
+    num_lights_ = paired_lights_.size();
 }
 
 std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& img_thre)
@@ -34,9 +42,9 @@ std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& im
     }
     return target_contours;
 }
-std::vector<std::vector<cv::Point2f>> PairedLights::findLightLines(std::vector<std::vector<cv::Point>>& contours)
+std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Point>>& contours)
 {
-    std::vector<std::vector<cv::Point2f>> light_lines;
+    std::vector<Lights> lights_list;
     // 结合椭圆和 minAreaRect 的优点：
         // 1. 用椭圆拟合得到准确的方向和端点位置
         // 2. 用 minAreaRect 的边界限制椭圆端点，防止超出轮廓
@@ -75,105 +83,73 @@ std::vector<std::vector<cv::Point2f>> PairedLights::findLightLines(std::vector<s
             // 重新计算：从中心沿椭圆方向，但限制在 minAreaRect 范围内
             cv::Point2f final_top = center - dir * std::min(cv::norm(e_top - center),(double) m_half_len);
             cv::Point2f final_bottom = center + dir * std::min(cv::norm(e_bottom - center),(double) m_half_len);
-            // 4. 保存结果
-            light_lines.push_back({final_top, final_bottom});            
+            // 4. 填充Lights对象并保存
+            Lights light;
+            light.top_ = final_top;
+            light.bottom_ = final_bottom;
+            light.center_ = center;
+            light.length_ = cv::norm(final_top - final_bottom);
+            light.angle_ = atan2(dir.y, dir.x) * 180 / CV_PI;
+            lights_list.push_back(light);            
         }
-    return light_lines;
+    return lights_list;
 }
-bool PairedLights::checkPairLights(cv::Point2f p1, cv::Point2f p2, cv::Point2f p3, cv::Point2f p4) {
+bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
-    //角度（方向） -> 边长比例（距离）
-    float parallel = getParallelDegree(p1, p2, p3, p4);
-    double left_length = cv::norm(p1 - p2);
-    double right_length = cv::norm(p3 - p4);
-    float length_ratio = left_length / right_length;
-    //先判断角度 和 边长比例判断是否合理
-    if (parallel < MIN_PARALLEL  || length_ratio < MIN_LENGTH_RATIO ) return false;
+    float diff = std::abs(light_left.angle_ - light_right.angle_);
+    diff = std::min(diff, 180 - diff);
+    float length_ratio = std::min(light_left.length_, light_left.length_) / std::max(light_left.length_, light_left.length_);
+    //角度差（方向） -> 边长比例（距离）
+    if (diff > MAX_ANGLE_DIFF  || length_ratio < MIN_LENGTH_RATIO ) return false;
     // 再判断x差比率和y差比率和相距距离与灯条长度比值
-    double men_length = (left_length + right_length) / 2;
-    cv::Point2f left_center = (p1 + p2) / 2;
-    cv::Point2f right_center = (p3 + p4) / 2;
-    double x_diff_ratio = std::abs(left_center.x - right_center.x) / men_length;
-    double y_diff_ratio = std::abs(left_center.y - right_center.y) / men_length;
-    double distance_ratio = cv::norm(left_center - right_center) / men_length;
+    double men_length = (light_left.length_ + light_right.length_) / 2;
+    double x_diff_ratio = std::abs(light_left.center_.x - light_right.center_.x) / men_length;
+    double y_diff_ratio = std::abs(light_left.center_.y - light_right.center_.y) / men_length;
+    double distance_ratio = men_length / cv::norm(light_left.center_ - light_right.center_) ;
     if ( x_diff_ratio < MIN_X_DIFF_RATIO
          || y_diff_ratio > MAX_Y_DIFF_RATIO 
          || distance_ratio > MAX_DISTANCE_RATIO
          || distance_ratio < MIN_DISTANCE_RATIO 
     ) return false;
-   
+
     return true;
 }
-std::vector<std::vector<cv::Point2f>> PairedLights::matchLights(std::vector<std::vector<cv::Point2f>>& all_lights)
+std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>& all_lights)
 {
-    std::vector<std::vector<cv::Point2f>> paired_light_points;
-    //遍历 C(n,2)
+    std::vector<std::array<Lights, 2>> paired_lights;
     for (size_t i = 0; i < all_lights.size(); i++) {
-        const auto& light1 = all_lights[i];
-        cv::Point2f p1 = light1[0];
-        cv::Point2f p2 = light1[1];
         for (size_t j = i + 1; j < all_lights.size(); j++) {
-            const auto& light2 = all_lights[j];
-            cv::Point2f p3 = light2[0];
-            cv::Point2f p4 = light2[1];
-            if (checkPairLights(p1, p2, p3, p4)) {
-                paired_light_points.push_back({p4, p2, p3, p1 });
+            if (checkPairLights(all_lights[i], all_lights[j])) {
+                std::array<Lights, 2> pair_lights = { all_lights[i], all_lights[j] };
+                paired_lights.push_back(pair_lights);
             }
         }
     }
-    return paired_light_points;
+    return paired_lights;
 }
 void PairedLights::drawPairedLights(cv::Mat& img)
 {
-    for (const auto& light_points : paired_light_points_) {
-        //画出矩形
-        drawQuadrangle(img, light_points[0], light_points[1], light_points[3], light_points[2], cv::Scalar(0, 255, 0));
-        //标出四个点
-        for (int j = 0; j < 4; j++) {
-            std::string test = "(" + std::to_string((int)light_points[j].x) + "," + std::to_string((int)light_points[j].y) + ")";
-            cv::putText(img, test, light_points[j], cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
-        }
+    for (const auto& pair_lights : paired_lights_) {
+        // 这个是画出角点
+        cv::circle(img, pair_lights[0].top_, 3, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[0].bottom_, 3, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[1].top_, 3, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[1].bottom_, 3, cv::Scalar(255, 0, 255), -1);
+        // 画出灯条
+        cv::line(img, pair_lights[0].top_, pair_lights[0].bottom_, cv::Scalar(255, 0, 255), 2);
+        cv::line(img, pair_lights[1].top_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 2);
+        cv::line(img, pair_lights[0].top_, pair_lights[1].top_, cv::Scalar(255, 0, 255), 2);
+        cv::line(img, pair_lights[0].bottom_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 2);
     }
 }
 
-
-std::vector<cv::Point2f> sortRotatedRectPoints(cv::RotatedRect& rect)
+std::vector<std::vector<cv::Point2f>> PairedLights::getPairedLightPoints() const
 {
-    cv::Point2f points[4];
-    rect.points(points);
-    //对y经行排序
-    std::sort(points, points + 4, [](const cv::Point2f p1, const cv::Point2f p2) { return p1.y < p2.y; });
-    for (int i = 0; i < 2; i++) {
-        //对x进行排序
-        std::sort(points + 2 * i, points + 2 * (i + 1), [](const cv::Point2f p1, const cv::Point2f p2) { return p1.x < p2.x; });
+    std::vector<std::vector<cv::Point2f>> paired_points;
+    for (const auto& pair_lights : paired_lights_) {
+        std::vector<cv::Point2f> points = { pair_lights[0].top_, pair_lights[0].bottom_, pair_lights[1].top_, pair_lights[1].bottom_ };
+        paired_points.push_back(points);
+        
     }
-    return std::vector<cv::Point2f>{points[0], points[1], points[2], points[3]};
-}
-void drawQuadrangle(cv::Mat& img, cv::Point2f p1, cv::Point2f p2, cv::Point2f p3, cv::Point2f p4, cv::Scalar color)
-{
-    cv::line(img, p1, p2, color, 2);
-    cv::line(img, p2, p3, color, 2);
-    cv::line(img, p3, p4, color, 2);
-    cv::line(img, p4, p1, color, 2);
-}
-
-double getParallelDegree(cv::Point2f p1, cv::Point2f p2, cv::Point2f p3, cv::Point2f p4)
-{
-    cv::Vec2f vec1(p2.x - p1.x, p2.y - p1.y);
-    cv::Vec2f vec2(p4.x - p3.x, p4.y - p3.y);
-    if (cv::norm(vec1) < 1e-6 || cv::norm(vec2) < 1e-6) {
-        return 0.0;
-    }
-    // 归一化
-    vec1 = vec1 / cv::norm(vec1);
-    vec2 = vec2 / cv::norm(vec2);
-    // 计算点积
-    double dot = vec1[0] * vec2[0] + vec1[1] * vec2[1];
-    // 计算夹角（弧度）
-    double angle_diff = acos(fmin(fmax(dot, -1.0), 1.0));
-    // 考虑方向相反的情况
-    angle_diff = std::min(angle_diff, CV_PI - angle_diff);
-    // 转换为平行程度：0度=1（完全平行），90度=0（垂直）
-    double parallel_degree = 1.0 - (angle_diff / (CV_PI / 2));
-    return std::max(0.0, std::min(1.0, parallel_degree));
+    return paired_points;
 }
