@@ -21,7 +21,7 @@ private:
 
     // 可调参数
     int exposure_time = 300;  // 初始曝光时间（微秒）
-    int gain = 80;             // 初始增益
+    int gain = 20;             // 初始增益
 
     rclcpp::TimerBase::SharedPtr timer_;
 
@@ -61,10 +61,10 @@ private:
 
         // 匹配参数初始化
         lights.MAX_ANGLE_DIFF = 10.0f;
-        lights.MIN_LENGTH_RATIO = 0.3f;
-        lights.MIN_X_DIFF_RATIO = 0.1f;
-        lights.MAX_Y_DIFF_RATIO = 0.7f;
-        lights.MAX_DISTANCE_RATIO = 1.0f;
+        lights.MIN_LENGTH_RATIO = 0.7f;
+        lights.MIN_X_DIFF_RATIO = 1.75f;
+        lights.MAX_Y_DIFF_RATIO = 0.4f;
+        lights.MAX_DISTANCE_RATIO = 0.4f;
         lights.MIN_DISTANCE_RATIO = 0.1f;
         
         // 创建定时器，5秒发布一次信息
@@ -120,7 +120,6 @@ private:
         std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
         showMultiImages("Identify-View", images, labels);
 #endif
-
 #ifdef DEBUG_INDENTIFICATION
         // 在img_show显示6个参数
         for (int i = 0; i < 6; ++i) {
@@ -140,8 +139,8 @@ private:
             cv::putText(img_show, text, cv::Point(x, y + i * line_h),
                         cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
         }
-        
         std::string help_text;
+        lights.drawAllLights(img_show);
 #if defined(DEBUG_BASE)
         help_text = "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit";
 #else

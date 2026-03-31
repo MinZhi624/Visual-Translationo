@@ -10,7 +10,7 @@
 Lights::Lights() :
     center_(0, 0), top_(0, 0), bottom_(0, 0),
     angle_(0), length_(0), width_(0), area_(0),
-    is_paired_(false)
+    is_paired_(false), id_(-1)
 {}
 
 void PairedLights::findPairedLights(cv::Mat& img_thre)
@@ -37,10 +37,11 @@ std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& im
     for (const auto& contour : contours) {
         int area = cv::contourArea(contour);
         if (area > MIN_CONTOURS_AREA) {
-            cv::Rect bbox = cv::boundingRect(contour);
-            float ratio = (float)bbox.width / bbox.height;
-            if (ratio < MAX_CONTOURS_RATIO && ratio > MIN_CONTOURS_RATIO)
-            {
+            cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+            double long_length = std::max(min_rect.size.width, min_rect.size.height);
+            double short_length = std::min(min_rect.size.width, min_rect.size.height);
+            double ratio =short_length / long_length;
+            if (ratio < MAX_CONTOURS_RATIO && ratio > MIN_CONTOURS_RATIO) {
                 target_contours.push_back(contour);
             }
         }
@@ -51,118 +52,169 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
 {
     std::vector<Lights> lights_list;
     // 结合椭圆和 minAreaRect 的优点：
-        // 1. 用椭圆拟合得到准确的方向和端点位置
-        // 2. 用 minAreaRect 的边界限制椭圆端点，防止超出轮廓
-        for (auto & contour : contours) {
-            // 1. 获取椭圆拟合结果（准确方向）
-            cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
-            cv::Point2f e_points[4];
-            ellipse_rect.points(e_points);
-            // 按y排序，上面两点和下面两点
-            std::sort(e_points, e_points + 4, [](const cv::Point2f& a, const cv::Point2f& b) {
-                return a.y < b.y;
-            });
-            // 椭圆中轴线端点
-            cv::Point2f e_top = (e_points[0] + e_points[1]) / 2;
-            cv::Point2f e_bottom = (e_points[2] + e_points[3]) / 2;
+    // 1. 用椭圆拟合得到准确的方向
+    // 2. 用 minAreaRect 的边界限制端点，防止超出轮廓
+    for (auto & contour : contours) {
+        // 1. 椭圆拟合提供准确方向，并规范化
+        cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
+        // 2. minAreaRect 提供边长边界约束
+        cv::RotatedRect min_rect = cv::minAreaRect(contour);
+        // 3. 用规范化后的椭圆角度计算中轴线单位方向向量
+        double angle_rad = (ellipse_rect.angle + 90) * CV_PI / 180.0f;
+        cv::Point2f dir = cv::Point2f(cos(angle_rad), sin(angle_rad));
+        if (abs(dir.y) > 0.5f) 
+            if (dir.y > 0) dir  = -dir;
+        else 
+            if(dir.x > 0) dir = -dir;
+        // 这里采用点是为了方便计算
+        double len = cv::norm(dir);
+        if (len < 1e-6) continue;
+        dir = dir / len;
+        // 4. 计算中心点和半长
+        cv::Point2f center = ellipse_rect.center;
+        double half_len = std::max(min_rect.size.width, min_rect.size.height) / 2;
 
-            // 2. 获取 minAreaRect 边界（范围约束）
-            cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
-            cv::Point2f m_points[4];
-            min_rect.points(m_points);
-            std::sort(m_points, m_points + 4, [](const cv::Point2f& a, const cv::Point2f& b) {
-                return a.y < b.y;
-            });
-            // minAreaRect 的中轴线端点（边界）
-            cv::Point2f m_top = (m_points[0] + m_points[1]) / 2;
-            cv::Point2f m_bottom = (m_points[2] + m_points[3]) / 2;
-            // 3. 结合：椭圆端点限制在 minAreaRect 边界内
-            // 计算椭圆方向向量
-            cv::Point2f dir = e_bottom - e_top;
-            float len = cv::norm(dir);
-            if (len < 1e-6) continue;
-            dir = dir / len;  // 单位向量
-            // 限制方法：从椭圆中心沿方向延伸，但长度不超过 minAreaRect 的半长
-            cv::Point2f center = (e_top + e_bottom) / 2;
-            float m_half_len = cv::norm(m_top - m_bottom) / 2;
-            // 重新计算：从中心沿椭圆方向，但限制在 minAreaRect 范围内
-            cv::Point2f final_top = center - dir * std::min(cv::norm(e_top - center),(double) m_half_len);
-            cv::Point2f final_bottom = center + dir * std::min(cv::norm(e_bottom - center),(double) m_half_len);
-            // 4. 填充Lights对象并保存
-            Lights light;
-            light.top_ = final_top;
-            light.bottom_ = final_bottom;
-            light.center_ = center;
-            light.length_ = cv::norm(final_top - final_bottom);
-            light.angle_ = atan2(dir.y, dir.x) * 180 / CV_PI;
-            lights_list.push_back(light);            
-        }
+        // 5. 计算最终端点（限制在 minAreaRect 范围内）
+        cv::Point2f final_top = center + dir * half_len;
+        cv::Point2f final_bottom = center - dir * half_len;
+
+        // 6. 填充 Lights 对象
+        Lights light;
+        light.rect_ = ellipse_rect;  // 用规范化的 ellipse_rect 作为绘制框
+        light.top_ = final_top;
+        light.bottom_ = final_bottom;
+        light.center_ = center;
+        light.length_ = half_len * 2.0f;
+        light.angle_ = atan2(dir.y, dir.x);
+        light.id_ = static_cast<int>(lights_list.size());
+        lights_list.push_back(light);
+    }
     return lights_list;
 }
 bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
-    float diff = std::abs(light_left.angle_ - light_right.angle_);
+    float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
     diff = std::min(diff, 180 - diff);
-    float length_ratio = std::min(light_left.length_, light_left.length_) / std::max(light_left.length_, light_left.length_);
+    float length_ratio = std::min(light_left.length_, light_right.length_) / std::max(light_left.length_, light_right.length_);
     //角度差（方向） -> 边长比例（距离）
-    if (diff > MAX_ANGLE_DIFF  || length_ratio < MIN_LENGTH_RATIO ) {
+    if (diff > MAX_ANGLE_DIFF) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是交差过大");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "交差过大 差距为\t%lf", diff);
 #endif
         return false;
     }
     if (length_ratio < MIN_LENGTH_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 长度 相差太远");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "长度 相差 太大\t%lf", length_ratio);
 #endif
         return false;
     }
-
+    // 相机坐标系下面的距离
+    double global_x_diff = light_right.center_.x - light_left.center_.x;   // 已经按x排过序，自然 >= 0
+    double global_y_diff = light_right.center_.y - light_left.center_.y;   // 保留符号！
+    // 计算灯条的局部坐标系下面的距离
+    // local_x -> 垂直于灯条的方向
+    // local_y -> 沿着灯条的方向
+    double sinx = std::sin(light_left.angle_);
+    double cosx = std::cos(light_left.angle_);
+    double local_x = std::abs(-global_x_diff * sinx + global_y_diff * cosx);
+    double local_y = std::abs(global_x_diff * cosx + global_y_diff * sinx);
     // 再判断x差比率和y差比率和相距距离与灯条长度比值
-    double men_length = (light_left.length_ + light_right.length_) / 2;
-    double x_diff_ratio = std::abs(light_left.center_.x - light_right.center_.x) / men_length;
-    double y_diff_ratio = std::abs(light_left.center_.y - light_right.center_.y) / men_length;
+    double men_length = (light_left.length_ + light_right.length_) / 2.0;
+    double x_diff_ratio = local_x / men_length;
+    double y_diff_ratio = local_y / men_length;
     double distance_ratio = men_length / cv::norm(light_left.center_ - light_right.center_) ;
     if ( x_diff_ratio < MIN_X_DIFF_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 X 相差太远");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "X 差太近\t%lf",x_diff_ratio);
 #endif
         return false;
     }
-    if ( y_diff_ratio > MAX_Y_DIFF_RATIO ) {
+    if ( y_diff_ratio > MAX_Y_DIFF_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 Y 相差太远");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "Y 差太远\t%lf",y_diff_ratio);
 #endif
         return false;
     }
     if ( distance_ratio > MAX_DISTANCE_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 距离 相差太 大");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "距离 相差 太 大\t%lf",distance_ratio);
 #endif
         return false;
     }
     if (distance_ratio < MIN_DISTANCE_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 距离 相差太 小");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "距离 相差 太 小\t%lf",distance_ratio);
 #endif
         return false;
     }
     // 全部检测通过
     return true;
 }
+float PairedLights::computePairScore(const Lights& light_left, const Lights& light_right) {
+    // 1. 平行度：角度差越小越好
+    float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
+    diff = std::min(diff, 180.0f - diff);
+    float angle_score = 1.0f - std::min(diff / MAX_ANGLE_DIFF, 1.0f);
+
+    // 2. 长度比：越接近1越好
+    float length_ratio = std::min(light_left.length_, light_right.length_) / std::max(light_left.length_, light_right.length_);
+
+    // 3. 中心距/灯条长度比：越接近2.0（标准装甲板宽高比）越好
+    double men_length = (light_left.length_ + light_right.length_) / 2.0;
+    double distance = cv::norm(light_left.center_ - light_right.center_);
+    double dist_ratio = distance / men_length;
+    float dist_score = 1.0f - std::min(std::abs((float)dist_ratio - 2.0f), 1.0f);
+
+    return angle_score + length_ratio + dist_score;
+}
+
 std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>& all_lights)
 {
-    std::vector<std::array<Lights, 2>> paired_lights;
+    struct Candidate {
+        std::array<Lights, 2> pair;
+        int idx1;
+        int idx2;
+        float score;
+    };
+
+    std::vector<Candidate> candidates;
     for (size_t i = 0; i < all_lights.size(); i++) {
         for (size_t j = i + 1; j < all_lights.size(); j++) {
             if (checkPairLights(all_lights[i], all_lights[j])) {
-                std::array<Lights, 2> pair_lights = { all_lights[i], all_lights[j] };
-                paired_lights.push_back(pair_lights);
+                float score = computePairScore(all_lights[i], all_lights[j]);
+                candidates.push_back({{all_lights[i], all_lights[j]}, static_cast<int>(i), static_cast<int>(j), score});
             }
+        }
+    }
+
+    // 按 score 降序排序，优先保留"最像装甲板"的配对
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        return a.score > b.score;
+    });
+
+    // NMS 去重：一个灯条只能属于一个装甲板
+    std::vector<std::array<Lights, 2>> paired_lights;
+    std::vector<bool> used(all_lights.size(), false);
+
+    for (const auto& c : candidates) {
+        if (!used[c.idx1] && !used[c.idx2]) {
+            paired_lights.push_back(c.pair);
+            used[c.idx1] = true;
+            used[c.idx2] = true;
         }
     }
     return paired_lights;
 }
+void PairedLights::drawAllLights(cv::Mat& img)
+{
+    for (const auto& light : find_lights_) {
+        drawRotatedRect(img, light.rect_);
+        cv::putText(img, "top", light.top_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
+        cv::putText(img, "bottom", light.bottom_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
+    }
+}
+
 void PairedLights::drawPairedLights(cv::Mat& img)
 {
     for (const auto& pair_lights : paired_lights_) {
@@ -185,7 +237,6 @@ std::vector<std::vector<cv::Point2f>> PairedLights::getPairedLightPoints() const
     for (const auto& pair_lights : paired_lights_) {
         std::vector<cv::Point2f> points = { pair_lights[0].top_, pair_lights[0].bottom_, pair_lights[1].top_, pair_lights[1].bottom_ };
         paired_points.push_back(points);
-        
     }
     return paired_points;
 }
