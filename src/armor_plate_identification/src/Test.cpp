@@ -22,8 +22,8 @@ private:
 
 #ifdef DEBUG_BASE
     int play_delay_ms_ = 100; // 播放延迟，越大越慢
-    int x = 10, y = 30, line_h = 25;
 #endif
+    int x = 10, y = 30, line_h = 25;
 #ifdef DEBUG_INDENTIFICATION
     int selected_param_ = 0; // 0~5 对应6个匹配参数
     const std::vector<std::string> param_names_ = {
@@ -42,10 +42,10 @@ private:
         c.open(video_path);
         // 匹配参数初始化
         lights.MAX_ANGLE_DIFF = 10.0f;
-        lights.MIN_LENGTH_RATIO = 0.3f;
-        lights.MIN_X_DIFF_RATIO = 0.1f;
-        lights.MAX_Y_DIFF_RATIO = 0.7f;
-        lights.MAX_DISTANCE_RATIO = 1.0f;
+        lights.MIN_LENGTH_RATIO = 0.7f;
+        lights.MIN_X_DIFF_RATIO = 1.75f;
+        lights.MAX_Y_DIFF_RATIO = 0.4f;
+        lights.MAX_DISTANCE_RATIO = 0.4f;
         lights.MIN_DISTANCE_RATIO = 0.1f;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
 #ifdef DEBUG_INDENTIFICATION
@@ -97,13 +97,22 @@ private:
                 case 5: val = lights.MIN_X_DIFF_RATIO; break;
             }
             std::string text = param_names_[i] + ": " + std::to_string(val);
+            // 保留2位小数
+            text = text.substr(0, text.find('.') + 3);
             cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
             cv::putText(img_show, text, cv::Point(x, y + i * line_h),
                         cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
         }
-        cv::putText(img_show, "1-6:select  W/S:adj  +/-:speed  A:pause  ESC:exit",
+        lights.drawAllLights(img_show);
+#if defined(DEBUG_BASE)
+        cv::putText(img_show, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
                     cv::Point(x, y + 6 * line_h + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+#else
+        cv::putText(img_show, "1-6:select  T/G:adj  P:pause  ESC:exit",
+                    cv::Point(x, y + 6 * line_h + 10),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+#endif
 #endif
 #ifdef DEBUG_BASE
     std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
@@ -113,53 +122,71 @@ private:
     }
     void controlParams()
     {
-        // 按键控制
-        // 退出暂停
         int key = cv::waitKey(1);
-        if (key == 27) { rclcpp::shutdown(); return; }
-        else if (key == 'a' || key == 'A') { cv::waitKey(0); return; }
-#ifdef DEBUG_BASE
-        // 速度控制（必须在 W/S 判断之前）
-        if (key == '+' || key == '=') {
-            play_delay_ms_ = std::max(play_delay_ms_ - 30, 0);
+        if (key == -1) return;
+
+        // ESC：退出
+        if (key == 27) {
+            rclcpp::shutdown();
             return;
-        } else if (key == '-' || key == '_') {
-            play_delay_ms_ += 30;
+        }
+
+        // P：暂停
+        if (key == 'p' || key == 'P') {
+            RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
+            cv::waitKey(0);
+            return;
+        }
+
+#ifdef DEBUG_BASE
+        // +/-：速度控制
+        if (key == '+' || key == '=') {
+            play_delay_ms_ = std::max(play_delay_ms_ - 10, 0);
+            RCLCPP_INFO(this->get_logger(), "播放延迟: %d ms", play_delay_ms_);
+            return;
+        }
+        if (key == '-' || key == '_') {
+            play_delay_ms_ += 10;
+            RCLCPP_INFO(this->get_logger(), "播放延迟: %d ms", play_delay_ms_);
             return;
         }
 #endif
+
 #ifdef DEBUG_INDENTIFICATION
-        // 1-6 切换选中参数
+        // 1-6：选择参数
         if (key >= '1' && key <= '6') {
             selected_param_ = key - '1';
+            RCLCPP_INFO(this->get_logger(), "选中参数: %s", param_names_[selected_param_].c_str());
             return;
         }
 
+        // T/G：调节参数值
+        bool increase = (key == 't' || key == 'T');
+        bool decrease = (key == 'g' || key == 'G');
 
-        bool up = (key == 'w' || key == 'W');
-        bool down = (key == 's' || key == 'S');
-        if (!up && !down) return;
-
-        float dir = up ? 1.0f : -1.0f;
-        switch (selected_param_) {
-            case 0: // MAX_ANGLE_DIFF (角度差，范围 0-30 度)
-                lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
-                break;
-            case 1: // MAX_Y_DIFF_RATIO
-                lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
-                break;
-            case 2: // MIN_DISTANCE_RATIO
-                lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                break;
-            case 3: // MAX_DISTANCE_RATIO
-                lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                break;
-            case 4: // MIN_LENGTH_RATIO
-                lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
-                break;
-            case 5: // MIN_X_DIFF_RATIO
-                lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
-                break;
+        if (increase || decrease) {
+            float dir = increase ? 1.0f : -1.0f;
+            switch (selected_param_) {
+                case 0: // MAX_ANGLE_DIFF
+                    lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
+                    break;
+                case 1: // MAX_Y_DIFF_RATIO
+                    lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
+                    break;
+                case 2: // MIN_DISTANCE_RATIO
+                    lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
+                    break;
+                case 3: // MAX_DISTANCE_RATIO
+                    lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
+                    break;
+                case 4: // MIN_LENGTH_RATIO
+                    lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
+                    break;
+                case 5: // MIN_X_DIFF_RATIO
+                    lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
+                    break;
+            }
+            return;
         }
 #endif
     }

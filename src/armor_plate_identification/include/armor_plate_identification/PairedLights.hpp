@@ -35,14 +35,13 @@ public:
 	// ==调参列表== //
 	// Contuors筛选参数
 	int MIN_CONTOURS_AREA = 100;
-	float MIN_CONTOURS_RATIO = 0.1f;
-	float MAX_CONTOURS_RATIO = 0.5f;
+	float MIN_CONTOURS_RATIO = 0.05f;
+	float MAX_CONTOURS_RATIO = 0.5;
 	// 灯条匹配参
 	float MAX_ANGLE_DIFF = 5.0f; // 角度差这里不是比值！ 
 	float MIN_LENGTH_RATIO = 0.5f;
-	float MIN_X_DIFF_RATIO = 5.0f;
-	float MIN_Y_DIFF_RATIO = 5.0f;
-	float MAX_Y_DIFF_RATIO = 0.3f;
+	float MIN_X_DIFF_RATIO = 0.3f;
+	float MAX_Y_DIFF_RATIO = 5.0f;
 	float MAX_DISTANCE_RATIO = 1.0f;
 	float MIN_DISTANCE_RATIO = 0.2f;
 	// =========== //
@@ -58,6 +57,7 @@ public:
 	void findPairedLights(cv::Mat& img_thre);
 	// 画出匹配好的图
 	void drawPairedLights(cv::Mat& img);
-	
+	void drawAllLights(cv::Mat& img);
+
 	std::vector<std::vector<cv::Point2f>> getPairedLightPoints() const;
 };

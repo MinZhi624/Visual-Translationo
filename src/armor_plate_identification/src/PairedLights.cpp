@@ -37,73 +37,102 @@ std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& im
     for (const auto& contour : contours) {
         int area = cv::contourArea(contour);
         if (area > MIN_CONTOURS_AREA) {
-            cv::Rect bbox = cv::boundingRect(contour);
-            float ratio = (float)bbox.width / bbox.height;
-            if (ratio < MAX_CONTOURS_RATIO && ratio > MIN_CONTOURS_RATIO)
-            {
+            cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+            double long_length = std::max(min_rect.size.width, min_rect.size.height);
+            double short_length = std::min(min_rect.size.width, min_rect.size.height);
+            double ratio =short_length / long_length;
+            if (ratio < MAX_CONTOURS_RATIO && ratio > MIN_CONTOURS_RATIO) {
                 target_contours.push_back(contour);
             }
         }
     }
     return target_contours;
 }
+// 规范化 RotatedRect：mode=0 保证 width>=height；mode=1 保证 height 为长边且 angle 在 [-45,45)
+static cv::RotatedRect& adjustRec(cv::RotatedRect& rec, int mode)
+{
+    using std::swap;
+    float& width = rec.size.width;
+    float& height = rec.size.height;
+    float& angle = rec.angle;
+
+    if(mode == 0) // WIDTH_GREATER_THAN_HEIGHT
+    {
+        if(width < height)
+        {
+            swap(width, height);
+            angle += 90.0;
+        }
+    }
+
+    while(angle >= 90.0) angle -= 180.0;
+    while(angle < -90.0) angle += 180.0;
+
+    if(mode == 1) // ANGLE_TO_UP
+    {
+        if(angle >= 45.0)
+        {
+            swap(width, height);
+            angle -= 90.0;
+        }
+        else if(angle < -45.0)
+        {
+            swap(width, height);
+            angle += 90.0;
+        }
+    }
+
+    return rec;
+}
+
 std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Point>>& contours)
 {
     std::vector<Lights> lights_list;
     // 结合椭圆和 minAreaRect 的优点：
-        // 1. 用椭圆拟合得到准确的方向和端点位置
-        // 2. 用 minAreaRect 的边界限制椭圆端点，防止超出轮廓
-        for (auto & contour : contours) {
-            // 1. 获取椭圆拟合结果（准确方向）
-            cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
-            cv::Point2f e_points[4];
-            ellipse_rect.points(e_points);
-            // 按y排序，上面两点和下面两点
-            std::sort(e_points, e_points + 4, [](const cv::Point2f& a, const cv::Point2f& b) {
-                return a.y < b.y;
-            });
-            // 椭圆中轴线端点
-            cv::Point2f e_top = (e_points[0] + e_points[1]) / 2;
-            cv::Point2f e_bottom = (e_points[2] + e_points[3]) / 2;
+    // 1. 用椭圆拟合得到准确的方向
+    // 2. 用 minAreaRect 的边界限制端点，防止超出轮廓
+    for (auto & contour : contours) {
+        // 1. 椭圆拟合提供准确方向，并规范化
+        cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
+        adjustRec(ellipse_rect, 0); // ANGLE_TO_UP：height 为长边，angle 在 [-45, 45)
 
-            // 2. 获取 minAreaRect 边界（范围约束）
-            cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
-            cv::Point2f m_points[4];
-            min_rect.points(m_points);
-            std::sort(m_points, m_points + 4, [](const cv::Point2f& a, const cv::Point2f& b) {
-                return a.y < b.y;
-            });
-            // minAreaRect 的中轴线端点（边界）
-            cv::Point2f m_top = (m_points[0] + m_points[1]) / 2;
-            cv::Point2f m_bottom = (m_points[2] + m_points[3]) / 2;
-            // 3. 结合：椭圆端点限制在 minAreaRect 边界内
-            // 计算椭圆方向向量
-            cv::Point2f dir = e_bottom - e_top;
-            float len = cv::norm(dir);
-            if (len < 1e-6) continue;
-            dir = dir / len;  // 单位向量
-            // 限制方法：从椭圆中心沿方向延伸，但长度不超过 minAreaRect 的半长
-            cv::Point2f center = (e_top + e_bottom) / 2;
-            float m_half_len = cv::norm(m_top - m_bottom) / 2;
-            // 重新计算：从中心沿椭圆方向，但限制在 minAreaRect 范围内
-            cv::Point2f final_top = center - dir * std::min(cv::norm(e_top - center),(double) m_half_len);
-            cv::Point2f final_bottom = center + dir * std::min(cv::norm(e_bottom - center),(double) m_half_len);
-            // 4. 填充Lights对象并保存
-            Lights light;
-            light.top_ = final_top;
-            light.bottom_ = final_bottom;
-            light.center_ = center;
-            light.length_ = cv::norm(final_top - final_bottom);
-            light.angle_ = atan2(dir.y, dir.x) * 180 / CV_PI;
-            lights_list.push_back(light);            
-        }
+        // 2. minAreaRect 提供边界约束（原始即可，只取最长边做限制）
+        cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+
+        // 3. 用规范化后的椭圆角度计算中轴线单位方向向量
+        float angle_rad = ellipse_rect.angle * CV_PI / 180.0f;
+        cv::Point2f dir(std::cos(angle_rad), std::sin(angle_rad));
+        float len = cv::norm(dir);
+        if (len < 1e-6) continue;
+        dir = dir / len;
+
+        // 4. 计算中心点和半长
+        cv::Point2f center = ellipse_rect.center;
+        float ellipse_half_len = ellipse_rect.size.width * 0.5f;  // adjustRec 后 width 为长边
+        float min_half_len = std::max(min_rect.size.width, min_rect.size.height) * 0.5f;
+        float final_half_len = std::min(ellipse_half_len, min_half_len);
+
+        // 5. 计算最终端点（限制在 minAreaRect 范围内）
+        cv::Point2f final_top = center - dir * final_half_len;
+        cv::Point2f final_bottom = center + dir * final_half_len;
+
+        // 6. 填充 Lights 对象
+        Lights light;
+        light.rect_ = ellipse_rect;  // 用规范化的 ellipse_rect 作为绘制框
+        light.top_ = final_top;
+        light.bottom_ = final_bottom;
+        light.center_ = center;
+        light.length_ = final_half_len * 2.0f;
+        light.angle_ = std::atan2(dir.y, dir.x) * 180.0f / CV_PI;
+        lights_list.push_back(light);
+    }
     return lights_list;
 }
 bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
     float diff = std::abs(light_left.angle_ - light_right.angle_);
     diff = std::min(diff, 180 - diff);
-    float length_ratio = std::min(light_left.length_, light_left.length_) / std::max(light_left.length_, light_left.length_);
+    float length_ratio = std::min(light_left.length_, light_right.length_) / std::max(light_left.length_, light_right.length_);
     //角度差（方向） -> 边长比例（距离）
     if (diff > MAX_ANGLE_DIFF  || length_ratio < MIN_LENGTH_RATIO ) {
 #ifdef DEBUG_INDENTIFICATION
@@ -118,10 +147,33 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
         return false;
     }
 
+    // 建立以灯条平均方向为基准的局部坐标系，消除相机俯仰/滚转带来的透视畸变影响
+    // 先处理 180° 周期性，确保两个角度在同一半周期内再平均
+    float a1 = light_left.angle_ * CV_PI / 180.0f;
+    float a2 = light_right.angle_ * CV_PI / 180.0f;
+    if (std::abs(a1 - a2) > CV_PI / 2.0f) {
+        if (a1 < a2) a1 += CV_PI;
+        else a2 += CV_PI;
+    }
+    float avg_angle_rad = (a1 + a2) / 2.0f;
+    // 规范回 [0, PI)
+    while (avg_angle_rad >= CV_PI) avg_angle_rad -= CV_PI;
+    while (avg_angle_rad < 0.0f) avg_angle_rad += CV_PI;
+
+    float cos_a = std::cos(avg_angle_rad);
+    float sin_a = std::sin(avg_angle_rad);
+
+    float dx = light_right.center_.x - light_left.center_.x;
+    float dy = light_right.center_.y - light_left.center_.y;
+
+    // 旋转到局部坐标系：local_x 为装甲板宽度方向（垂直于灯条），local_y 为灯条长度方向（平行于灯条）
+    float local_x = std::abs(-dx * sin_a + dy * cos_a);
+    float local_y = std::abs(dx * cos_a + dy * sin_a);
+
     // 再判断x差比率和y差比率和相距距离与灯条长度比值
-    double men_length = (light_left.length_ + light_right.length_) / 2;
-    double x_diff_ratio = std::abs(light_left.center_.x - light_right.center_.x) / men_length;
-    double y_diff_ratio = std::abs(light_left.center_.y - light_right.center_.y) / men_length;
+    double men_length = (light_left.length_ + light_right.length_) / 2.0;
+    double x_diff_ratio = local_x / men_length;
+    double y_diff_ratio = local_y / men_length;
     double distance_ratio = men_length / cv::norm(light_left.center_ - light_right.center_) ;
     if ( x_diff_ratio < MIN_X_DIFF_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
@@ -163,6 +215,13 @@ std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>
     }
     return paired_lights;
 }
+void PairedLights::drawAllLights(cv::Mat& img)
+{
+    for (const auto& light : find_lights_) {
+        drawRotatedRect(img, light.rect_);
+    }
+}
+
 void PairedLights::drawPairedLights(cv::Mat& img)
 {
     for (const auto& pair_lights : paired_lights_) {
