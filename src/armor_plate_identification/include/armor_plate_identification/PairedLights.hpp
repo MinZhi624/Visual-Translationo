@@ -40,7 +40,8 @@ public:
 	// 灯条匹配参
 	float MAX_ANGLE_DIFF = 5.0f; // 角度差这里不是比值！ 
 	float MIN_LENGTH_RATIO = 0.5f;
-	float MIN_X_DIFF_RATIO = 0.3f;
+	float MIN_X_DIFF_RATIO = 5.0f;
+	float MIN_Y_DIFF_RATIO = 5.0f;
 	float MAX_Y_DIFF_RATIO = 0.3f;
 	float MAX_DISTANCE_RATIO = 1.0f;
 	float MIN_DISTANCE_RATIO = 0.2f;

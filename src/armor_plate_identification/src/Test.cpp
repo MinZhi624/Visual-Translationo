@@ -17,8 +17,15 @@ private:
     cv::VideoCapture c;
     cv::Mat img_show;
     PairedLights lights;
-    int selected_param_ = 0; // 0~5 对应6个匹配参数
+
+    rclcpp::TimerBase::SharedPtr timer_;
+
+#ifdef DEBUG_BASE
     int play_delay_ms_ = 100; // 播放延迟，越大越慢
+    int x = 10, y = 30, line_h = 25;
+#endif
+#ifdef DEBUG_INDENTIFICATION
+    int selected_param_ = 0; // 0~5 对应6个匹配参数
     const std::vector<std::string> param_names_ = {
         "MAX_ANGLE_DIFF",
         "MAX_Y_DIFF_RATIO",
@@ -27,7 +34,36 @@ private:
         "MIN_LENGTH_RATIO",
         "MIN_X_DIFF_RATIO"
     };
+#endif
 
+    void init(std::string video_path)
+    {
+        // 相机初始化
+        c.open(video_path);
+        // 匹配参数初始化
+        lights.MAX_ANGLE_DIFF = 10.0f;
+        lights.MIN_LENGTH_RATIO = 0.3f;
+        lights.MIN_X_DIFF_RATIO = 0.1f;
+        lights.MAX_Y_DIFF_RATIO = 0.7f;
+        lights.MAX_DISTANCE_RATIO = 1.0f;
+        lights.MIN_DISTANCE_RATIO = 0.1f;
+        this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
+#endif
+#ifdef DEBUG_PREPROCESSING
+        RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
+#endif
+    }
+    void info()
+    {
+        // 计时器 5s发布一次信息
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_INFO(this->get_logger(), "MAX_ANGLE_DIFF: %f, MAX_Y_DIFF_RATIO: %f, MIN_DISTANCE_RATIO: %f, MAX_DISTANCE_RATIO: %f, MIN_LENGTH_RATIO: %f, MIN_X_DIFF_RATIO: %f",
+        lights.MAX_ANGLE_DIFF, lights.MAX_Y_DIFF_RATIO, lights.MIN_DISTANCE_RATIO, lights.MAX_DISTANCE_RATIO, lights.MIN_LENGTH_RATIO, lights.MIN_X_DIFF_RATIO
+        );
+#endif
+    }
     void Identification(cv::Mat& image)
     {
         cv::Mat mask = findTargetColor(image);
@@ -35,7 +71,11 @@ private:
         
         // 直接调用 findPairedLights 完成检测和匹配
         lights.findPairedLights(img_thre);
+        lights.drawPairedLights(img_show);
+    
+        
         // ===== 测试 ==== 
+#ifdef DEBUG_PREPROCESSING
         // 预处理四图拼接显示
         // 绘制目标区域
         cv::Mat img_target;
@@ -43,10 +83,9 @@ private:
         std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
         std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
         showMultiImages("PreProcessions-View", images, labels);
-        lights.drawPairedLights(img_show);
-
+#endif
+#ifdef DEBUG_INDENTIFICATION
         // 在img_show显示6个参数
-        int x = 10, y = 30, line_h = 25;
         for (int i = 0; i < 6; ++i) {
             float val = 0.0f;
             switch (i) {
@@ -65,23 +104,21 @@ private:
         cv::putText(img_show, "1-6:select  W/S:adj  +/-:speed  A:pause  ESC:exit",
                     cv::Point(x, y + 6 * line_h + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-        std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
-        cv::putText(img_show, speed_text, cv::Point(x, y + 7 * line_h + 10),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
-        // ===============
+#endif
+#ifdef DEBUG_BASE
+    std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
+    cv::putText(img_show, speed_text, cv::Point(x, y + 7 * line_h + 10),
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
+#endif
     }
     void controlParams()
     {
+        // 按键控制
+        // 退出暂停
         int key = cv::waitKey(1);
         if (key == 27) { rclcpp::shutdown(); return; }
         else if (key == 'a' || key == 'A') { cv::waitKey(0); return; }
-
-        // 1-6 切换选中参数
-        if (key >= '1' && key <= '6') {
-            selected_param_ = key - '1';
-            return;
-        }
-
+#ifdef DEBUG_BASE
         // 速度控制（必须在 W/S 判断之前）
         if (key == '+' || key == '=') {
             play_delay_ms_ = std::max(play_delay_ms_ - 30, 0);
@@ -90,6 +127,14 @@ private:
             play_delay_ms_ += 30;
             return;
         }
+#endif
+#ifdef DEBUG_INDENTIFICATION
+        // 1-6 切换选中参数
+        if (key >= '1' && key <= '6') {
+            selected_param_ = key - '1';
+            return;
+        }
+
 
         bool up = (key == 'w' || key == 'W');
         bool down = (key == 's' || key == 'S');
@@ -116,12 +161,13 @@ private:
                 lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
                 break;
         }
+#endif
     }
 public:
     Test(std::string video_path) : Node("test_node_cpp")
     {
         RCLCPP_INFO(this->get_logger(), "测试节点已经启动");
-        c.open(video_path);
+        init(video_path);
         cv::Mat frame;
         while(true)
         {
@@ -131,14 +177,16 @@ public:
             img_show = frame.clone();
             // 图像处理
             Identification(frame);
-
             // 图片展示
             cv::imshow("img_show", img_show);
-
             // 按键控制
             controlParams();
+            // 打印
+            rclcpp::spin_some(this->get_node_base_interface());
             // 控制速度
+#ifdef DEBUG_BASE
             std::this_thread::sleep_for(std::chrono::milliseconds(play_delay_ms_));
+#endif
         }
         RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
     }

@@ -2,6 +2,11 @@
 #include "armor_plate_identification/DrawTarget.hpp"
 #include <opencv2/imgproc.hpp>
 
+#ifdef DEBUG_INDENTIFICATION
+    #include <iostream>
+#endif
+#include <rclcpp/rclcpp.hpp>
+    
 Lights::Lights() :
     center_(0, 0), top_(0, 0), bottom_(0, 0),
     angle_(0), length_(0), width_(0), area_(0),
@@ -100,18 +105,49 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
     diff = std::min(diff, 180 - diff);
     float length_ratio = std::min(light_left.length_, light_left.length_) / std::max(light_left.length_, light_left.length_);
     //角度差（方向） -> 边长比例（距离）
-    if (diff > MAX_ANGLE_DIFF  || length_ratio < MIN_LENGTH_RATIO ) return false;
+    if (diff > MAX_ANGLE_DIFF  || length_ratio < MIN_LENGTH_RATIO ) {
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是交差过大");
+#endif
+        return false;
+    }
+    if (length_ratio < MIN_LENGTH_RATIO) {
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 长度 相差太远");
+#endif
+        return false;
+    }
+
     // 再判断x差比率和y差比率和相距距离与灯条长度比值
     double men_length = (light_left.length_ + light_right.length_) / 2;
     double x_diff_ratio = std::abs(light_left.center_.x - light_right.center_.x) / men_length;
     double y_diff_ratio = std::abs(light_left.center_.y - light_right.center_.y) / men_length;
     double distance_ratio = men_length / cv::norm(light_left.center_ - light_right.center_) ;
-    if ( x_diff_ratio < MIN_X_DIFF_RATIO
-         || y_diff_ratio > MAX_Y_DIFF_RATIO 
-         || distance_ratio > MAX_DISTANCE_RATIO
-         || distance_ratio < MIN_DISTANCE_RATIO 
-    ) return false;
-
+    if ( x_diff_ratio < MIN_X_DIFF_RATIO) {
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 X 相差太远");
+#endif
+        return false;
+    }
+    if ( y_diff_ratio > MAX_Y_DIFF_RATIO ) {
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 Y 相差太远");
+#endif
+        return false;
+    }
+    if ( distance_ratio > MAX_DISTANCE_RATIO) {
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 距离 相差太 大");
+#endif
+        return false;
+    }
+    if (distance_ratio < MIN_DISTANCE_RATIO) {
+#ifdef DEBUG_INDENTIFICATION
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 距离 相差太 小");
+#endif
+        return false;
+    }
+    // 全部检测通过
     return true;
 }
 std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>& all_lights)
@@ -131,15 +167,15 @@ void PairedLights::drawPairedLights(cv::Mat& img)
 {
     for (const auto& pair_lights : paired_lights_) {
         // 这个是画出角点
-        cv::circle(img, pair_lights[0].top_, 3, cv::Scalar(255, 0, 255), -1);
-        cv::circle(img, pair_lights[0].bottom_, 3, cv::Scalar(255, 0, 255), -1);
-        cv::circle(img, pair_lights[1].top_, 3, cv::Scalar(255, 0, 255), -1);
-        cv::circle(img, pair_lights[1].bottom_, 3, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[0].top_, 2, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[0].bottom_, 2, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[1].top_, 2, cv::Scalar(255, 0, 255), -1);
+        cv::circle(img, pair_lights[1].bottom_, 2, cv::Scalar(255, 0, 255), -1);
         // 画出灯条
-        cv::line(img, pair_lights[0].top_, pair_lights[0].bottom_, cv::Scalar(255, 0, 255), 2);
-        cv::line(img, pair_lights[1].top_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 2);
-        cv::line(img, pair_lights[0].top_, pair_lights[1].top_, cv::Scalar(255, 0, 255), 2);
-        cv::line(img, pair_lights[0].bottom_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 2);
+        cv::line(img, pair_lights[0].top_, pair_lights[0].bottom_, cv::Scalar(255, 0, 255), 1);
+        cv::line(img, pair_lights[1].top_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 1);
+        cv::line(img, pair_lights[0].top_, pair_lights[1].top_, cv::Scalar(255, 0, 255), 1);
+        cv::line(img, pair_lights[0].bottom_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 1);
     }
 }
 
