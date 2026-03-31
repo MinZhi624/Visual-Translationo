@@ -115,6 +115,10 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
         // 5. 计算最终端点（限制在 minAreaRect 范围内）
         cv::Point2f final_top = center - dir * final_half_len;
         cv::Point2f final_bottom = center + dir * final_half_len;
+        // 按照y最后再来一次排序，确保 top_ 在图像上方（y 较小）
+        if (final_top.y > final_bottom.y) {
+            std::swap(final_top, final_bottom);
+        }
 
         // 6. 填充 Lights 对象
         Lights light;
