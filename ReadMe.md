@@ -14,7 +14,8 @@
 我这里属于薄弱点，基本对相机的使用几乎没有。几乎全靠ai辅助写的
 ### 目前的大概区间是
 曝光 -> 100 - 300 us
-增益好像影响不大
+增益 -> 20
+
 其他参数还没有研究
 # 对图片的预处理
 ## 核心参数
@@ -59,23 +60,47 @@ findContours
 ## 将轮廓匹配为直线(两个角点)
 主要实现
 minAreaRect 和fitEllipse
-通过 fitEllipse 来比较精fitEllipse准找到角点位置，再通过minAreaRect来实现对fitEllipse寻找误差来进行限位
+通过 fitEllipse 提供**角度**信息，
+再通过minAreaRec提供**长度**信息
 
 ## 灯条点位匹配机制
-主要实现
-角度差
-y差比
-x差比
-
-## 效果
-灯条轮廓 
-实现效果 90%
-缺点：
-1. 主要可能还是有些太过简单了 （优先级低）
-	-  增强检测(没思路)
-
-将轮廓匹配为直线 
-实现效果 90%
-缺点：
-1. 还是有些地方角点识别不准 （优先级低）
-	- 可能要改算法（目前没思路）
+### 主要思路
+1. 先通过6个经验参数来实现初步约束，找到装甲板
+2. 正对于多个匹配的装机版采取 匹配 - 打分 - NMS 进一步匹配
+### 经验参数
+- 角度差(平行程度)
+- 灯条长度相似度
+- 中心距离之比
+- y差比
+- x差比
+其中 y , x差比则是在以左边的灯的参考系下计算
+这样避免相机坐标系导致的 倾斜装甲板 导致y差比率和x差比率的不合理
+### 打分参数
+总分3分，每个1分
+- 角度差(平行程度)
+- 灯条长度相似度
+- 装机版长宽比形状分
+## 下一步改进
+1. 对打分机制的权重
+# 使用教程
+## 正常模式
+1. 功能包构建
+2. 启动launch文件
+	- 启动相机控制`ros2 launch armor_plate_identification run.launch.py `
+	- 启动视频控制`ros2 launch armor_plate_identification test.launch.py`
+## DEBUG模式
+### 开启全部debug模式
+1. 功能包的构建
+``` bash
+colcon build --packages-select armor_plate_identification --cmake-args -DDEBUG_MODE=ON
+```
+这里如果是对应的debug模式的话，请对应的debug
+比如说
+- DEBUG_INDENTIFICATION
+- DEBUG_PREPROCESSING
+## 时钟不匹配
+当出现这种情况下，请输入
+```bash
+rm -rf build/armor_plate_identification install/armor_plate_identification
+colcon build --packages-select armor_plate_identification --cmake-args -DDEBUG_MODE=ON
+```
