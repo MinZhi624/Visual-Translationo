@@ -60,7 +60,7 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
         // 2. minAreaRect 提供边长边界约束
         cv::RotatedRect min_rect = cv::minAreaRect(contour);
         // 3. 用规范化后的椭圆角度计算中轴线单位方向向量
-        double angle_rad = (ellipse_rect.angle + 90) * CV_PI / 180.0f; 
+        double angle_rad = (ellipse_rect.angle + 90) * CV_PI / 180.0f;
         cv::Point2f dir = cv::Point2f(cos(angle_rad), sin(angle_rad));
         if (abs(dir.y) > 0.5f) 
             if (dir.y > 0) dir  = -dir;
@@ -85,7 +85,7 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
         light.bottom_ = final_bottom;
         light.center_ = center;
         light.length_ = half_len * 2.0f;
-        light.angle_ = angle_rad;
+        light.angle_ = atan2(dir.y, dir.x);
         lights_list.push_back(light);
     }
     return lights_list;
@@ -96,23 +96,24 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
     diff = std::min(diff, 180 - diff);
     float length_ratio = std::min(light_left.length_, light_right.length_) / std::max(light_left.length_, light_right.length_);
     //角度差（方向） -> 边长比例（距离）
-    if (diff > MAX_ANGLE_DIFF  || length_ratio < MIN_LENGTH_RATIO ) {
+    if (diff > MAX_ANGLE_DIFF) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是交差过大");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "交差过大 差距为\t%lf", diff);
 #endif
         return false;
     }
     if (length_ratio < MIN_LENGTH_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 长度 相差太远");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "长度 相差 太大\t%lf", length_ratio);
 #endif
         return false;
     }
-
     // 相机坐标系下面的距离
-    double global_x_diff = std::abs(light_left.center_.x - light_right.center_.x);
-    double global_y_diff = std::abs(light_left.center_.y - light_right.center_.y);
+    double global_x_diff = light_right.center_.x - light_left.center_.x;   // 已经按x排过序，自然 >= 0
+    double global_y_diff = light_right.center_.y - light_left.center_.y;   // 保留符号！
     // 计算灯条的局部坐标系下面的距离
+    // local_x -> 垂直于灯条的方向
+    // local_y -> 沿着灯条的方向
     double sinx = std::sin(light_left.angle_);
     double cosx = std::cos(light_left.angle_);
     double local_x = std::abs(-global_x_diff * sinx + global_y_diff * cosx);
@@ -124,25 +125,25 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
     double distance_ratio = men_length / cv::norm(light_left.center_ - light_right.center_) ;
     if ( x_diff_ratio < MIN_X_DIFF_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 X 相差太远");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "X 差太近\t%lf",x_diff_ratio);
 #endif
         return false;
     }
     if ( y_diff_ratio > MAX_Y_DIFF_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 Y 相差太远");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "Y 差太远\t%lf",y_diff_ratio);
 #endif
         return false;
     }
     if ( distance_ratio > MAX_DISTANCE_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 距离 相差太 大");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "距离 相差 太 大\t%lf",distance_ratio);
 #endif
         return false;
     }
     if (distance_ratio < MIN_DISTANCE_RATIO) {
 #ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "当前是距两个灯条之间 距离 相差太 小");
+        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "距离 相差 太 小\t%lf",distance_ratio);
 #endif
         return false;
     }

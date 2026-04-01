@@ -21,7 +21,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
 
 #ifdef DEBUG_BASE
-    int play_delay_ms_ = 100; // 播放延迟，越大越慢
+    int play_delay_ms_ = 0; // 播放延迟，越大越慢
 #endif
     int x = 10, y = 30, line_h = 25;
 #ifdef DEBUG_INDENTIFICATION
@@ -43,9 +43,9 @@ private:
         // 匹配参数初始化
         lights.MAX_ANGLE_DIFF = 10.0f;
         lights.MIN_LENGTH_RATIO = 0.7f;
-        lights.MIN_X_DIFF_RATIO = 1.75f;
-        lights.MAX_Y_DIFF_RATIO = 0.4f;
-        lights.MAX_DISTANCE_RATIO = 0.4f;
+        lights.MIN_X_DIFF_RATIO = 0.75f;
+        lights.MAX_Y_DIFF_RATIO = 0.6f;
+        lights.MAX_DISTANCE_RATIO = 0.8;
         lights.MIN_DISTANCE_RATIO = 0.1f;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
 #ifdef DEBUG_INDENTIFICATION
