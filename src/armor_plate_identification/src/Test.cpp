@@ -42,10 +42,10 @@ private:
         c.open(video_path);
         // 匹配参数初始化
         lights.MAX_ANGLE_DIFF = 10.0f;
-        lights.MIN_LENGTH_RATIO = 0.7f;
+        lights.MIN_LENGTH_RATIO = 0.5f;
         lights.MIN_X_DIFF_RATIO = 0.75f;
-        lights.MAX_Y_DIFF_RATIO = 0.6f;
-        lights.MAX_DISTANCE_RATIO = 0.8;
+        lights.MAX_Y_DIFF_RATIO = 1.0f;
+        lights.MAX_DISTANCE_RATIO = 0.8f;
         lights.MIN_DISTANCE_RATIO = 0.1f;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
 #ifdef DEBUG_INDENTIFICATION
