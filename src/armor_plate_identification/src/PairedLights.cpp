@@ -57,14 +57,15 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
     for (auto & contour : contours) {
         // 1. 椭圆拟合提供准确方向，并规范化
         cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
-        // 2. minAreaRect 提供边界约束（原始即可，只取最长边做限制）
+        // 2. minAreaRect 提供边长边界约束
         cv::RotatedRect min_rect = cv::minAreaRect(contour);
         // 3. 用规范化后的椭圆角度计算中轴线单位方向向量
         double angle_rad = (ellipse_rect.angle + 90) * CV_PI / 180.0f; 
         cv::Point2f dir = cv::Point2f(cos(angle_rad), sin(angle_rad));
-        if (dir.y > 0) {
-            dir  = -dir;
-        }
+        if (abs(dir.y) > 0.5f) 
+            if (dir.y > 0) dir  = -dir;
+        else 
+            if(dir.x > 0) dir = -dir;
         // 这里采用点是为了方便计算
         double len = cv::norm(dir);
         if (len < 1e-6) continue;
@@ -76,10 +77,6 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
         // 5. 计算最终端点（限制在 minAreaRect 范围内）
         cv::Point2f final_top = center + dir * half_len;
         cv::Point2f final_bottom = center - dir * half_len;
-        // // 按照y最后再来一次排序，确保 top_ 在图像上方（y 较小）
-        // if (final_top.y > final_bottom.y) {
-        //     std::swap(final_top, final_bottom);
-        // }
 
         // 6. 填充 Lights 对象
         Lights light;
