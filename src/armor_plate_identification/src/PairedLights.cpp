@@ -10,7 +10,7 @@
 Lights::Lights() :
     center_(0, 0), top_(0, 0), bottom_(0, 0),
     angle_(0), length_(0), width_(0), area_(0),
-    is_paired_(false)
+    is_paired_(false), id_(-1)
 {}
 
 void PairedLights::findPairedLights(cv::Mat& img_thre)
@@ -86,6 +86,7 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
         light.center_ = center;
         light.length_ = half_len * 2.0f;
         light.angle_ = atan2(dir.y, dir.x);
+        light.id_ = static_cast<int>(lights_list.size());
         lights_list.push_back(light);
     }
     return lights_list;
@@ -150,15 +151,57 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
     // 全部检测通过
     return true;
 }
+float PairedLights::computePairScore(const Lights& light_left, const Lights& light_right) {
+    // 1. 平行度：角度差越小越好
+    float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
+    diff = std::min(diff, 180.0f - diff);
+    float angle_score = 1.0f - std::min(diff / MAX_ANGLE_DIFF, 1.0f);
+
+    // 2. 长度比：越接近1越好
+    float length_ratio = std::min(light_left.length_, light_right.length_) / std::max(light_left.length_, light_right.length_);
+
+    // 3. 中心距/灯条长度比：越接近2.0（标准装甲板宽高比）越好
+    double men_length = (light_left.length_ + light_right.length_) / 2.0;
+    double distance = cv::norm(light_left.center_ - light_right.center_);
+    double dist_ratio = distance / men_length;
+    float dist_score = 1.0f - std::min(std::abs((float)dist_ratio - 2.0f), 1.0f);
+
+    return angle_score + length_ratio + dist_score;
+}
+
 std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>& all_lights)
 {
-    std::vector<std::array<Lights, 2>> paired_lights;
+    struct Candidate {
+        std::array<Lights, 2> pair;
+        int idx1;
+        int idx2;
+        float score;
+    };
+
+    std::vector<Candidate> candidates;
     for (size_t i = 0; i < all_lights.size(); i++) {
         for (size_t j = i + 1; j < all_lights.size(); j++) {
             if (checkPairLights(all_lights[i], all_lights[j])) {
-                std::array<Lights, 2> pair_lights = { all_lights[i], all_lights[j] };
-                paired_lights.push_back(pair_lights);
+                float score = computePairScore(all_lights[i], all_lights[j]);
+                candidates.push_back({{all_lights[i], all_lights[j]}, static_cast<int>(i), static_cast<int>(j), score});
             }
+        }
+    }
+
+    // 按 score 降序排序，优先保留"最像装甲板"的配对
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        return a.score > b.score;
+    });
+
+    // NMS 去重：一个灯条只能属于一个装甲板
+    std::vector<std::array<Lights, 2>> paired_lights;
+    std::vector<bool> used(all_lights.size(), false);
+
+    for (const auto& c : candidates) {
+        if (!used[c.idx1] && !used[c.idx2]) {
+            paired_lights.push_back(c.pair);
+            used[c.idx1] = true;
+            used[c.idx2] = true;
         }
     }
     return paired_lights;
