@@ -15,6 +15,7 @@ public:
 	int area_;
 	// 暂时先不用 is_paired_
 	bool is_paired_;
+	int id_;
 
 	Lights();
 };
@@ -49,6 +50,7 @@ public:
 	std::vector<std::vector<cv::Point>> findLightsContours(cv::Mat& img_thre);
 	std::vector<Lights> findLightLines(std::vector<std::vector<cv::Point>>& contours);
 	bool checkPairLights(const Lights& light_left, const Lights& light_right);
+	float computePairScore(const Lights& light_left, const Lights& light_right);
 	std::vector<std::array<Lights, 2>> matchLights(std::vector<Lights>& all_lights);
 	
 	// ================================= //
