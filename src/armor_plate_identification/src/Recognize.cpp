@@ -14,6 +14,7 @@ cv::Mat preProcessing(cv::Mat& img)
 {
 	// 通过大津法二值化
 	cv::Mat img_thre;
+	//cv::threshold(img, img_thre, 20, 255, cv::THRESH_BINARY);
 	cv::threshold(img, img_thre, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
 	
 	// 先不用

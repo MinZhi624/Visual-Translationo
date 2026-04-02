@@ -11,10 +11,8 @@ endif()
 set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
   src/CameraDriver.cpp
-  src/SolvePnP.cpp
+  src/PoseSolver.cpp
   src/Recognize.cpp
-  src/MyKalmanFilter.cpp
-  src/DrawTarget.cpp
   src/PairedLights.cpp
   src/TestFunc.cpp
 )
@@ -22,10 +20,8 @@ set( Test
   src/Test.cpp
   src/TestFunc.cpp
   src/CameraDriver.cpp
-  src/SolvePnP.cpp
+  src/PoseSolver.cpp
   src/Recognize.cpp
-  src/MyKalmanFilter.cpp
-  src/DrawTarget.cpp
   src/PairedLights.cpp
 )
 # ======================
@@ -34,6 +30,7 @@ set( Test
 option(DEBUG_MODE "开始调试模式" OFF)
 option(DEBUG_INDENTIFICATION_MODE "识别调试模式" OFF)
 option(DEBUG_PREPROCESSING_MODE "预处理调试模式" OFF)
+option(DEBUG_PNP_MODE "PNP调试模式" ON)
 
 if(DEBUG_MODE)
     add_compile_definitions(DEBUG_PREPROCESSING)
@@ -45,9 +42,15 @@ if(DEBUG_INDENTIFICATION_MODE)
     add_compile_definitions(DEBUG_BASE)
     add_compile_definitions(DEBUG_INDENTIFICATION)
 endif()
+
 if (DEBUG_PREPROCESSING_MODE)
     add_compile_definitions(DEBUG_BASE)
     add_compile_definitions(DEBUG_PREPROCESSING)
+endif()
+
+if (DEBUG_PNP_MODE)
+    add_compile_definitions(DEBUG_BASE)
+    add_compile_definitions(DEBUG_PNP)
 endif()
 # ======================
 # 依赖

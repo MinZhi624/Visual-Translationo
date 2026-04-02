@@ -1,7 +1,6 @@
 #include "armor_plate_identification/CameraDriver.hpp"
 #include "armor_plate_identification/Recognize.hpp"
 #include "armor_plate_identification/PairedLights.hpp"
-#include "armor_plate_identification/DrawTarget.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 
 #include <opencv2/highgui.hpp>
@@ -27,20 +26,10 @@ private:
 
 #ifdef DEBUG_BASE
     int play_delay_ms_ = 30; // 播放延迟，越大越慢
-#endif
     int x = 10, y = 30, line_h = 25;
-
-#ifdef DEBUG_INDENTIFICATION
-    int selected_param_ = 0; // 0~5 对应6个匹配参数
-    const std::vector<std::string> param_names_ = {
-        "MAX_ANGLE_DIFF",
-        "MAX_Y_DIFF_RATIO",
-        "MIN_DISTANCE_RATIO",
-        "MAX_DISTANCE_RATIO",
-        "MIN_LENGTH_RATIO",
-        "MIN_X_DIFF_RATIO"
-    };
 #endif
+
+    DebugParamController debug_controller_;
 
     // 初始化
     void init()
@@ -61,10 +50,10 @@ private:
 
         // 匹配参数初始化
         lights.MAX_ANGLE_DIFF = 10.0f;
-        lights.MIN_LENGTH_RATIO = 0.7f;
-        lights.MIN_X_DIFF_RATIO = 1.75f;
-        lights.MAX_Y_DIFF_RATIO = 0.4f;
-        lights.MAX_DISTANCE_RATIO = 0.4f;
+        lights.MIN_LENGTH_RATIO = 0.5f;
+        lights.MIN_X_DIFF_RATIO = 0.75f;
+        lights.MAX_Y_DIFF_RATIO = 1.0f;
+        lights.MAX_DISTANCE_RATIO = 0.8f;
         lights.MIN_DISTANCE_RATIO = 0.1f;
         
         // 创建定时器，5秒发布一次信息
@@ -83,7 +72,6 @@ private:
         RCLCPP_INFO(this->get_logger(), "DEBUG模式：+/-调速度");
 #endif
     }
-
     // 定时器回调，发布信息
     void info()
     {
@@ -93,7 +81,6 @@ private:
         );
 #endif
     }
-
     // 识别
     void Identification(cv::Mat& image)
     {
@@ -112,48 +99,11 @@ private:
         std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
         std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
         showMultiImages("PreProcessions-View", images, labels);
-#else
-        // 非 DEBUG_PREPROCESSING 模式：也显示基础四图（便于观察）
-        cv::Mat img_target;
-        cv::bitwise_and(image, image, img_target, img_thre);
-        std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
-        std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
-        showMultiImages("Identify-View", images, labels);
 #endif
 #ifdef DEBUG_INDENTIFICATION
-        // 在img_show显示6个参数
-        for (int i = 0; i < 6; ++i) {
-            float val = 0.0f;
-            switch (i) {
-                case 0: val = lights.MAX_ANGLE_DIFF; break;
-                case 1: val = lights.MAX_Y_DIFF_RATIO; break;
-                case 2: val = lights.MIN_DISTANCE_RATIO; break;
-                case 3: val = lights.MAX_DISTANCE_RATIO; break;
-                case 4: val = lights.MIN_LENGTH_RATIO; break;
-                case 5: val = lights.MIN_X_DIFF_RATIO; break;
-            }
-            std::string text = param_names_[i] + ": " + std::to_string(val);
-            // 保留2位小数
-            text = text.substr(0, text.find('.') + 3);
-            cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
-            cv::putText(img_show, text, cv::Point(x, y + i * line_h),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
-        }
-        std::string help_text;
+        debug_controller_.drawParams(img_show, lights, x, y, line_h);
         lights.drawAllLights(img_show);
-#if defined(DEBUG_BASE)
-        help_text = "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit";
-#else
-        help_text = "1-6:select  T/G:adj  P:pause  ESC:exit";
-#endif
-        cv::putText(img_show, help_text, cv::Point(x, y + 6 * line_h + 10),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-#endif
-
-#ifdef DEBUG_BASE
-        std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
-        cv::putText(img_show, speed_text, cv::Point(x, y + 7 * line_h + 20),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
+        debug_controller_.drawDebugInfo(img_show, play_delay_ms_, true, x, y, line_h);
 #endif
     }
 
@@ -179,63 +129,11 @@ private:
         }
 
 #ifdef DEBUG_BASE
-        // +/-：速度控制（DEBUG_BASE模式）
-        if (key == '+' || key == '=') {
-            play_delay_ms_ = std::max(play_delay_ms_ - 10, 0);
-            RCLCPP_INFO(this->get_logger(), "播放延迟: %d ms", play_delay_ms_);
-            return;
-        }
-        if (key == '-' || key == '_') {
-            play_delay_ms_ += 10;
-            RCLCPP_INFO(this->get_logger(), "播放延迟: %d ms", play_delay_ms_);
+        if (debug_controller_.handleKey(key, lights, play_delay_ms_, this->get_logger())) {
             return;
         }
 #endif
-
-#ifdef DEBUG_INDENTIFICATION
-        // DEBUG_INDENTIFICATION 模式：调节灯条匹配参数
-        
-        // 1-6：选择参数
-        if (key >= '1' && key <= '6') {
-            selected_param_ = key - '1';
-            RCLCPP_INFO(this->get_logger(), "选中参数: %s", param_names_[selected_param_].c_str());
-            return;
-        }
-        
-        // T/G：调节参数值
-        bool increase = (key == 't' || key == 'T');
-        bool decrease = (key == 'g' || key == 'G');
-        
-        if (increase || decrease) {
-            float dir = increase ? 1.0f : -1.0f;
-            switch (selected_param_) {
-                case 0: // MAX_ANGLE_DIFF (角度差，范围 0-30 度)
-                    lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
-                    break;
-                case 1: // MAX_Y_DIFF_RATIO
-                    lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
-                    break;
-                case 2: // MIN_DISTANCE_RATIO
-                    lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                    break;
-                case 3: // MAX_DISTANCE_RATIO
-                    lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                    break;
-                case 4: // MIN_LENGTH_RATIO
-                    lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
-                    break;
-                case 5: // MIN_X_DIFF_RATIO
-                    lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
-                    break;
-            }
-            return;
-        }
-#endif
-
-        // 相机参数控制（所有模式都支持）
-        // W/S：曝光时间
-        // 非 DEBUG_INDENTIFICATION 模式：调节相机参数
-        
+        // 相机参数控制
         // W/S：曝光时间
         if (key == 'w' || key == 'W') {
             exposure_time = std::min(exposure_time + 100, 10000);
@@ -268,19 +166,12 @@ private:
     // 可视化
     void ImageShow()
     {
-        // 获取图像尺寸
-        int img_h = img_show.rows;
-        int img_w = img_show.cols;
-        
         // 在 img_show 左下角显示相机参数
         std::string params_text = "Exp: " + std::to_string(exposure_time) + "us  Gain: " + std::to_string(gain);
-        int baseline = 0;
-        cv::Size text_size = cv::getTextSize(params_text, cv::FONT_HERSHEY_SIMPLEX, 0.6, 2, &baseline);
         // 左下角位置（留 10px 边距）
-        cv::Point pos(10, img_h - 10);
+        cv::Point pos(10, img_show.rows - 10);
         cv::putText(img_show, params_text, pos,
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
-        
         // 显示带参数的检测结果图
         cv::imshow("Detection Result", img_show);
     }
