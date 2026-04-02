@@ -1,7 +1,6 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
 #include "armor_plate_identification/Recognize.hpp"
 #include "armor_plate_identification/PairedLights.hpp"
-#include "armor_plate_identification/DrawTarget.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 
 #include <opencv2/highgui.hpp>
@@ -22,21 +21,11 @@ private:
 
 #ifdef DEBUG_BASE
     int play_delay_ms_ = 0; // 播放延迟，越大越慢
-#endif
     int x = 10, y = 30, line_h = 25;
-#ifdef DEBUG_INDENTIFICATION
-    int selected_param_ = 0; // 0~5 对应6个匹配参数
-    const std::vector<std::string> param_names_ = {
-        "MAX_ANGLE_DIFF",
-        "MAX_Y_DIFF_RATIO",
-        "MIN_DISTANCE_RATIO",
-        "MAX_DISTANCE_RATIO",
-        "MIN_LENGTH_RATIO",
-        "MIN_X_DIFF_RATIO"
-    };
 #endif
+    DebugParamController debug_controller_;
 
-    void init(std::string video_path)
+    void init(const std::string& video_path)
     {
         // 相机初始化
         c.open(video_path);
@@ -72,9 +61,7 @@ private:
         // 直接调用 findPairedLights 完成检测和匹配
         lights.findPairedLights(img_thre);
         lights.drawPairedLights(img_show);
-    
         
-        // ===== 测试 ==== 
 #ifdef DEBUG_PREPROCESSING
         // 预处理四图拼接显示
         // 绘制目标区域
@@ -85,39 +72,9 @@ private:
         showMultiImages("PreProcessions-View", images, labels);
 #endif
 #ifdef DEBUG_INDENTIFICATION
-        // 在img_show显示6个参数
-        for (int i = 0; i < 6; ++i) {
-            float val = 0.0f;
-            switch (i) {
-                case 0: val = lights.MAX_ANGLE_DIFF; break;
-                case 1: val = lights.MAX_Y_DIFF_RATIO; break;
-                case 2: val = lights.MIN_DISTANCE_RATIO; break;
-                case 3: val = lights.MAX_DISTANCE_RATIO; break;
-                case 4: val = lights.MIN_LENGTH_RATIO; break;
-                case 5: val = lights.MIN_X_DIFF_RATIO; break;
-            }
-            std::string text = param_names_[i] + ": " + std::to_string(val);
-            // 保留2位小数
-            text = text.substr(0, text.find('.') + 3);
-            cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
-            cv::putText(img_show, text, cv::Point(x, y + i * line_h),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
-        }
+        debug_controller_.drawParams(img_show, lights, x, y, line_h);
         lights.drawAllLights(img_show);
-#if defined(DEBUG_BASE)
-        cv::putText(img_show, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
-                    cv::Point(x, y + 6 * line_h + 10),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-#else
-        cv::putText(img_show, "1-6:select  T/G:adj  P:pause  ESC:exit",
-                    cv::Point(x, y + 6 * line_h + 10),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-#endif
-#endif
-#ifdef DEBUG_BASE
-    std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
-    cv::putText(img_show, speed_text, cv::Point(x, y + 7 * line_h + 10),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
+        debug_controller_.drawDebugInfo(img_show, play_delay_ms_, true, x, y, line_h);
 #endif
     }
     void controlParams()
@@ -139,53 +96,7 @@ private:
         }
 
 #ifdef DEBUG_BASE
-        // +/-：速度控制
-        if (key == '+' || key == '=') {
-            play_delay_ms_ = std::max(play_delay_ms_ - 10, 0);
-            RCLCPP_INFO(this->get_logger(), "播放延迟: %d ms", play_delay_ms_);
-            return;
-        }
-        if (key == '-' || key == '_') {
-            play_delay_ms_ += 10;
-            RCLCPP_INFO(this->get_logger(), "播放延迟: %d ms", play_delay_ms_);
-            return;
-        }
-#endif
-
-#ifdef DEBUG_INDENTIFICATION
-        // 1-6：选择参数
-        if (key >= '1' && key <= '6') {
-            selected_param_ = key - '1';
-            RCLCPP_INFO(this->get_logger(), "选中参数: %s", param_names_[selected_param_].c_str());
-            return;
-        }
-
-        // T/G：调节参数值
-        bool increase = (key == 't' || key == 'T');
-        bool decrease = (key == 'g' || key == 'G');
-
-        if (increase || decrease) {
-            float dir = increase ? 1.0f : -1.0f;
-            switch (selected_param_) {
-                case 0: // MAX_ANGLE_DIFF
-                    lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
-                    break;
-                case 1: // MAX_Y_DIFF_RATIO
-                    lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
-                    break;
-                case 2: // MIN_DISTANCE_RATIO
-                    lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                    break;
-                case 3: // MAX_DISTANCE_RATIO
-                    lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                    break;
-                case 4: // MIN_LENGTH_RATIO
-                    lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
-                    break;
-                case 5: // MIN_X_DIFF_RATIO
-                    lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
-                    break;
-            }
+        if (debug_controller_.handleKey(key, lights, play_delay_ms_, this->get_logger())) {
             return;
         }
 #endif
@@ -199,7 +110,10 @@ public:
         while(true)
         {
             c >> frame;
-            if (frame.empty()) return;
+            if (frame.empty()) {
+                RCLCPP_INFO(this->get_logger(), "视频播放结束");
+                return;
+            }
             if (!rclcpp::ok()) return;
             img_show = frame.clone();
             // 图像处理

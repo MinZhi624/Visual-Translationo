@@ -74,30 +74,25 @@ bool ArmorCameraCapture::read(cv::Mat &frame)
 
     // 1. 获取一帧图像缓冲区（超时 1000ms）
     const CameraSdkStatus buffer_status = CameraGetImageBuffer(camera_handle_, &frame_info, &raw_buffer, 1000);
-    if (buffer_status != CAMERA_STATUS_SUCCESS)
-    {
+    if (buffer_status != CAMERA_STATUS_SUCCESS) {
         return false;  // 超时或失败
     }
-
     // 2. 将原始图像处理为 RGB 格式，存入 rgb_buffer_
     const CameraSdkStatus process_status = CameraImageProcess(camera_handle_, raw_buffer, rgb_buffer_.data(), &frame_info);
     CameraReleaseImageBuffer(camera_handle_, raw_buffer);  // 释放原始缓冲区（必须调用）
-    if (process_status != CAMERA_STATUS_SUCCESS)
-    {
+    if (process_status != CAMERA_STATUS_SUCCESS) {
         return false;
     }
 
     // 3. 将 rgb_buffer_ 转换为 OpenCV Mat（克隆一份，避免缓冲区被覆盖）
     const int image_type = frame_info.uiMediaType == CAMERA_MEDIA_TYPE_MONO8 ? CV_8UC1 : CV_8UC3;
     frame = cv::Mat(frame_info.iHeight, frame_info.iWidth, image_type, rgb_buffer_.data()).clone();
-    if (frame.empty())
-    {
+    if (frame.empty()) {
         return false;
     }
 
     // 4. 如果是灰度图，转换为三通道 BGR（方便后续统一处理）
-    if (image_type == CV_8UC1)
-    {
+    if (image_type == CV_8UC1) {
         cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
     }
     return true;
@@ -115,14 +110,11 @@ void ArmorCameraCapture::release()
 
 bool ArmorCameraCapture::setLowExposureForLightBar(int exposure_us, int gain)
 {
-    if (!initialized_)
-    {
+    if (!initialized_) {
         return false;
     }
-
     // 1. 关闭自动曝光，切换到手动模式
-    if (CameraSetAeState(camera_handle_, FALSE) != CAMERA_STATUS_SUCCESS)
-    {
+    if (CameraSetAeState(camera_handle_, FALSE) != CAMERA_STATUS_SUCCESS) {
         return false;
     }
 

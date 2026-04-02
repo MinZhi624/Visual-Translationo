@@ -68,36 +68,3 @@ float SolvePnP::getPitch()
 	y = atan2(-R.at<double>(2, 0), sy);
 	return y;
 }
-
-cv::Point3f fitSphereCenter(const std::deque<cv::Point3f>& points) {
-	// 点太少，无法拟合
-	int n = points.size();
-	if (n < 4) {
-		return cv::Point3f(0, 0, 0);
-	}
-	// 构建矩阵 A 和向量 B
-	cv::Mat A(n, 4, CV_64F);
-	cv::Mat B(n, 1, CV_64F);
-
-	for (int i = 0; i < n; ++i) {
-		double x = points[i].x;
-		double y = points[i].y;
-		double z = points[i].z;
-
-		A.at<double>(i, 0) = 2.0 * x;
-		A.at<double>(i, 1) = 2.0 * y;
-		A.at<double>(i, 2) = 2.0 * z;
-		A.at<double>(i, 3) = 1.0;
-
-		B.at<double>(i) = x * x + y * y + z * z;
-	}
-	// 使用SVD求解最小二乘问题：X = (A^T A)^(-1) A^T B
-	cv::Mat X;
-	cv::solve(A, B, X, cv::DECOMP_SVD);
-	// X = [a, b, c, d]^T，其中(a,b,c)是球心坐标
-	return cv::Point3f(
-		static_cast<float>(X.at<double>(0)),
-		static_cast<float>(X.at<double>(1)),
-		static_cast<float>(X.at<double>(2))
-	);
-}

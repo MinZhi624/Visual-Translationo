@@ -22,11 +22,9 @@ public:
 	
 	SolvePnP(std::vector<cv::Point2f> image_points);
 
-	/// <summary>
-	/// 将三维坐标（相机坐标系）转换为二维坐标（图像坐标系）
-	/// </summary>
-	/// <param name="point3D">三维坐标点（相机坐标系）</param>
-	/// <returns></returns>
+	/// @brief 将相机的三维坐标系点转换到图像坐标系
+	/// @param point3D 相机坐标系三维点
+	/// @return 图像坐标系二维点
 	cv::Point2f reprojection(cv::Point3f point3D);
 
 	cv::Mat getTvec() const { return tvec_; };
@@ -35,10 +33,3 @@ public:
 	float getYaw();
 	float getPitch();
 };
-
-/// <summary>
-/// 最小二乘法拟合球
-/// </summary>
-/// <param name="points"></param>
-/// <returns></returns>
-cv::Point3f fitSphereCenter(const std::deque<cv::Point3f>& points);

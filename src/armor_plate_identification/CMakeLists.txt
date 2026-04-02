@@ -13,8 +13,6 @@ set(  ArmorPlateIdentifcation
   src/CameraDriver.cpp
   src/SolvePnP.cpp
   src/Recognize.cpp
-  src/MyKalmanFilter.cpp
-  src/DrawTarget.cpp
   src/PairedLights.cpp
   src/TestFunc.cpp
 )
@@ -24,8 +22,6 @@ set( Test
   src/CameraDriver.cpp
   src/SolvePnP.cpp
   src/Recognize.cpp
-  src/MyKalmanFilter.cpp
-  src/DrawTarget.cpp
   src/PairedLights.cpp
 )
 # ======================

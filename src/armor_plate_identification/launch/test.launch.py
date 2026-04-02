@@ -13,8 +13,8 @@ def generate_launch_description():
     
     video_path_arg = DeclareLaunchArgument(
         name="video_path",
-        default_value= video_default_path 
-        # default_value= video_true_path1 
+        #default_value= video_default_path 
+        default_value= video_true_path1 
         # default_value= video_true_path2 
     )
     # 定义节点
