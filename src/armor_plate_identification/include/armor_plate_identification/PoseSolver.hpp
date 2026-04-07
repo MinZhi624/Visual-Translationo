@@ -12,6 +12,7 @@ private:
 	// 输出矩阵
 	cv::Mat rvec_;					
 	cv::Mat tvec_;
+	cv::Mat r_matrix_;
 	float yaw_;
 	float pitch_;
 	float distance_;
@@ -39,6 +40,7 @@ public:
 
 	cv::Mat getTvec() const { return tvec_; };
 	cv::Mat getRvec() const { return rvec_; };
+	cv::Mat getRMatrix() const { return r_matrix_; };
 	float getDistance() const { return distance_; };
 	float getYaw() const {return yaw_; }
 	float getPitch() const { return pitch_; }
@@ -47,3 +49,13 @@ public:
 float calculateYaw(cv::Mat r_matrix);
 float calculatePitch(cv::Mat r_matrix);
 float calculateDistance(cv::Mat t_vector);
+
+#ifdef DEBUG_POSE
+	/// @brief 绘制yaw和pitch的图示
+	/// @param image 输入图像
+	/// @param yaw 偏航角
+	/// @param pitch 俯仰角
+	/// @param points 装甲板四个点
+	void drawPose(cv::Mat& image, float yaw, float pitch, const std::vector<cv::Point2f>& points);
+	void sendTF(const cv::Mat& rvec,const cv::Mat& tvec);
+#endif

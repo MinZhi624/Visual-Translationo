@@ -30,7 +30,7 @@ set( Test
 option(DEBUG_MODE "开始调试模式" OFF)
 option(DEBUG_INDENTIFICATION_MODE "识别调试模式" OFF)
 option(DEBUG_PREPROCESSING_MODE "预处理调试模式" OFF)
-option(DEBUG_PNP_MODE "PNP调试模式" ON)
+option(DEBUG_POSE_MODE "PNP调试模式" ON)
 
 if(DEBUG_MODE)
     add_compile_definitions(DEBUG_PREPROCESSING)
@@ -48,9 +48,9 @@ if (DEBUG_PREPROCESSING_MODE)
     add_compile_definitions(DEBUG_PREPROCESSING)
 endif()
 
-if (DEBUG_PNP_MODE)
+if (DEBUG_POSE_MODE)
     add_compile_definitions(DEBUG_BASE)
-    add_compile_definitions(DEBUG_PNP)
+    add_compile_definitions(DEBUG_POSE)
 endif()
 # ======================
 # 依赖
@@ -59,6 +59,8 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 # ======================
 # 相机 SDK 路径
@@ -119,11 +121,15 @@ ament_target_dependencies(
   ArmorPlateIdentifcation
   "rclcpp"
   "OpenCV"
+  "geometry_msgs"
+  "tf2_ros"
 )
 ament_target_dependencies(
   Test
   "rclcpp"
   "OpenCV"
+  "geometry_msgs"
+  "tf2_ros"
 )
   
 # ======================

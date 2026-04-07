@@ -1,6 +1,11 @@
 ﻿#include "armor_plate_identification/PoseSolver.hpp"
 #include <opencv2/calib3d.hpp>
 
+#ifdef DEBUG_POSE
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#endif
+
 PoseSolver::PoseSolver()
     : world_points_(),
       camera_matrix_(),
@@ -46,7 +51,8 @@ void PoseSolver::solve(const std::vector<cv::Point2f>& camera_points)
 	cv::solvePnP(world_points_, camera_points, camera_matrix_, distortion_coefficients_, rvec_, tvec_, false, cv::SOLVEPNP_SQPNP);
 	cv::Mat r_matrix;
 	cv::Rodrigues(rvec_, r_matrix);
-	// Opencv转换为Eigen矩阵
+	r_matrix_= r_matrix;
+	// 计算Yaw、Pitch、距离
 	yaw_ = calculateYaw(r_matrix);
 	pitch_ = calculatePitch(r_matrix);
 	distance_ = calculateDistance(tvec_);
@@ -108,3 +114,11 @@ float calculateDistance(cv::Mat t_vector)
 	// Distance: 平移向量的欧几里得范数（到目标的直线距离）
 	return static_cast<float>(cv::norm(t_vector));
 }
+
+#ifdef DEBUG_POSE
+	void drawPose(cv::Mat& image, float yaw, float pitch, const std::vector<cv::Point2f>& points)
+	{
+		cv::putText(image, "Yaw: " + std::to_string(yaw), (points[0] + points[1]) / 2, cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 0, 255), 1);
+        cv::putText(image, "Pitch: " + std::to_string(pitch), (points[2] + points[3]) / 2, cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(255, 0, 255), 1);
+	}
+#endif
