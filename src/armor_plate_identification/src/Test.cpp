@@ -71,7 +71,7 @@ private:
         myKF.setStatePost(Eigen::MatrixXf::Zero(2, 1));
         myKF.setProcessNoiseCov(Eigen::MatrixXf::Identity(2, 2) * 0.05);
 	    myKF.setMeasurementNoiseCov(Eigen::MatrixXf::Identity(1, 1) * 0.1);
-        pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_, myKF);
+        pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_, myKF, myKF);
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
 #endif

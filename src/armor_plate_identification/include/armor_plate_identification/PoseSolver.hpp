@@ -20,20 +20,27 @@ private:
 	float pitch_;		
 	float distance_;
 	//===== 卡尔曼滤波 =====//
-	MyKalmanFilter mykf_;
+	MyKalmanFilter mykf_yaw_origin_;
+	MyKalmanFilter mykf_pitch_origin_;
+	MyKalmanFilter mykf_yaw_;
+	MyKalmanFilter mykf_pitch_;
+	float filter_yaw_;
+	float filter_pitch_;
 public:
 	
 	PoseSolver();
 	PoseSolver(std::vector<cv::Point3f> world_points,
 		cv::Mat camera_matrix, 
 		cv::Mat distortion_coefficients,
-		MyKalmanFilter mykf
+		MyKalmanFilter mykf_yaw,
+		MyKalmanFilter mykf_pitch
 	);
 	PoseSolver(std::vector<cv::Point3f> world_points,
 		cv::Mat camera_matrix,
 		cv::Mat distortion_coefficients,
 		cv::Mat projection_matrix,
-		MyKalmanFilter mykf
+		MyKalmanFilter mykf_yaw,
+		MyKalmanFilter mykf_pitch
 	);
 
 	/// @brief 解算位姿，计算瞄准角误差
@@ -45,12 +52,17 @@ public:
 	/// @return 图像坐标系二维点
 	cv::Point2f reprojection(cv::Point3f point3D);
 
+	/// @brief 初始化卡尔曼滤波器，恢复到初始状态
+	void initKF();
+
 	cv::Mat getTvec() const { return tvec_; };
 	cv::Mat getRvec() const { return rvec_; };
 	cv::Mat getRMatrix() const { return r_matrix_; };
 	float getDistance() const { return distance_; };
 	float getYaw() const { return yaw_; }
 	float getPitch() const { return pitch_; }
+	float getFilterYaw() const { return filter_yaw_; }
+	float getFilterPitch() const { return filter_pitch_; }
 #ifdef DEBUG_POSE
 	void drawPose(cv::Mat& image);
 #endif
