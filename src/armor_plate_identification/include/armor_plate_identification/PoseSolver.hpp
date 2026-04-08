@@ -9,13 +9,14 @@ private:
 	cv::Mat distortion_coefficients_;		// 相机畸变系数
 	cv::Mat rectification_matrix_;			// 校正矩阵
 	cv::Mat projection_matrix_;				// 投影矩阵
+	std::vector<cv::Point2f> image_points_;	// 图像上的装甲板四个角点
 	// 输出矩阵
 	cv::Mat rvec_;					
 	cv::Mat tvec_;
 	cv::Mat r_matrix_;
-	float yaw_;
-	float pitch_;
-	float distance_;
+	float yaw_;			
+	float pitch_;		
+	float distance_;	
 public:
 	
 	PoseSolver();
@@ -29,8 +30,8 @@ public:
 		cv::Mat projection_matrix
 	);
 
-	/// @brief 解算位姿的主函数，输入相机坐标系的点，得到相机坐标系的位姿同时还有距离和姿态角度
-	/// @param camera_points 相机坐标系的点
+	/// @brief 解算位姿，计算瞄准角误差
+	/// @param camera_points 图像上的装甲板四个角点
 	void solve(const std::vector<cv::Point2f>& camera_points);
 
 	/// @brief 将相机的三维坐标系点转换到图像坐标系
@@ -42,20 +43,13 @@ public:
 	cv::Mat getRvec() const { return rvec_; };
 	cv::Mat getRMatrix() const { return r_matrix_; };
 	float getDistance() const { return distance_; };
-	float getYaw() const {return yaw_; }
+	float getYaw() const { return yaw_; }
 	float getPitch() const { return pitch_; }
+#ifdef DEBUG_POSE
+	void drawPose(cv::Mat& image);
+#endif
 };
 
-float calculateYaw(cv::Mat r_matrix);
-float calculatePitch(cv::Mat r_matrix);
-float calculateDistance(cv::Mat t_vector);
-
-#ifdef DEBUG_POSE
-	/// @brief 绘制yaw和pitch的图示
-	/// @param image 输入图像
-	/// @param yaw 偏航角
-	/// @param pitch 俯仰角
-	/// @param points 装甲板四个点
-	void drawPose(cv::Mat& image, float yaw, float pitch, const std::vector<cv::Point2f>& points);
-	void sendTF(const cv::Mat& rvec,const cv::Mat& tvec);
-#endif
+float calculateYaw(cv::Mat tvec);
+float calculatePitch(cv::Mat tvec);
+float calculateDistance(cv::Mat tvec);

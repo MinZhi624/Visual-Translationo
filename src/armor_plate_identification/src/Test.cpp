@@ -5,8 +5,6 @@
 #include "armor_plate_identification/PoseSolver.hpp"
 
 #include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/transform_stamped.hpp"
-#include "tf2_ros/transform_broadcaster.h"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -27,7 +25,6 @@ private:
     PoseSolver pose_solver_;
     
     rclcpp::TimerBase::SharedPtr timer_;
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 #ifdef DEBUG_BASE
     int play_delay_ms_ = 0; // 播放延迟，越大越慢
     int x = 10, y = 30, line_h = 25;
@@ -62,8 +59,6 @@ private:
         cv::Mat distortion_coefficients_ = (cv::Mat_<double>(1, 5) <<
             -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
         pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_);
-        // ===== tf参数初始化 ===== //
-        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
 #endif
@@ -107,48 +102,14 @@ private:
         debug_controller_.drawDebugInfo(img_show_, play_delay_ms_, true, x, y, line_h);
 #endif
     }
-    void PublishPose(const cv::Mat& r_matrix,const cv::Mat& tvec)
-    {
-        // PnP 解算结果：世界坐标系(armor) → 相机坐标系的变换 T_c_w
-        // 这里发布 armor_link 相对于 camera_link 的位置，即直接用 PnP 结果
-        // 如果要发布 camera 在 armor 坐标系下的位置，需要求逆：T_armor->camera = T_c_w^-1
-        
-        geometry_msgs::msg::TransformStamped transform_stamped;
-        transform_stamped.header.stamp = this->get_clock()->now();
-        transform_stamped.header.frame_id = "camera_link";
-        transform_stamped.child_frame_id = "armor_link";
-        
-        // 平移：mm to m
-        transform_stamped.transform.translation.x = tvec.at<double>(0) / 1000.0;
-        transform_stamped.transform.translation.y = tvec.at<double>(1) / 1000.0;
-        transform_stamped.transform.translation.z = tvec.at<double>(2) / 1000.0;
-        
-        // 旋转矩阵转四元数（使用 Eigen 简化）
-        Eigen::Matrix3d rmat;
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                rmat(i, j) = r_matrix.at<double>(i, j);
-            }
-        }
-        Eigen::Quaterniond q(rmat);
-        
-        transform_stamped.transform.rotation.w = q.w();
-        transform_stamped.transform.rotation.x = q.x();
-        transform_stamped.transform.rotation.y = q.y();
-        transform_stamped.transform.rotation.z = q.z();
-        
-        tf_broadcaster_->sendTransform(transform_stamped);
-    }
     void SolvePose()
     {
         // 每一个匹配好的灯条解算
         for (const auto& points : lights_.getPairedLightPoints()) {
             pose_solver_.solve(points);
-            double yaw = pose_solver_.getYaw();
-            double pitch = pose_solver_.getPitch();
-            PublishPose(pose_solver_.getRMatrix(), pose_solver_.getTvec());
+            pose_solver_.solve(points);
 #ifdef DEBUG_POSE
-            drawPose(img_show_, yaw, pitch, points);            
+            pose_solver_.drawPose(img_show_);            
 #endif
         }
     }
