@@ -43,7 +43,7 @@ private:
         lights_.MAX_DISTANCE_RATIO = 0.8f;
         lights_.MIN_DISTANCE_RATIO = 0.1f;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
-        // ===== 初始化相机内参 ===== //
+        // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
         std::vector<cv::Point3f> world_points_;
         world_points_.push_back(cv::Point3f(-67.5f, -27.5f, 0)); // 0
@@ -55,10 +55,23 @@ private:
             2374.54248, 0., 698.85288,
             0., 2377.53648, 520.8649,
             0., 0., 1.);
-        //相机畸变系数
+        // 相机畸变系数
         cv::Mat distortion_coefficients_ = (cv::Mat_<double>(1, 5) <<
             -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
-        pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_);
+        // 卡尔曼滤波 这里采用二阶的KF
+        MyKalmanFilter myKF(2, 1);
+        Eigen::MatrixXf A(2, 2);
+        A << 1, 0.02,
+            0, 1;
+        myKF.setTransitionMatrix(A);
+        Eigen::MatrixXf H(1, 2);
+        H << 1, 0;
+        myKF.setMeasurementMatrix(H);
+        myKF.setErrorCovPost(Eigen::MatrixXf::Identity(2, 2));
+        myKF.setStatePost(Eigen::MatrixXf::Zero(2, 1));
+        myKF.setProcessNoiseCov(Eigen::MatrixXf::Identity(2, 2) * 0.05);
+	    myKF.setMeasurementNoiseCov(Eigen::MatrixXf::Identity(1, 1) * 0.1);
+        pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_, myKF);
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
 #endif

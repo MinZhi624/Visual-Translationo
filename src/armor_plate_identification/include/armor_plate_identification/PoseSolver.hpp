@@ -1,9 +1,11 @@
 ﻿#pragma once
+#include "armor_plate_identification/MyKalmanFilter.hpp"
 #include <opencv2/core.hpp>
 
 class PoseSolver
 {
 private:
+	//===== PNP解算 =====//
 	std::vector<cv::Point3f> world_points_;	// 装甲板坐标系点
 	cv::Mat camera_matrix_; 				// 初始化相机内参
 	cv::Mat distortion_coefficients_;		// 相机畸变系数
@@ -16,18 +18,22 @@ private:
 	cv::Mat r_matrix_;
 	float yaw_;			
 	float pitch_;		
-	float distance_;	
+	float distance_;
+	//===== 卡尔曼滤波 =====//
+	MyKalmanFilter mykf_;
 public:
 	
 	PoseSolver();
 	PoseSolver(std::vector<cv::Point3f> world_points,
 		cv::Mat camera_matrix, 
-		cv::Mat distortion_coefficients
+		cv::Mat distortion_coefficients,
+		MyKalmanFilter mykf
 	);
 	PoseSolver(std::vector<cv::Point3f> world_points,
 		cv::Mat camera_matrix,
 		cv::Mat distortion_coefficients,
-		cv::Mat projection_matrix
+		cv::Mat projection_matrix,
+		MyKalmanFilter mykf
 	);
 
 	/// @brief 解算位姿，计算瞄准角误差

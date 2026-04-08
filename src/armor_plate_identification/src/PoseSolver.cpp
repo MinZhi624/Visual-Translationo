@@ -13,13 +13,15 @@ PoseSolver::PoseSolver()
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(),
       rvec_(),
-      tvec_()
+      tvec_(),
+	  mykf_()
 {
 }
 
 PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
     cv::Mat camera_matrix, 
-    cv::Mat distortion_coefficients
+    cv::Mat distortion_coefficients,
+	MyKalmanFilter mykf
 )
     : world_points_(std::move(world_points)),
       camera_matrix_(std::move(camera_matrix)),
@@ -27,14 +29,16 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(camera_matrix_ * rectification_matrix_),
       rvec_(),
-      tvec_()
+      tvec_(),
+	  mykf_(mykf)
 {
 }
 
 PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
     cv::Mat camera_matrix,
     cv::Mat distortion_coefficients,
-    cv::Mat projection_matrix
+    cv::Mat projection_matrix,
+	MyKalmanFilter mykf
 )
     : world_points_(std::move(world_points)),
       camera_matrix_(std::move(camera_matrix)),
@@ -42,7 +46,8 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(std::move(projection_matrix)),
       rvec_(),
-      tvec_()
+      tvec_(),
+	  mykf_(mykf)
 {
 }
 
