@@ -3,6 +3,7 @@
 #include "armor_plate_identification/PairedLights.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
+#include "armor_plate_identification/Tracker.hpp"
 
 #include "rclcpp/rclcpp.hpp"
 
@@ -12,7 +13,6 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-#include <algorithm>
 #include <thread>
 #include <chrono>
 
@@ -23,8 +23,16 @@ private:
     cv::Mat img_show_;
     PairedLights lights_;
     PoseSolver pose_solver_;
-    
+    Tracker tracker_;
     rclcpp::TimerBase::SharedPtr timer_;
+    std::vector<float> yaw_;
+    std::vector<float> pitch_;
+    
+    // 时间和帧数
+    double fps_;
+    int frame_count_;           // 当前帧数
+    double current_time_;       // 当前时间（秒）= frame_count_ / fps_
+    
 #ifdef DEBUG_BASE
     int play_delay_ms_ = 0; // 播放延迟，越大越慢
     int x = 10, y = 30, line_h = 25;
@@ -35,6 +43,25 @@ private:
     {
         // ==== 相机初始化 ==== //
         c_.open(video_path);
+        if (!c_.isOpened()) {
+            RCLCPP_ERROR(this->get_logger(), "无法打开视频: %s", video_path.c_str());
+            rclcpp::shutdown();
+            return;
+        }
+        
+        // 获取视频FPS
+        fps_ = c_.get(cv::CAP_PROP_FPS);
+        if (fps_ <= 0) {
+            fps_ = 50.0;  // 默认50fps
+            RCLCPP_WARN(this->get_logger(), "无法获取视频FPS，使用默认值: %.1f", fps_);
+        } else {
+            RCLCPP_INFO(this->get_logger(), "视频FPS: %.2f", fps_);
+        }
+        
+        // 初始化时间和帧数
+        frame_count_ = 0;
+        current_time_ = 0.0;
+        
         // ==== 匹配参数初始化 ==== //
         lights_.MAX_ANGLE_DIFF = 10.0f;
         lights_.MIN_LENGTH_RATIO = 0.6f;
@@ -42,7 +69,9 @@ private:
         lights_.MAX_Y_DIFF_RATIO = 1.0f;
         lights_.MAX_DISTANCE_RATIO = 0.8f;
         lights_.MIN_DISTANCE_RATIO = 0.1f;
+        
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
+        
         // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
         std::vector<cv::Point3f> world_points_;
@@ -58,20 +87,16 @@ private:
         // 相机畸变系数
         cv::Mat distortion_coefficients_ = (cv::Mat_<double>(1, 5) <<
             -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
-        // 卡尔曼滤波 这里采用二阶的KF
-        MyKalmanFilter myKF(2, 1);
-        Eigen::MatrixXf A(2, 2);
-        A << 1, 0.02,
-            0, 1;
-        myKF.setTransitionMatrix(A);
-        Eigen::MatrixXf H(1, 2);
-        H << 1, 0;
-        myKF.setMeasurementMatrix(H);
-        myKF.setErrorCovPost(Eigen::MatrixXf::Identity(2, 2));
-        myKF.setStatePost(Eigen::MatrixXf::Zero(2, 1));
-        myKF.setProcessNoiseCov(Eigen::MatrixXf::Identity(2, 2) * 0.05);
-	    myKF.setMeasurementNoiseCov(Eigen::MatrixXf::Identity(1, 1) * 0.1);
-        pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_, myKF, myKF);
+        
+        pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_);
+        
+        // ===== 初始化Tracker ===== //
+        tracker_.setMaxLostTime(0.5);  // 最大丢失0.5秒
+        tracker_.setMutationThreshold(3.0f, 2.0f);  // yaw突变3度，pitch突变2度
+        tracker_.Init();
+        
+        RCLCPP_INFO(this->get_logger(), "Tracker初始化完成，fps=%.2f", fps_);
+        
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
 #endif
@@ -117,14 +142,89 @@ private:
     }
     void SolvePose()
     {
+        std::vector<float> yaw;
+        std::vector<float> pitch;
         // 每一个匹配好的灯条解算
         for (const auto& points : lights_.getPairedLightPoints()) {
             pose_solver_.solve(points);
-            pose_solver_.solve(points);
+            yaw.push_back(pose_solver_.getYaw());
+            pitch.push_back(pose_solver_.getPitch());
 #ifdef DEBUG_POSE
             pose_solver_.drawPose(img_show_);            
 #endif
         }
+        yaw_ = yaw;
+        pitch_ = pitch;
+    }
+    void Track()
+    {
+        // 更新时间：frame_count / fps
+        current_time_ = frame_count_ / fps_;
+        
+        // 使用Tracker进行滤波跟踪
+        tracker_.Update(yaw_, pitch_, current_time_);
+        
+        // 获取滤波后的值
+        float tracked_yaw = tracker_.getYaw();
+        float tracked_pitch = tracker_.getPitch();
+        
+#ifdef DEBUG_POSE
+        // 显示时间和帧数
+        cv::putText(img_show_, "Time: " + std::to_string(current_time_) + "s Frame: " + std::to_string(frame_count_), 
+                   cv::Point(10, 30), cv::FONT_HERSHEY_PLAIN, 1.2, cv::Scalar(255, 255, 255), 2);
+        
+        // 在图像上显示跟踪结果
+        if (tracker_.isLost()) {
+            // 丢失目标时显示预测值（红色）
+            cv::putText(img_show_, "Tracked Yaw: " + std::to_string(tracked_yaw), 
+                       cv::Point(10, 60), cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 0, 255), 2);
+            cv::putText(img_show_, "Tracked Pitch: " + std::to_string(tracked_pitch), 
+                       cv::Point(10, 85), cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 0, 255), 2);
+            cv::putText(img_show_, "Lost: " + std::to_string(tracker_.getLostTime(current_time_)) + "s", 
+                       cv::Point(10, 110), cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 0, 255), 2);
+        } else {
+            // 正常跟踪时显示滤波值（绿色）
+            cv::putText(img_show_, "Tracked Yaw: " + std::to_string(tracked_yaw), 
+                       cv::Point(10, 60), cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 0), 2);
+            cv::putText(img_show_, "Tracked Pitch: " + std::to_string(tracked_pitch), 
+                       cv::Point(10, 85), cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 0), 2);
+        }
+        
+        // 可视化追踪点：将滤波后的角度反投影到图像
+        drawTrackedPoint(tracked_yaw, tracked_pitch);
+#endif
+    }
+    
+    void drawTrackedPoint(float tracked_yaw, float tracked_pitch)
+    {
+        // 获取当前距离（从最后一次解算）
+        float distance = pose_solver_.getDistance();
+        if (distance <= 0) return;
+        
+        // 从 yaw/pitch/distance 重建 tvec
+        double yaw_rad = tracked_yaw * CV_PI / 180.0;
+        double pitch_rad = tracked_pitch * CV_PI / 180.0;
+        
+        cv::Point3f tracked_tvec;
+        tracked_tvec.x = static_cast<float>(distance * std::sin(yaw_rad) * std::cos(pitch_rad));
+        tracked_tvec.y = static_cast<float>(-distance * std::sin(pitch_rad));
+        tracked_tvec.z = static_cast<float>(distance * std::cos(yaw_rad) * std::cos(pitch_rad));
+        
+        // 重投影到图像
+        cv::Point2f tracked_point = pose_solver_.reprojection(tracked_tvec);
+        
+        // 画追踪点（黄色圆圈+十字）
+        cv::circle(img_show_, tracked_point, 8, cv::Scalar(0, 255, 255), 2);
+        cv::circle(img_show_, tracked_point, 3, cv::Scalar(0, 255, 255), -1);
+        int cross_len = 12;
+        cv::line(img_show_, 
+                 cv::Point(tracked_point.x - cross_len, tracked_point.y),
+                 cv::Point(tracked_point.x + cross_len, tracked_point.y),
+                 cv::Scalar(0, 255, 255), 2);
+        cv::line(img_show_, 
+                 cv::Point(tracked_point.x, tracked_point.y - cross_len),
+                 cv::Point(tracked_point.x, tracked_point.y + cross_len),
+                 cv::Scalar(0, 255, 255), 2);
     }
     void controlParams()
     {
@@ -164,11 +264,17 @@ public:
                 return;
             }
             if (!rclcpp::ok()) return;
+            
+            // 更新帧数
+            frame_count_++;
+            
             img_show_ = frame.clone();
             // 图像处理
             Identification(frame);
             // 解算
             SolvePose();
+            // 跟踪滤波
+            Track();
             // 图片展示
             cv::imshow("img_show_", img_show_);
             // 按键控制
@@ -188,7 +294,7 @@ int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     if (argc != 3) {
-        RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), "请输入正确的参数，输入视屏地址");
+        RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), "请输入正确的参数，输入视频地址");
         return 1;
     }
     auto node = std::make_shared<Test>(argv[1]);

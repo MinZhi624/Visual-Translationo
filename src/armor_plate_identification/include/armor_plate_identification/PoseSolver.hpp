@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include "armor_plate_identification/MyKalmanFilter.hpp"
 #include <opencv2/core.hpp>
 
 class PoseSolver
@@ -19,28 +18,17 @@ private:
 	float yaw_;			
 	float pitch_;		
 	float distance_;
-	//===== 卡尔曼滤波 =====//
-	MyKalmanFilter mykf_yaw_origin_;
-	MyKalmanFilter mykf_pitch_origin_;
-	MyKalmanFilter mykf_yaw_;
-	MyKalmanFilter mykf_pitch_;
-	float filter_yaw_;
-	float filter_pitch_;
 public:
 	
 	PoseSolver();
 	PoseSolver(std::vector<cv::Point3f> world_points,
 		cv::Mat camera_matrix, 
-		cv::Mat distortion_coefficients,
-		MyKalmanFilter mykf_yaw,
-		MyKalmanFilter mykf_pitch
+		cv::Mat distortion_coefficients
 	);
 	PoseSolver(std::vector<cv::Point3f> world_points,
 		cv::Mat camera_matrix,
 		cv::Mat distortion_coefficients,
-		cv::Mat projection_matrix,
-		MyKalmanFilter mykf_yaw,
-		MyKalmanFilter mykf_pitch
+		cv::Mat projection_matrix
 	);
 
 	/// @brief 解算位姿，计算瞄准角误差
@@ -61,8 +49,6 @@ public:
 	float getDistance() const { return distance_; };
 	float getYaw() const { return yaw_; }
 	float getPitch() const { return pitch_; }
-	float getFilterYaw() const { return filter_yaw_; }
-	float getFilterPitch() const { return filter_pitch_; }
 #ifdef DEBUG_POSE
 	void drawPose(cv::Mat& image);
 #endif

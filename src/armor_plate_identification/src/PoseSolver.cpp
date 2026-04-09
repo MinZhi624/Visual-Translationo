@@ -13,19 +13,13 @@ PoseSolver::PoseSolver()
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(),
       rvec_(),
-      tvec_(),
-	  mykf_yaw_(),
-	  mykf_pitch_(),
-	  mykf_yaw_origin_(),
-	  mykf_pitch_origin_()
+      tvec_()
 {
 }
 
 PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
     cv::Mat camera_matrix, 
-    cv::Mat distortion_coefficients,
-	MyKalmanFilter mykf_yaw,
-	MyKalmanFilter mykf_pitch
+    cv::Mat distortion_coefficients
 )
     : world_points_(std::move(world_points)),
       camera_matrix_(std::move(camera_matrix)),
@@ -33,20 +27,14 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(camera_matrix_ * rectification_matrix_),
       rvec_(),
-      tvec_(),
-	  mykf_yaw_(mykf_yaw),
-	  mykf_pitch_(mykf_pitch),
-	  mykf_yaw_origin_(mykf_yaw),
-	  mykf_pitch_origin_(mykf_pitch)
+      tvec_()
 {
 }
 
 PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
     cv::Mat camera_matrix,
     cv::Mat distortion_coefficients,
-    cv::Mat projection_matrix,
-	MyKalmanFilter mykf_yaw,
-	MyKalmanFilter mykf_pitch
+    cv::Mat projection_matrix
 )
     : world_points_(std::move(world_points)),
       camera_matrix_(std::move(camera_matrix)),
@@ -54,19 +42,9 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(std::move(projection_matrix)),
       rvec_(),
-      tvec_(),
-	  mykf_yaw_(mykf_yaw),
-	  mykf_pitch_(mykf_pitch),
-	  mykf_yaw_origin_(mykf_yaw),
-	  mykf_pitch_origin_(mykf_pitch)
+      tvec_()
 {
 }
-void PoseSolver::initKF()
-{
-	mykf_pitch_ = mykf_pitch_origin_;
-	mykf_yaw_ = mykf_yaw_origin_;
-}
-
 void PoseSolver::solve(const std::vector<cv::Point2f>& camera_points)
 {
 	cv::solvePnP(world_points_, camera_points, camera_matrix_, distortion_coefficients_, rvec_, tvec_, false, cv::SOLVEPNP_SQPNP);

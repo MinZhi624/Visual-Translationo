@@ -15,6 +15,8 @@ set(  ArmorPlateIdentifcation
   src/Recognize.cpp
   src/PairedLights.cpp
   src/TestFunc.cpp
+  src/Tracker.cpp
+  src/MyKalmanFilter.cpp
 )
 set( Test
   src/Test.cpp
@@ -23,6 +25,8 @@ set( Test
   src/PoseSolver.cpp
   src/Recognize.cpp
   src/PairedLights.cpp
+  src/Tracker.cpp
+  src/MyKalmanFilter.cpp
 )
 # ======================
 # 宏定义

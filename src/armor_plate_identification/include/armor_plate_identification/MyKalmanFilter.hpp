@@ -63,4 +63,7 @@ public:
 	/// <param name="matrix2">矩阵2</param>
 	/// <returns>true说明一致,flase说明不一致</returns>
 	bool checkDimensions(Eigen::MatrixXf matrix1,Eigen::MatrixXf matrix2);
+
+	// Getter for state_post_
+	Eigen::MatrixXf getStatePost() const { return state_post_; }
 };
