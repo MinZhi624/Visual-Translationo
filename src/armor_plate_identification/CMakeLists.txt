@@ -17,6 +17,8 @@ set(  ArmorPlateIdentifcation
   src/DrawTarget.cpp
   src/PairedLights.cpp
   src/TestFunc.cpp
+  src/Tracker.cpp
+  src/MyKalmanFilter.cpp
 )
 set( Test
   src/Test.cpp
@@ -27,6 +29,8 @@ set( Test
   src/MyKalmanFilter.cpp
   src/DrawTarget.cpp
   src/PairedLights.cpp
+  src/Tracker.cpp
+  src/MyKalmanFilter.cpp
 )
 # ======================
 # 宏定义
