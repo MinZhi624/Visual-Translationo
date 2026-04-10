@@ -5,7 +5,12 @@
 #include "armor_plate_identification/PoseSolver.hpp"
 #include "armor_plate_identification/Tracker.hpp"
 
+#include "armor_plate_interfaces/msg/armor_plate.hpp"
+#include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/transform_broadcaster.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "geometry_msgs/msg/pose.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -15,6 +20,9 @@
 
 #include <thread>
 #include <chrono>
+
+using armor_plate_interfaces::msg::ArmorPlate;
+using armor_plate_interfaces::msg::ArmorPlates;
 
 class Test : public rclcpp::Node
 {
@@ -27,10 +35,14 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     std::vector<float> yaw_;
     std::vector<float> pitch_;
-    
+    // PoseSolver结果
+    std::vector<ArmorPlate> armor_plates_;
+    // 发布者
+    rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
+    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     // 时间和帧数
     double fps_;
-    int frame_count_;           // 当前帧数
+    int frame_count_;           // 当前帧数->用于每秒多少fps
     double current_time_;       // 当前时间（秒）= frame_count_ / fps_
     
 #ifdef DEBUG_BASE
@@ -94,9 +106,9 @@ private:
         tracker_.setMaxLostTime(0.5);  // 最大丢失0.5秒
         tracker_.setMutationThreshold(3.0f, 2.0f);  // yaw突变3度，pitch突变2度
         tracker_.Init();
-        
-        RCLCPP_INFO(this->get_logger(), "Tracker初始化完成，fps=%.2f", fps_);
-        
+        // ===== 初始化发布器 ===== //
+        armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
+        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
 #endif
@@ -144,17 +156,36 @@ private:
     {
         std::vector<float> yaw;
         std::vector<float> pitch;
+        std::vector<ArmorPlate> armor_plates;
         // 每一个匹配好的灯条解算
         for (const auto& points : lights_.getPairedLightPoints()) {
             pose_solver_.solve(points);
             yaw.push_back(pose_solver_.getYaw());
             pitch.push_back(pose_solver_.getPitch());
+            // 存储解算结果
+            ArmorPlate armor_plate;
+            cv::Mat tvec = pose_solver_.getTvec();
+            Eigen::Quaternion q = pose_solver_.getQuaternion();
+            geometry_msgs::msg::Pose pose;
+            //mm -> m
+            pose.position.x = tvec.at<double>(0) / 1000;
+            pose.position.y = tvec.at<double>(1) / 1000;
+            pose.position.z = tvec.at<double>(2) / 1000;
+            pose.orientation.x = q.x();
+            pose.orientation.y = q.y();
+            pose.orientation.z = q.z();
+            pose.orientation.w = q.w();
+            float image_distance = pose_solver_.getImageDistanceToCenter();
+            armor_plate.pose = pose;
+            armor_plate.image_distance_to_center = image_distance;
+            armor_plates.push_back(armor_plate);
 #ifdef DEBUG_POSE
             pose_solver_.drawPose(img_show_);            
 #endif
         }
         yaw_ = yaw;
         pitch_ = pitch;
+        armor_plates_ = armor_plates;
     }
     void Track()
     {
@@ -194,7 +225,6 @@ private:
         drawTrackedPoint(tracked_yaw, tracked_pitch);
 #endif
     }
-    
     void drawTrackedPoint(float tracked_yaw, float tracked_pitch)
     {
         // 获取当前距离（从最后一次解算）
@@ -225,6 +255,38 @@ private:
                  cv::Point(tracked_point.x, tracked_point.y - cross_len),
                  cv::Point(tracked_point.x, tracked_point.y + cross_len),
                  cv::Scalar(0, 255, 255), 2);
+    }
+    void Publish()
+    {
+        int index = 0;
+        // 使用视频的模拟时间（frame_count / fps）作为消息时间戳
+        double sim_time = frame_count_ / fps_;
+        builtin_interfaces::msg::Time stamp;
+        stamp.sec = static_cast<int32_t>(sim_time);
+        stamp.nanosec = static_cast<uint32_t>((sim_time - stamp.sec) * 1e9);
+
+        for(const auto& armor_plate : armor_plates_)
+        {
+            // 发布姿态
+            geometry_msgs::msg::TransformStamped transformStamped;
+            transformStamped.header.stamp = stamp;
+            transformStamped.header.frame_id = "camera_link";
+            transformStamped.child_frame_id = "armor_plate_" + std::to_string(index++);
+            transformStamped.transform.translation.x = armor_plate.pose.position.x;
+            transformStamped.transform.translation.y = armor_plate.pose.position.y;
+            transformStamped.transform.translation.z = armor_plate.pose.position.z;
+            transformStamped.transform.rotation.x = armor_plate.pose.orientation.x;
+            transformStamped.transform.rotation.y = armor_plate.pose.orientation.y;
+            transformStamped.transform.rotation.z = armor_plate.pose.orientation.z;
+            transformStamped.transform.rotation.w = armor_plate.pose.orientation.w;
+            tf_broadcaster_->sendTransform(transformStamped);
+        }
+        // 发布灯条信息
+        ArmorPlates armor_plates_msg;
+        armor_plates_msg.header.stamp = stamp;
+        armor_plates_msg.header.frame_id = "camera_link";
+        armor_plates_msg.armor_plates = armor_plates_;  // 直接拷贝赋值
+        armor_plates_pub_->publish(armor_plates_msg);
     }
     void controlParams()
     {
@@ -267,7 +329,6 @@ public:
             
             // 更新帧数
             frame_count_++;
-            
             img_show_ = frame.clone();
             // 图像处理
             Identification(frame);
@@ -281,6 +342,8 @@ public:
             controlParams();
             // 打印
             rclcpp::spin_some(this->get_node_base_interface());
+            // 发布数据
+            Publish();
             // 控制速度
 #ifdef DEBUG_BASE
             std::this_thread::sleep_for(std::chrono::milliseconds(play_delay_ms_));

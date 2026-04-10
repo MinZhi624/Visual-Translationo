@@ -20,7 +20,6 @@ public:
 	Lights();
 };
 
-
 class PairedLights
 {
 private:

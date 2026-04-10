@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <opencv2/core.hpp>
+#include <Eigen/Geometry>
 
 class PoseSolver
 {
@@ -15,9 +16,11 @@ private:
 	cv::Mat rvec_;					
 	cv::Mat tvec_;
 	cv::Mat r_matrix_;
+	Eigen::Quaterniond q_;
 	float yaw_;			
 	float pitch_;		
 	float distance_;
+	float image_distance_to_center_;
 public:
 	
 	PoseSolver();
@@ -42,11 +45,15 @@ public:
 
 	/// @brief 初始化卡尔曼滤波器，恢复到初始状态
 	void initKF();
+	
+	float calculateImageDistanceToCenter(cv::Point2f target_center_point);
 
 	cv::Mat getTvec() const { return tvec_; };
 	cv::Mat getRvec() const { return rvec_; };
 	cv::Mat getRMatrix() const { return r_matrix_; };
+	Eigen::Quaterniond getQuaternion() const { return q_; };
 	float getDistance() const { return distance_; };
+	float getImageDistanceToCenter() const { return image_distance_to_center_; }
 	float getYaw() const { return yaw_; }
 	float getPitch() const { return pitch_; }
 #ifdef DEBUG_POSE
@@ -57,3 +64,4 @@ public:
 float calculateYaw(cv::Mat tvec);
 float calculatePitch(cv::Mat tvec);
 float calculateDistance(cv::Mat tvec);
+Eigen::Quaterniond calculateQuaternion(const cv::Mat& R);

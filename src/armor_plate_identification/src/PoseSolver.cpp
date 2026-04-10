@@ -47,14 +47,19 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
 }
 void PoseSolver::solve(const std::vector<cv::Point2f>& camera_points)
 {
-	cv::solvePnP(world_points_, camera_points, camera_matrix_, distortion_coefficients_, rvec_, tvec_, false, cv::SOLVEPNP_SQPNP);
+	cv::solvePnP(world_points_, camera_points, camera_matrix_, distortion_coefficients_, rvec_, tvec_, false, cv::SOLVEPNP_IPPE);
 	cv::Mat r_matrix;
 	cv::Rodrigues(rvec_, r_matrix);
 	image_points_ = camera_points;
 	r_matrix_= r_matrix;
+
+	q_ = calculateQuaternion(r_matrix);
+
 	yaw_ = calculateYaw(tvec_);
 	pitch_ = calculatePitch(tvec_);
 	distance_ = calculateDistance(tvec_);
+	cv::Point2f target_center_point = (camera_points[0] + camera_points[1] + camera_points[2] + camera_points[3])  / 4;
+	image_distance_to_center_ = calculateImageDistanceToCenter(target_center_point);
 }
 
 cv::Point2f PoseSolver::reprojection(cv::Point3f point3D)
@@ -93,6 +98,23 @@ float calculateDistance(cv::Mat tvec)
 {
 	// 到目标的直线距离
 	return static_cast<float>(cv::norm(tvec));
+}
+float PoseSolver::calculateImageDistanceToCenter(cv::Point2f target_center_point)
+{
+	// 计算图像中心到目标中心的距离，通过相机内参来求
+	double cx = camera_matrix_.at<double>(0, 2);
+	double cy = camera_matrix_.at<double>(1, 2);
+	cv::Point2f image_center_point(cx, cy);
+	return cv::norm(image_center_point - target_center_point);
+}
+
+Eigen::Quaterniond calculateQuaternion(const cv::Mat& R)
+{
+	Eigen::Matrix3d eigen_R;
+	eigen_R << R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2),
+	           R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2),
+	           R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2);
+	return Eigen::Quaterniond(eigen_R);
 }
 
 #ifdef DEBUG_POSE

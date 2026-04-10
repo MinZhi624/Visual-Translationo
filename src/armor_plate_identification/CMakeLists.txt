@@ -65,6 +65,7 @@ find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(armor_plate_interfaces REQUIRED)
 
 # ======================
 # 相机 SDK 路径
@@ -107,6 +108,7 @@ ${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
 target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(Test PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 # ======================
 # 链接库
 # ======================
@@ -127,6 +129,7 @@ ament_target_dependencies(
   "OpenCV"
   "geometry_msgs"
   "tf2_ros"
+  "armor_plate_interfaces"
 )
 ament_target_dependencies(
   Test
@@ -134,6 +137,7 @@ ament_target_dependencies(
   "OpenCV"
   "geometry_msgs"
   "tf2_ros"
+  "armor_plate_interfaces"
 )
   
 # ======================
