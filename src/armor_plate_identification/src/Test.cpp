@@ -3,7 +3,6 @@
 #include "armor_plate_identification/PairedLights.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
-#include "armor_plate_identification/Tracker.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
@@ -30,7 +29,6 @@ private:
     // 灯条匹配相关
     PairedLights lights_;
     PoseSolver pose_solver_;
-    Tracker tracker_;
     // PoseSolver结果
     std::vector<ArmorPlate> armor_plates_;
     std::vector<float> yaw_;
@@ -104,10 +102,6 @@ private:
         cv::Mat distortion_coefficients_ = (cv::Mat_<double>(1, 5) <<
             -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
         pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_);
-        // ===== 初始化Tracker ===== //
-        tracker_.setMaxLostTime(0.5);  // 最大丢失0.5秒
-        tracker_.setMutationThreshold(3.0f, 2.0f);  // yaw突变3度，pitch突变2度
-        tracker_.Init();
         // ===== 初始化发布器 ===== //
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
@@ -190,18 +184,6 @@ private:
         yaw_ = yaw;
         pitch_ = pitch;
         armor_plates_ = armor_plates;
-    }
-    void Track()
-    {
-        // Test.cpp 中的本地 Tracker 已禁用
-        // 滤波跟踪由 armor_plate_tracker 节点负责
-        (void)current_time_;
-    }
-    void drawTrackedPoint(float tracked_yaw, float tracked_pitch)
-    {
-        (void)tracked_yaw;
-        (void)tracked_pitch;
-        // 已移至 armor_plate_tracker 节点实现
     }
     void Publish()
     {

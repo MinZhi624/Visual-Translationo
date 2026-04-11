@@ -16,12 +16,21 @@
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::DebugTarcker;
 
+struct TrackingOverlayData {
+    bool has_result = false;
+    bool is_lost = false;
+    geometry_msgs::msg::Point measured_position;
+    float filter_yaw = 0.0f;
+    float filter_pitch = 0.0f;
+    float distance = 0.0f;
+};
+
 class ArmorPlateTracker : public rclcpp::Node
 {
 private:
-    // ===== 装甲板跟踪器 ===== //
+    // ===== 装甲板跟踪器  ===== //
     Tracker tracker_;
-    // ===== ROS 相关 ===== //
+    // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr debug_image_sub_;
     rclcpp::Publisher<DebugTarcker>::SharedPtr debug_tracker_pub_;
@@ -30,10 +39,11 @@ private:
     double current_time_ = 0.0;
     // ===== DEBUG =====//
     bool debug_;
-    // 调试图像
-    cv::Mat latest_img_;
     // 相机内参
     cv::Mat camera_matrix_;
+    // 最新跟踪结果（用于图像叠加）
+    TrackingOverlayData overlay_data_;
+    std::mutex overlay_mutex_;
 
     void init()
     {
@@ -64,6 +74,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.2f, pitch = %.2f||滤波数据: yaw = %.2f, pitch = %.2f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
     }
+///////// DEBUG ///////////////////
     void Debug()
     {
         debug_image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
@@ -76,16 +87,6 @@ private:
             2374.54248, 0., 698.85288,
             0., 2377.53648, 520.8649,
             0., 0., 1.);
-    }
-
-    void DebugImageCallBack(const sensor_msgs::msg::Image::SharedPtr msg)
-    {
-        try {
-            auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
-            latest_img_ = cv_ptr->image;
-        } catch (const cv_bridge::Exception& e) {
-            RCLCPP_ERROR(this->get_logger(), "cv_bridge 转换失败: %s", e.what());
-        }
     }
     cv::Point2f reprojection(const geometry_msgs::msg::Point& position)
     {
@@ -125,6 +126,35 @@ private:
             cv::putText(img, label, cv::Point(pt.x + 15, pt.y), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
         }
     }
+    void DebugImageCallBack(const sensor_msgs::msg::Image::SharedPtr msg)
+    {
+        try {
+            auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+            cv::Mat overlay = cv_ptr->image;
+
+            // 在这里画图：每来一帧图像，画一次最新的跟踪结果
+            std::lock_guard<std::mutex> lock(overlay_mutex_);
+            if (overlay_data_.has_result) {
+                cv::Point2f measured_pt = reprojection(overlay_data_.measured_position);
+                drawPoint(overlay, measured_pt, cv::Scalar(0, 0, 255), "measured");
+
+                if (!overlay_data_.is_lost) {
+                    cv::Point2f filtered_pt = reprojectionFromYawPitch(
+                        overlay_data_.filter_yaw, overlay_data_.filter_pitch, overlay_data_.distance);
+                    drawPoint(overlay, filtered_pt, cv::Scalar(0, 255, 0), "filtered");
+                } else {
+                    cv::Point2f predicted_pt = reprojectionFromYawPitch(
+                        overlay_data_.filter_yaw, overlay_data_.filter_pitch, overlay_data_.distance);
+                    drawPoint(overlay, predicted_pt, cv::Scalar(0, 255, 255), "predicted");
+                }
+            }
+
+            cv::imshow("Tracker Debug", overlay);
+            cv::waitKey(1);
+        } catch (const cv_bridge::Exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "cv_bridge 转换失败: %s", e.what());
+        }
+    }
     void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
     {
         double current_time = this->now().seconds();
@@ -150,37 +180,21 @@ private:
         debug_msg.filter_pitch = tracker_.getPitch();
         debug_tracker_pub_->publish(debug_msg);
 
-        // ===== 在调试图像上叠加滤波结果 ===== //
-        if (!latest_img_.empty()) {
-            cv::Mat overlay = latest_img_.clone();
-
-            // 红点：原始测量 tvec 直接重投影
+        // 更新最新跟踪结果数据，不在此画图
+        if (debug_) {
             auto measured_pos = tracker_.getMeasuredPosition();
-            cv::Point2f measured_pt = reprojection(measured_pos);
-            drawPoint(overlay, measured_pt, cv::Scalar(0, 0, 255), "measured");
+            float distance = static_cast<float>(std::sqrt(
+                measured_pos.x * measured_pos.x +
+                measured_pos.y * measured_pos.y +
+                measured_pos.z * measured_pos.z));
 
-            // 绿点：滤波后的 yaw/pitch + 原始 distance 重建 tvec 重投影
-            if (!tracker_.isLost()) {
-                float distance = static_cast<float>(std::sqrt(
-                    measured_pos.x * measured_pos.x +
-                    measured_pos.y * measured_pos.y +
-                    measured_pos.z * measured_pos.z));
-                cv::Point2f filtered_pt = reprojectionFromYawPitch(
-                    tracker_.getYaw(), tracker_.getPitch(), distance);
-                drawPoint(overlay, filtered_pt, cv::Scalar(0, 255, 0), "filtered");
-            } else {
-                // 丢失时显示预测点（黄色）
-                float distance = static_cast<float>(std::sqrt(
-                    measured_pos.x * measured_pos.x +
-                    measured_pos.y * measured_pos.y +
-                    measured_pos.z * measured_pos.z));
-                cv::Point2f predicted_pt = reprojectionFromYawPitch(
-                    tracker_.getYaw(), tracker_.getPitch(), distance);
-                drawPoint(overlay, predicted_pt, cv::Scalar(0, 255, 255), "predicted");
-            }
-
-            cv::imshow("Tracker Debug", overlay);
-            cv::waitKey(1);
+            std::lock_guard<std::mutex> lock(overlay_mutex_);
+            overlay_data_.has_result = true;
+            overlay_data_.is_lost = tracker_.isLost();
+            overlay_data_.measured_position = measured_pos;
+            overlay_data_.filter_yaw = tracker_.getYaw();
+            overlay_data_.filter_pitch = tracker_.getPitch();
+            overlay_data_.distance = distance;
         }
     }
 

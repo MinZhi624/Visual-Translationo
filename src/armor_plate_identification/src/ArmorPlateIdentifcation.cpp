@@ -3,7 +3,6 @@
 #include "armor_plate_identification/PairedLights.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
-#include "armor_plate_identification/Tracker.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -20,8 +19,6 @@ private:
     cv::Mat img_show;
     PairedLights lights;
     PoseSolver pose_solver_;
-    Tracker tracker_;
-
     // 可调参数
     int exposure_time = 300;  // 初始曝光时间（微秒）
     int gain = 20;             // 初始增益
@@ -90,10 +87,6 @@ private:
         pose_solver_ = PoseSolver(world_points_, camera_matrix_, distortion_coefficients_);
         
         // ===== 初始化Tracker ===== //
-        tracker_.setMaxLostTime(0.5);  // 最大丢失0.5秒
-        tracker_.setMutationThreshold(3.0f, 2.0f);  // yaw突变3度，pitch突变2度
-        tracker_.Init();
-        
         // 初始化时间和帧数
         frame_count_ = 0;
         current_time_ = 0.0;
@@ -168,14 +161,7 @@ private:
     {
         // 使用系统时间
         current_time_ = this->now().seconds();
-        
-        // 使用Tracker进行滤波跟踪
-        tracker_.Update(yaw_, pitch_, current_time_);
-        
-        // 获取滤波后的值
-        float tracked_yaw = tracker_.getYaw();
-        float tracked_pitch = tracker_.getPitch();
-        
+
 #ifdef DEBUG_POSE
         // 显示时间和帧数
         cv::putText(img_show, "Time: " + std::to_string(current_time_) + "s Frame: " + std::to_string(frame_count_), 
