@@ -21,19 +21,28 @@ public:
     ///  @brief 处理调试按键（1-6 选参数、T/G 调值、+/- 调播放速度）
     ///  @param key cv::waitKey 返回的按键值
     ///  @param lights 要调节的灯条匹配参数对象
-    ///  @param play_delay_ms 播放延迟（引用，可能被修改）
     ///  @param logger ROS2 日志器
     ///  @return true 表示按键已被消费
-    bool handleKey(int key, PairedLights& lights, int& play_delay_ms, const rclcpp::Logger& logger);
+    bool handleKey(int key, PairedLights& lights, const rclcpp::Logger& logger);
 
     ///  @brief 在图像左上角绘制 6 个可调参数及其当前值
-    void drawParams(cv::Mat& img, const PairedLights& lights, int x, int y, int line_h);
+    void drawParams(cv::Mat& img, const PairedLights& lights);
 
     ///  @brief 在图像上绘制帮助文字与播放延迟
     ///  @param show_speed_control 是否显示 +/- speed 提示和 Delay 数值
-    void drawDebugInfo(cv::Mat& img, int play_delay_ms, bool show_speed_control, int x, int y, int line_h);
+    void drawDebugInfo(cv::Mat& img, bool show_speed_control);
+
+    ///  @brief 获取当前播放延迟（ms）
+    int getPlayDelayMs() const { return play_delay_ms_; }
+
+    ///  @brief 手动设置播放延迟（ms）
+    void setPlayDelayMs(int ms) { play_delay_ms_ = std::max(ms, 0); }
 
 private:
     int selected_param_;
     std::vector<std::string> param_names_;
+    int play_delay_ms_ = 0;   // 播放延迟，越大越慢
+    int x_ = 10;              // 绘制起点 x
+    int y_ = 30;              // 绘制起点 y
+    int line_h_ = 25;         // 行高
 };

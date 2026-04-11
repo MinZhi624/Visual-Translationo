@@ -1,10 +1,7 @@
 #include "armor_plate_identification/PoseSolver.hpp"
 #include <opencv2/calib3d.hpp>
 
-#ifdef DEBUG_POSE
-	#include <opencv2/highgui.hpp>
-	#include <opencv2/imgproc.hpp>
-#endif
+#include <opencv2/imgproc.hpp>
 
 PoseSolver::PoseSolver()
     : world_points_(),
@@ -117,11 +114,9 @@ Eigen::Quaterniond calculateQuaternion(const cv::Mat& R)
 	return Eigen::Quaterniond(eigen_R);
 }
 
-#ifdef DEBUG_POSE
-	void PoseSolver::drawPose(cv::Mat& image)
-	{
-		// 写出yaw pitch来。
-		cv::putText(image, "yaw: " + std::to_string(yaw_), (image_points_[0] + image_points_[1]) / 2, cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 255), 2);
-		cv::putText(image, "pitch: " + std::to_string(pitch_), (image_points_[2] + image_points_[3]) / 2, cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 255), 2);
-	}
-#endif
+void PoseSolver::drawPose(cv::Mat& image)
+{
+	// 写出yaw pitch来。
+	cv::putText(image, "yaw: " + std::to_string(yaw_), (image_points_[0] + image_points_[1]) / 2, cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 255), 2);
+	cv::putText(image, "pitch: " + std::to_string(pitch_), (image_points_[2] + image_points_[3]) / 2, cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 255), 2);
+}

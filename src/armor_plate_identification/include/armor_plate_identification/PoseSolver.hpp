@@ -56,9 +56,7 @@ public:
 	float getImageDistanceToCenter() const { return image_distance_to_center_; }
 	float getYaw() const { return yaw_; }
 	float getPitch() const { return pitch_; }
-#ifdef DEBUG_POSE
 	void drawPose(cv::Mat& image);
-#endif
 };
 
 float calculateYaw(cv::Mat tvec);

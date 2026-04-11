@@ -21,7 +21,12 @@ def generate_launch_description():
     test_node = Node(
         package="armor_plate_identification",
         executable="Test",
-        arguments=[LaunchConfiguration("video_path")]
+        arguments=[LaunchConfiguration("video_path")],
+        parameters=[{
+            'debug_base': True,
+            'debug_identification': False,
+            'debug_preprocessing': False,
+        }]
     )
 
     tracker_node = Node(
@@ -30,6 +35,9 @@ def generate_launch_description():
         name='armor_plate_tracker_node',
         output='screen',
         emulate_tty=True,
+        parameters=[{
+            'debug': True,
+        }]
     )
 
     visualization_node = Node(

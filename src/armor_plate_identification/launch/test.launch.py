@@ -18,13 +18,19 @@ def generate_launch_description():
         # default_value= video_true_path2 
     )
     # 定义节点
-    Test = Node(
+    test_node = Node(
         package="armor_plate_identification",
         executable="Test",
-        arguments=[LaunchConfiguration("video_path")]
+        arguments=[LaunchConfiguration("video_path")],
+        parameters=[{
+            'debug_base': True,
+            'debug_identification': True,
+            'debug_preprocessing': False,
+            'debug_pose': True,
+        }]
     )
 
     return LaunchDescription([
         video_path_arg,
-        Test
+        test_node
     ])

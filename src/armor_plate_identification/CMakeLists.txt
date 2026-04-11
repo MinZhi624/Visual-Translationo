@@ -29,34 +29,6 @@ set( Test
   src/MyKalmanFilter.cpp
 )
 # ======================
-# 宏定义
-# ======================
-option(DEBUG_MODE "开始调试模式" OFF)
-option(DEBUG_INDENTIFICATION_MODE "识别调试模式" OFF)
-option(DEBUG_PREPROCESSING_MODE "预处理调试模式" OFF)
-option(DEBUG_POSE_MODE "PNP调试模式" ON)
-
-if(DEBUG_MODE)
-    add_compile_definitions(DEBUG_PREPROCESSING)
-    add_compile_definitions(DEBUG_INDENTIFICATION)
-    add_compile_definitions(DEBUG_BASE)
-endif()
-
-if(DEBUG_INDENTIFICATION_MODE)
-    add_compile_definitions(DEBUG_BASE)
-    add_compile_definitions(DEBUG_INDENTIFICATION)
-endif()
-
-if (DEBUG_PREPROCESSING_MODE)
-    add_compile_definitions(DEBUG_BASE)
-    add_compile_definitions(DEBUG_PREPROCESSING)
-endif()
-
-if (DEBUG_POSE_MODE)
-    add_compile_definitions(DEBUG_BASE)
-    add_compile_definitions(DEBUG_POSE)
-endif()
-# ======================
 # 依赖
 # ======================
 find_package(ament_cmake REQUIRED)
@@ -64,6 +36,8 @@ find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
 
@@ -136,6 +110,8 @@ ament_target_dependencies(
   "rclcpp"
   "OpenCV"
   "geometry_msgs"
+  "sensor_msgs"
+  "cv_bridge"
   "tf2_ros"
   "armor_plate_interfaces"
 )

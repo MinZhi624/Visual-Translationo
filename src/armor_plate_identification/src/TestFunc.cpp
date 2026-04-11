@@ -68,7 +68,7 @@ DebugParamController::DebugParamController()
       })
 {}
 
-bool DebugParamController::handleKey(int key, PairedLights& lights, int& play_delay_ms, const rclcpp::Logger& logger)
+bool DebugParamController::handleKey(int key, PairedLights& lights, const rclcpp::Logger& logger)
 {
     // 1-6：选择参数
     if (key >= '1' && key <= '6') {
@@ -108,20 +108,20 @@ bool DebugParamController::handleKey(int key, PairedLights& lights, int& play_de
 
     // +/-：速度控制
     if (key == '+' || key == '=') {
-        play_delay_ms = std::max(play_delay_ms - 10, 0);
-        RCLCPP_INFO(logger, "播放延迟: %d ms", play_delay_ms);
+        play_delay_ms_ = std::max(play_delay_ms_ - 10, 0);
+        RCLCPP_INFO(logger, "播放延迟: %d ms", play_delay_ms_);
         return true;
     }
     if (key == '-' || key == '_') {
-        play_delay_ms += 10;
-        RCLCPP_INFO(logger, "播放延迟: %d ms", play_delay_ms);
+        play_delay_ms_ += 10;
+        RCLCPP_INFO(logger, "播放延迟: %d ms", play_delay_ms_);
         return true;
     }
 
     return false;
 }
 
-void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights, int x, int y, int line_h)
+void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights)
 {
     for (int i = 0; i < 6; ++i) {
         float val = 0.0f;
@@ -136,23 +136,23 @@ void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights, 
         std::string text = param_names_[i] + ": " + std::to_string(val);
         text = text.substr(0, text.find('.') + 3);
         cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
-        cv::putText(img, text, cv::Point(x, y + i * line_h),
+        cv::putText(img, text, cv::Point(x_, y_ + i * line_h_),
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
     }
 }
 
-void DebugParamController::drawDebugInfo(cv::Mat& img, int play_delay_ms, bool show_speed_control, int x, int y, int line_h)
+void DebugParamController::drawDebugInfo(cv::Mat& img, bool show_speed_control)
 {
     if (show_speed_control) {
         cv::putText(img, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
-                    cv::Point(x, y + 6 * line_h + 10),
+                    cv::Point(x_, y_ + 6 * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-        std::string speed_text = "Delay: " + std::to_string(play_delay_ms) + " ms";
-        cv::putText(img, speed_text, cv::Point(x, y + 7 * line_h + 20),
+        std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
+        cv::putText(img, speed_text, cv::Point(x_, y_ + 7 * line_h_ + 20),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
     } else {
         cv::putText(img, "1-6:select  T/G:adj  P:pause  ESC:exit",
-                    cv::Point(x, y + 6 * line_h + 10),
+                    cv::Point(x_, y_ + 6 * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
     }
 }

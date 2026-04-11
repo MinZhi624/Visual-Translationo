@@ -23,6 +23,9 @@ private:
     float measured_yaw_;
     float measured_pitch_;
     
+    // 当前测量对应的原始位置（tvec，单位米）
+    geometry_msgs::msg::Point measured_position_;
+    
     // 时间相关
     double last_update_time_;   // 上次更新时间（秒）
     double last_detection_time_;// 上次检测到目标的时间（秒）
@@ -45,7 +48,8 @@ private:
     // 选择最佳匹配目标
     bool selectBestMatch(const std::vector<geometry_msgs::msg::Point>& positions,
                          const std::vector<float>& image_distances,
-                         float& out_yaw, float& out_pitch);
+                         float& out_yaw, float& out_pitch,
+                         geometry_msgs::msg::Point& out_position);
     
     // 检查是否突变
     bool isMutation(float measured_yaw, float measured_pitch);
@@ -89,6 +93,9 @@ public:
     // 获取原始测量值
     float getMeasuredYaw() const { return measured_yaw_; }
     float getMeasuredPitch() const { return measured_pitch_; }
+    
+    // 获取原始测量对应的tvec位置
+    geometry_msgs::msg::Point getMeasuredPosition() const { return measured_position_; }
     
     // 获取是否丢失目标
     bool isLost() const { return is_lost_; }

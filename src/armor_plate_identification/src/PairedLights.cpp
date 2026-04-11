@@ -234,7 +234,6 @@ void PairedLights::drawPairedLights(cv::Mat& img)
         }
     }
 }
-#ifdef DEBUG_INDENTIFICATION
 void PairedLights::drawAllLights(cv::Mat& img)
 {
     for (const auto& light : find_lights_) {
@@ -243,7 +242,6 @@ void PairedLights::drawAllLights(cv::Mat& img)
         cv::putText(img, "bottom", light.bottom_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
     }
 }
-#endif
 
 /////////////////// 工具函数 //////////////////////////
 

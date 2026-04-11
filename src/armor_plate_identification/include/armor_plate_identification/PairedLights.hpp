@@ -89,11 +89,10 @@ public:
 	/// @return 所有匹配好的灯条按照顺时针的顺序排列的四个点
 	std::vector<std::vector<cv::Point2f>> getPairedLightPoints() const {return paired_lights_points_;}
 
-#ifdef DEBUG_INDENTIFICATION
+///////////////////////// debug ////////////////////////////////////
 	/// @brief 测试用的，检查所有的灯条轮廓，并标记bottom还有top
 	/// @param img 要绘制的图像
 	void drawAllLights(cv::Mat& img);
-#endif
 };
 
 /// @brief 画出一个旋转矩形

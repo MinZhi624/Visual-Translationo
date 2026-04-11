@@ -98,7 +98,8 @@ void Tracker::updateTransitionMatrix(MyKalmanFilter& kf, double dt)
 // 选择最佳匹配目标
 bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& positions,
                               const std::vector<float>& image_distances,
-                              float& out_yaw, float& out_pitch)
+                              float& out_yaw, float& out_pitch,
+                              geometry_msgs::msg::Point& out_position)
 {
     if (positions.empty() || image_distances.empty() || 
         positions.size() != image_distances.size()) {
@@ -107,6 +108,7 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
     
     // 如果只有一个目标，直接选择
     if (positions.size() == 1) {
+        out_position = positions[0];
         out_yaw = calculateYaw(positions[0].x, positions[0].y, positions[0].z);
         out_pitch = calculatePitch(positions[0].x, positions[0].y, positions[0].z);
         return true;
@@ -129,6 +131,7 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
                 min_idx = i;
             }
         }
+        out_position = positions[min_idx];
         out_yaw = calculateYaw(positions[min_idx].x, positions[min_idx].y, positions[min_idx].z);
         out_pitch = calculatePitch(positions[min_idx].x, positions[min_idx].y, positions[min_idx].z);
         return true;
@@ -151,6 +154,7 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
         }
     }
     
+    out_position = positions[best_idx];
     out_yaw = calculateYaw(positions[best_idx].x, positions[best_idx].y, positions[best_idx].z);
     out_pitch = calculatePitch(positions[best_idx].x, positions[best_idx].y, positions[best_idx].z);
     return true;
@@ -242,12 +246,14 @@ void Tracker::Update(const std::vector<geometry_msgs::msg::Point>& positions,
     
     // 有检测结果，选择最佳匹配
     float target_yaw, target_pitch;
-    if (!selectBestMatch(positions, image_distances, target_yaw, target_pitch)) {
+    geometry_msgs::msg::Point target_position;
+    if (!selectBestMatch(positions, image_distances, target_yaw, target_pitch, target_position)) {
         return;
     }
     
     measured_yaw_ = target_yaw;
     measured_pitch_ = target_pitch;
+    measured_position_ = target_position;
     
     // 检查是否突变
     if (isMutation(target_yaw, target_pitch)) {
