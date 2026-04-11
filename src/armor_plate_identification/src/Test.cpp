@@ -16,7 +16,7 @@ class Test : public rclcpp::Node
 private:
     cv::VideoCapture c;
     cv::Mat img_show;
-    PairedLights lights;
+    PairedLights lights_;
 
     rclcpp::TimerBase::SharedPtr timer_;
 
@@ -41,12 +41,12 @@ private:
         // 相机初始化
         c.open(video_path);
         // 匹配参数初始化
-        lights.MAX_ANGLE_DIFF = 10.0f;
-        lights.MIN_LENGTH_RATIO = 0.5f;
-        lights.MIN_X_DIFF_RATIO = 0.75f;
-        lights.MAX_Y_DIFF_RATIO = 1.0f;
-        lights.MAX_DISTANCE_RATIO = 0.8f;
-        lights.MIN_DISTANCE_RATIO = 0.1f;
+        lights_.MAX_ANGLE_DIFF = 10.0f;
+        lights_.MIN_LENGTH_RATIO = 0.70f;
+        lights_.MIN_X_DIFF_RATIO = 0.75f;
+        lights_.MAX_Y_DIFF_RATIO = 1.0f;
+        lights_.MAX_DISTANCE_RATIO = 0.8f;
+        lights_.MIN_DISTANCE_RATIO = 0.1f;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
@@ -60,7 +60,7 @@ private:
         // 计时器 5s发布一次信息
 #ifdef DEBUG_INDENTIFICATION
         RCLCPP_INFO(this->get_logger(), "MAX_ANGLE_DIFF: %f, MAX_Y_DIFF_RATIO: %f, MIN_DISTANCE_RATIO: %f, MAX_DISTANCE_RATIO: %f, MIN_LENGTH_RATIO: %f, MIN_X_DIFF_RATIO: %f",
-        lights.MAX_ANGLE_DIFF, lights.MAX_Y_DIFF_RATIO, lights.MIN_DISTANCE_RATIO, lights.MAX_DISTANCE_RATIO, lights.MIN_LENGTH_RATIO, lights.MIN_X_DIFF_RATIO
+        lights_.MAX_ANGLE_DIFF, lights_.MAX_Y_DIFF_RATIO, lights_.MIN_DISTANCE_RATIO, lights_.MAX_DISTANCE_RATIO, lights_.MIN_LENGTH_RATIO, lights_.MIN_X_DIFF_RATIO
         );
 #endif
     }
@@ -70,8 +70,8 @@ private:
         cv::Mat img_thre = preProcessing(mask);
         
         // 直接调用 findPairedLights 完成检测和匹配
-        lights.findPairedLights(img_thre);
-        lights.drawPairedLights(img_show);
+        lights_.findPairedLights(img_thre);
+        lights_.drawPairedLights(img_show);
     
         
         // ===== 测试 ==== 
@@ -89,12 +89,12 @@ private:
         for (int i = 0; i < 6; ++i) {
             float val = 0.0f;
             switch (i) {
-                case 0: val = lights.MAX_ANGLE_DIFF; break;
-                case 1: val = lights.MAX_Y_DIFF_RATIO; break;
-                case 2: val = lights.MIN_DISTANCE_RATIO; break;
-                case 3: val = lights.MAX_DISTANCE_RATIO; break;
-                case 4: val = lights.MIN_LENGTH_RATIO; break;
-                case 5: val = lights.MIN_X_DIFF_RATIO; break;
+                case 0: val = lights_.MAX_ANGLE_DIFF; break;
+                case 1: val = lights_.MAX_Y_DIFF_RATIO; break;
+                case 2: val = lights_.MIN_DISTANCE_RATIO; break;
+                case 3: val = lights_.MAX_DISTANCE_RATIO; break;
+                case 4: val = lights_.MIN_LENGTH_RATIO; break;
+                case 5: val = lights_.MIN_X_DIFF_RATIO; break;
             }
             std::string text = param_names_[i] + ": " + std::to_string(val);
             // 保留2位小数
@@ -103,7 +103,7 @@ private:
             cv::putText(img_show, text, cv::Point(x, y + i * line_h),
                         cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
         }
-        lights.drawAllLights(img_show);
+        lights_.drawAllLights(img_show);
 #if defined(DEBUG_BASE)
         cv::putText(img_show, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
                     cv::Point(x, y + 6 * line_h + 10),
@@ -168,22 +168,22 @@ private:
             float dir = increase ? 1.0f : -1.0f;
             switch (selected_param_) {
                 case 0: // MAX_ANGLE_DIFF
-                    lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
+                    lights_.MAX_ANGLE_DIFF = std::clamp(lights_.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
                     break;
                 case 1: // MAX_Y_DIFF_RATIO
-                    lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
+                    lights_.MAX_Y_DIFF_RATIO = std::max(lights_.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
                     break;
                 case 2: // MIN_DISTANCE_RATIO
-                    lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
+                    lights_.MIN_DISTANCE_RATIO = std::max(lights_.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
                     break;
                 case 3: // MAX_DISTANCE_RATIO
-                    lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
+                    lights_.MAX_DISTANCE_RATIO = std::max(lights_.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
                     break;
                 case 4: // MIN_LENGTH_RATIO
-                    lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
+                    lights_.MIN_LENGTH_RATIO = std::clamp(lights_.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
                     break;
                 case 5: // MIN_X_DIFF_RATIO
-                    lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
+                    lights_.MIN_X_DIFF_RATIO = std::max(lights_.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
                     break;
             }
             return;
