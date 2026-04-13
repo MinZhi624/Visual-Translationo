@@ -80,7 +80,7 @@ private:
         current_time_ = 0.0;
         // ==== 匹配参数初始化 ==== //
         lights_.MAX_ANGLE_DIFF = 10.0f;
-        lights_.MIN_LENGTH_RATIO = 0.6f;
+        lights_.MIN_LENGTH_RATIO = 0.70f;
         lights_.MIN_X_DIFF_RATIO = 0.75f;
         lights_.MAX_Y_DIFF_RATIO = 1.0f;
         lights_.MAX_DISTANCE_RATIO = 0.8f;

@@ -5,7 +5,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "rclcpp/rclcpp.hpp"
-#include "armor_plate_interfaces/msg/debug_tarcker.hpp"
+#include "armor_plate_interfaces/msg/debug_tracker.hpp"
 
 class DataVisualizaiton : public rclcpp::Node
 {
@@ -19,14 +19,14 @@ public:
         yaw_plot_ = ScatterPlot(yaw_roi);
         pitch_plot_ = ScatterPlot(pitch_roi);
 
-        debug_sub_ = this->create_subscription<armor_plate_interfaces::msg::DebugTarcker>(
+        debug_sub_ = this->create_subscription<armor_plate_interfaces::msg::DebugTracker>(
             "debug_tracker",
             50,
             std::bind(&DataVisualizaiton::msgCallBack, this, std::placeholders::_1));
     }
 
 private:
-    rclcpp::Subscription<armor_plate_interfaces::msg::DebugTarcker>::SharedPtr debug_sub_;
+    rclcpp::Subscription<armor_plate_interfaces::msg::DebugTracker>::SharedPtr debug_sub_;
     ScatterPlotData observed_yaw_;
     ScatterPlotData observed_pitch_;
     ScatterPlotData filtered_yaw_;
@@ -35,11 +35,11 @@ private:
     ScatterPlot yaw_plot_;
     ScatterPlot pitch_plot_;
 
-    void msgCallBack(const armor_plate_interfaces::msg::DebugTarcker & msg)
+    void msgCallBack(const armor_plate_interfaces::msg::DebugTracker & msg)
     {
         // 处理数据
-        observed_yaw_.saveDatum(msg.orignal_yaw);
-        observed_pitch_.saveDatum(msg.orignal_pitch);
+        observed_yaw_.saveDatum(msg.measurement_yaw);
+        observed_pitch_.saveDatum(msg.measurement_pitch);
         filtered_yaw_.saveDatum(msg.filter_yaw);
         filtered_pitch_.saveDatum(msg.filter_pitch);
 

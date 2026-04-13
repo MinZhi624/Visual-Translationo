@@ -26,7 +26,8 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmorPlate.msg"
   "msg/ArmorPlates.msg"
-  "msg/DebugTarcker.msg"
+  "msg/AimCommand.msg"
+  "msg/DebugTracker.msg"
   DEPENDENCIES geometry_msgs std_msgs  
 )
 

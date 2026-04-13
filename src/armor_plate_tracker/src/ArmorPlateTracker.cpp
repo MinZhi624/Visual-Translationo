@@ -1,6 +1,7 @@
-#include "armor_plate_interfaces/msg/armor_plates.hpp"
-#include "armor_plate_interfaces/msg/debug_tarcker.hpp"
 #include "armor_plate_tracker/Tracker.hpp"
+#include "armor_plate_interfaces/msg/armor_plates.hpp"
+#include "armor_plate_interfaces/msg/aim_command.hpp"
+#include "armor_plate_interfaces/msg/debug_tracker.hpp"
 
 #include "rclcpp/rclcpp.hpp"
 
@@ -9,12 +10,9 @@
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
-
-#include <vector>
-#include <cmath>
-
 using armor_plate_interfaces::msg::ArmorPlates;
-using armor_plate_interfaces::msg::DebugTarcker;
+using armor_plate_interfaces::msg::AimCommand;
+using armor_plate_interfaces::msg::DebugTracker;
 
 struct TrackingOverlayData {
     bool has_result = false;
@@ -32,13 +30,14 @@ private:
     Tracker tracker_;
     // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr debug_image_sub_;
-    rclcpp::Publisher<DebugTarcker>::SharedPtr debug_tracker_pub_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
     // ===== DEBUG =====//
     bool debug_;
+    rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr debug_image_sub_;
     // 相机内参
     cv::Mat camera_matrix_;
     // 最新跟踪结果（用于图像叠加）
@@ -54,6 +53,8 @@ private:
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
         timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), std::bind(&ArmorPlateTracker::info, this));
+        aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
+        // ===== DEBUG ===== //
         this->declare_parameter("debug", false);
         this->get_parameter("debug", debug_);
         // ===== 装甲板跟踪器 ===== //
@@ -74,6 +75,13 @@ private:
         RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.2f, pitch = %.2f||滤波数据: yaw = %.2f, pitch = %.2f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
     }
+    void publish()
+    {
+        AimCommand aim_command;
+        aim_command.delta_pitch = tracker_.getPitch();
+        aim_command.delta_yaw = tracker_.getYaw();
+        aim_command_pub_->publish(aim_command);
+    }
 ///////// DEBUG ///////////////////
     void Debug()
     {
@@ -82,7 +90,7 @@ private:
             10,
             std::bind(&ArmorPlateTracker::DebugImageCallBack, this, std::placeholders::_1)
         );
-        debug_tracker_pub_ = this->create_publisher<DebugTarcker>("debug_tracker", 10); 
+        debug_tracker_pub_ = this->create_publisher<DebugTracker>("debug_tracker", 10); 
         camera_matrix_ = (cv::Mat_<double>(3, 3) <<
             2374.54248, 0., 698.85288,
             0., 2377.53648, 520.8649,
@@ -173,9 +181,9 @@ private:
 
         tracker_.Update(positions, image_distances, current_time);
 
-        DebugTarcker debug_msg;
-        debug_msg.orignal_yaw = tracker_.getMeasuredYaw();
-        debug_msg.orignal_pitch = tracker_.getMeasuredPitch();
+        DebugTracker debug_msg;
+        debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
+        debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
         debug_msg.filter_yaw = tracker_.getYaw();
         debug_msg.filter_pitch = tracker_.getPitch();
         debug_tracker_pub_->publish(debug_msg);
@@ -203,6 +211,7 @@ public:
     {
         RCLCPP_INFO(this->get_logger(), "Armor Plate Tracker节点创建成功！");
         init();
+        publish();
         if (debug_) {
             Debug();
         }
