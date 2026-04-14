@@ -1,13 +1,14 @@
 # 总流程(基础)
 相机获取图像 -> 对获取图片的预处理 -> 进行灯条匹配算法 -> 实现追踪功能 -> 解算 pitch 和 yaw -> 通过串口传递给电控。
-目前阶段在 获取相机获取图像 和 预处理阶段。
 
-主要由两个文件
-1. ArmorPlateIdentifcation.cpp -> 以相机为中心的核心节点
-2. Test.cpp -> 以视频来判断是否可行的
+其中分为6个功能包
+1. armor_plate_bringup 实现多节点的launch启动
+2. armor_plate_indentification 对应[相机获取图像 -> 对获取图片的预处理 -> 进行灯条匹配算法, 解算 pitch 和 yaw] 来实现对所有装甲板的匹配识别解算发送数据
+3. armor_plate_tracker 对应[实现追踪功能] 实现匹配合适的装甲板然后进行选定然后进行滤波。
+4. armor_plate_data_visualiztion 这是数据的可视化，用于查看滤波还有原始数据的情况
+5. armor_plate_interfaces 字面意思
+6. armor_plate_ serial 把tarcker得到的数据按照电控的要求进行发送。
 
-还有一个以往参考文件
-1. DetectorDriver.cpp
 # 获取图像
 ## 核心关键
 相机的参数配置
@@ -103,26 +104,25 @@ opencv中SlovePnP
 目前只在视频实现，还未在相机中使用，请参考test.cpp
 目前版本针对的是对多个装甲板追踪的功能中选择历史连续装甲板。
 如果有突变的话就是选择新的。
-## 
+# 串口传输
+## 核心计算
+采用查表法来计算crc
+通过线程分离通过Rate来实现100hz发送。
+# 参数修改
+在各个功能包文件的config文件中自行修改。
 # 使用教程
 ## 正常模式
 1. 功能包构建
-2. 启动launch文件
-	- 启动相机控制`ros2 launch armor_plate_identification run.launch.py `
-	- 启动视频控制`ros2 launch armor_plate_identification test.launch.py`
+2. 启动单独launch文件
+	- 启动相机控制`ros2 launch armor_plate_bringup run.launch.py  `
+	- 启动视频控制`ros2 launch armor_plate_bringup test.launch.py `
 ## DEBUG模式
-### 开启全部debug模式
-1. 功能包的构建
-``` bash
-colcon build --packages-select armor_plate_identification --cmake-args -DDEBUG_MODE=ON
-```
-这里如果是对应的debug模式的话，请对应的debug
-比如说
-- DEBUG_INDENTIFICATION
-- DEBUG_PREPROCESSING
+### 开启debug模式
+在launch里面修改想要的debug模式,然后改为true
+这里如果是对应的debug模式的话，请对应的debug，一定要开debug_base!
 ## 时钟不匹配
 当出现这种情况下，请输入
 ```bash
-rm -rf build/armor_plate_identification install/armor_plate_identification
-colcon build --packages-select armor_plate_identification --cmake-args -DDEBUG_MODE=ON
+rm -rf build
+colcon build
 ```
