@@ -6,9 +6,7 @@
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
-#include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
-#include "sensor_msgs/msg/image.hpp"
 #include <cv_bridge/cv_bridge.h>
 
 #include <opencv2/highgui.hpp>
@@ -169,18 +167,18 @@ private:
         for(const auto& armor_plate : armor_plates_)
         {
             // 发布姿态
-            geometry_msgs::msg::TransformStamped transformStamped;
-            transformStamped.header.stamp = stamp;
-            transformStamped.header.frame_id = "camera_link";
-            transformStamped.child_frame_id = "armor_plate_" + std::to_string(index++);
-            transformStamped.transform.translation.x = armor_plate.pose.position.x;
-            transformStamped.transform.translation.y = armor_plate.pose.position.y;
-            transformStamped.transform.translation.z = armor_plate.pose.position.z;
-            transformStamped.transform.rotation.x = armor_plate.pose.orientation.x;
-            transformStamped.transform.rotation.y = armor_plate.pose.orientation.y;
-            transformStamped.transform.rotation.z = armor_plate.pose.orientation.z;
-            transformStamped.transform.rotation.w = armor_plate.pose.orientation.w;
-            tf_broadcaster_->sendTransform(transformStamped);
+            geometry_msgs::msg::TransformStamped transform_stamped;
+            transform_stamped.header.stamp = stamp;
+            transform_stamped.header.frame_id = "camera_link";
+            transform_stamped.child_frame_id = "armor_plate_" + std::to_string(index++);
+            transform_stamped.transform.translation.x = armor_plate.pose.position.x;
+            transform_stamped.transform.translation.y = armor_plate.pose.position.y;
+            transform_stamped.transform.translation.z = armor_plate.pose.position.z;
+            transform_stamped.transform.rotation.x = armor_plate.pose.orientation.x;
+            transform_stamped.transform.rotation.y = armor_plate.pose.orientation.y;
+            transform_stamped.transform.rotation.z = armor_plate.pose.orientation.z;
+            transform_stamped.transform.rotation.w = armor_plate.pose.orientation.w;
+            tf_broadcaster_->sendTransform(transform_stamped);
         }
         // 发布灯条信息
         ArmorPlates armor_plates_msg;

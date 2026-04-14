@@ -16,6 +16,7 @@ cv::Mat findTargetColor(cv::Mat& img, std::string target_color)
 		cv::split(img, channels);
 		return channels[2] - channels[0];
 	}
+	return 	cv::Mat(); // 返回空矩阵表示错误的颜色参数
 }
 
 cv::Mat preProcessing(cv::Mat& img)

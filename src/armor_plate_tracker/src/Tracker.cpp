@@ -306,14 +306,14 @@ float Tracker::calculateYaw(float tx, float ty, float tz)
 {
     // yaw: 左正右负（与atan2(tx, tz)的符号相反）
     (void)ty;
-    return -static_cast<float>(std::atan2(tx, tz) * 180.0 / M_PI);
+    return -static_cast<float>(std::atan2(tx, tz));
 }
 
 float Tracker::calculatePitch(float tx, float ty, float tz)
 {
     (void)tx;
     double horizontal_dist = std::sqrt(static_cast<double>(tx) * tx + static_cast<double>(tz) * tz);
-    return static_cast<float>(std::atan2(-ty, horizontal_dist) * 180.0 / M_PI);
+    return static_cast<float>(std::atan2(-ty, horizontal_dist));
 }
 
 float Tracker::calculateDistance(float tx, float ty, float tz)

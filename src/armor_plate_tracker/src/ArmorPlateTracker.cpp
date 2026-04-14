@@ -78,7 +78,7 @@ private:
         aim_command.delta_yaw = tracker_.getYaw();
         aim_command_pub_->publish(aim_command);
     }
-///////// DEBUG ///////////////////
+    ///////// DEBUG ///////////////////
     void Debug()
     {
         debug_image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
@@ -186,14 +186,15 @@ private:
         }
 
         tracker_.Update(positions, image_distances, current_time);
-
+        
+        ///////// DEBUG ////////////////////////
         if (debug_) {
             DebugTracker debug_msg;
             debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
             debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
             debug_msg.filter_yaw = tracker_.getYaw();
             debug_msg.filter_pitch = tracker_.getPitch();
-            if (debug_tracker_pub_) {
+            if (debug_tracker_pub_ && debug_tracker_pub_) {
                 debug_tracker_pub_->publish(debug_msg);
             }
         }
@@ -216,17 +217,18 @@ private:
             overlay_data_.filter_pitch = tracker_.getPitch();
             overlay_data_.distance = distance;
         }
+
+        publish();
     }
 
 public:
     ArmorPlateTracker() : Node("armor_plate_tracker_node_cpp")
     {
         RCLCPP_INFO(this->get_logger(), "Armor Plate Tracker节点创建成功！");
-        init();
-        publish();
         if (debug_) {
             Debug();
         }
+        init();
     }
 };
 

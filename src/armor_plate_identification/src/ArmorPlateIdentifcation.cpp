@@ -17,7 +17,6 @@
 #include <cmath>
 
 #include "tf2_ros/transform_broadcaster.hpp"
-#include "sensor_msgs/msg/image.hpp"
 #include <cv_bridge/cv_bridge.h>
 
 using armor_plate_interfaces::msg::ArmorPlate;
