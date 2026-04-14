@@ -48,7 +48,6 @@ private:
     bool debug_identification_ = false;
     bool debug_preprocessing_ = false;
     bool debug_pose_ = false;
-
     DebugParamController debug_controller_;
 
     void init(const std::string& video_path)

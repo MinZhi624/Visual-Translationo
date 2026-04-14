@@ -9,14 +9,8 @@ endif()
 # 查找依赖包
 # ========================================
 find_package(ament_cmake REQUIRED)
-
-# 接口生成依赖
 find_package(rosidl_default_generators REQUIRED)
-
-# geometry_msgs 是 ArmorPlate.msg 的依赖（包含 Pose 消息类型）
 find_package(geometry_msgs REQUIRED)
-
-# std_msgs 是 ArmorPlates.msg 的依赖（包含 Header 消息类型）
 find_package(std_msgs REQUIRED)
 
 # ========================================

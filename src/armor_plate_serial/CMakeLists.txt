@@ -21,16 +21,16 @@ ament_target_dependencies(serial_node
   armor_plate_interfaces
   serial_driver
 )
-#############
-# include
-#############
+# ======================
+# include 路径
+# ======================
 target_include_directories(serial_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-#############
+# ======================
 # 安装
-#############
+# ======================
 install(TARGETS 
   serial_node
   DESTINATION lib/${PROJECT_NAME}

@@ -34,23 +34,29 @@ private:
     rclcpp::Rate rate(100);  // 100 Hz
     while (running_.load() && rclcpp::ok()) {
       if (has_target_.load()) {
+        // 数据获取
+        has_target_.store(false);
         float yaw = latest_yaw_.load();
         float pitch = latest_pitch_.load();
+        // 数据打包
         VisionToEcFrame_t frame;
         frame.sof1 = 0xA5;
         frame.sof2 = 0x5A;
         frame.delta_yaw_1e4rad = static_cast<int16_t>(yaw * 10000.0f);
         frame.delta_pitch_1e4rad = static_cast<int16_t>(pitch * 10000.0f);
         frame.crc16 = crc16_modbus(reinterpret_cast<uint8_t *>(&frame), 6);
-
+        // 数据发送
         std::vector<uint8_t> data(
           reinterpret_cast<uint8_t *>(&frame),
           reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
         try {
           serial_driver_->port()->send(data);
         } catch (const std::exception & e) {
-          RCLCPP_ERROR(this->get_logger(), "Send error: %s", e.what());
+          RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
         }
+        RCLCPP_INFO(this->get_logger(), "发送数据: yaw=%f, pitch=%f", yaw, pitch);
+      } else {
+        RCLCPP_INFO(this->get_logger(), "没有目标");
       }
       rate.sleep();
     }
@@ -95,6 +101,7 @@ public:
   ~SerialDriver()
   {
     running_.store(false);
+    // 依赖关系 send_thread_ -> serial_driver_ -> owned_ctx_
     if (send_thread_.joinable()) {
       send_thread_.join();
     }
@@ -105,6 +112,7 @@ public:
       owned_ctx_->waitForExit();
     }
   }
+  
 };
 
 int main(int argc, char ** argv)
