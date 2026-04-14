@@ -15,6 +15,11 @@ def generate_launch_description():
         'config',
         'params.yaml'
     )
+    serial_node_params_file = os.path.join(
+        get_package_share_directory('armor_plate_serial'),
+        'config',
+        'params.yaml'
+    )
 
     identification_node = Node(
         package='armor_plate_identification',
@@ -41,11 +46,13 @@ def generate_launch_description():
         emulate_tty=True
     )
 
-    serial_node = Node( package='armor_plate_serial',
+    serial_node = Node(
+        package='armor_plate_serial',
         executable='serial_node',
         name='armor_plate_serial_node',
         output='screen',
-        emulate_tty=True
+        emulate_tty=True,
+        parameters=[serial_node_params_file]
     )
 
     return LaunchDescription([

@@ -40,7 +40,7 @@ install(DIRECTORY
   DESTINATION include/${PROJECT_NAME}
 )
 install(DIRECTORY 
-  launch
+  launch config
   DESTINATION share/${PROJECT_NAME}
 )
 
