@@ -1,20 +1,32 @@
 ﻿#include "armor_plate_identification/PairedLights.hpp"
-#include "armor_plate_identification/DrawTarget.hpp"
 #include <opencv2/imgproc.hpp>
 
 #ifdef DEBUG_INDENTIFICATION
     #include <iostream>
+    #include <rclcpp/rclcpp.hpp>
 #endif
-#include <rclcpp/rclcpp.hpp>
-    
+
+
+/////////////////////// Lights /////////////////////////////// 
 Lights::Lights() :
     center_(0, 0), top_(0, 0), bottom_(0, 0),
     angle_(0), length_(0), width_(0), area_(0),
     is_paired_(false), id_(-1)
 {}
 
+////////////////////// PairedLights /////////////////////////
+void PairedLights::init()
+{
+    find_lights_.clear();
+    paired_lights_.clear();
+    paired_lights_points_.clear();
+    num_lights_ = 0;
+}
+
 void PairedLights::findPairedLights(cv::Mat& img_thre)
 {
+    // 初始化（重置）参数
+    init();
     // 找到灯条然后拟合成直线
     std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre);
     find_lights_ = findLightLines(valued_contours);
@@ -24,10 +36,14 @@ void PairedLights::findPairedLights(cv::Mat& img_thre)
     });
     // 匹配灯条
     paired_lights_ = matchLights(find_lights_);
+    // 将匹配好的装甲板4个点存储下来
+    for (auto& lights : paired_lights_) {
+        std::vector<cv::Point2f> points = {lights[0].top_, lights[1].top_, lights[1].bottom_, lights[0].bottom_};
+        paired_lights_points_.push_back(points);
+    }
     // 更新灯条数量
     num_lights_ = paired_lights_.size();
 }
-
 std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& img_thre)
 {
     std::vector<std::vector<cv::Point>> contours;
@@ -55,17 +71,19 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
     // 1. 用椭圆拟合得到准确的方向
     // 2. 用 minAreaRect 的边界限制端点，防止超出轮廓
     for (auto & contour : contours) {
-        // 1. 椭圆拟合提供准确方向，并规范化
+        // 1. 椭圆拟合提供准确方向
         cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
         // 2. minAreaRect 提供边长边界约束
         cv::RotatedRect min_rect = cv::minAreaRect(contour);
         // 3. 用规范化后的椭圆角度计算中轴线单位方向向量
         double angle_rad = (ellipse_rect.angle + 90) * CV_PI / 180.0f;
         cv::Point2f dir = cv::Point2f(cos(angle_rad), sin(angle_rad));
-        if (abs(dir.y) > 0.5f) 
+        if (abs(dir.y) > 0.8f) {
             if (dir.y > 0) dir  = -dir;
-        else 
-            if(dir.x > 0) dir = -dir;
+        }
+        else if(dir.x < 0) {
+            dir = -dir;
+        }
         // 这里采用点是为了方便计算
         double len = cv::norm(dir);
         if (len < 1e-6) continue;
@@ -91,6 +109,7 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
     }
     return lights_list;
 }
+
 bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
     float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
@@ -168,7 +187,6 @@ float PairedLights::computePairScore(const Lights& light_left, const Lights& lig
 
     return angle_score + length_ratio + dist_score;
 }
-
 std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>& all_lights)
 {
     struct Candidate {
@@ -177,7 +195,6 @@ std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>
         int idx2;
         float score;
     };
-
     std::vector<Candidate> candidates;
     for (size_t i = 0; i < all_lights.size(); i++) {
         for (size_t j = i + 1; j < all_lights.size(); j++) {
@@ -187,16 +204,13 @@ std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>
             }
         }
     }
-
     // 按 score 降序排序，优先保留"最像装甲板"的配对
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
         return a.score > b.score;
     });
-
     // NMS 去重：一个灯条只能属于一个装甲板
     std::vector<std::array<Lights, 2>> paired_lights;
     std::vector<bool> used(all_lights.size(), false);
-
     for (const auto& c : candidates) {
         if (!used[c.idx1] && !used[c.idx2]) {
             paired_lights.push_back(c.pair);
@@ -205,6 +219,20 @@ std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>
         }
     }
     return paired_lights;
+}
+
+void PairedLights::drawPairedLights(cv::Mat& img)
+{
+    for (const auto& points : paired_lights_points_) {
+        
+        for (int i = 0; i < 4; i++) {
+            // 画出点
+            cv::circle(img, points[i], 3, cv::Scalar(0, 255, 0), -1);
+            cv::putText(img, std::to_string(i), points[i], cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(255, 0, 255));
+            // 画出线条
+            cv::line(img, points[i], points[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
+        }
+    }
 }
 void PairedLights::drawAllLights(cv::Mat& img)
 {
@@ -215,28 +243,21 @@ void PairedLights::drawAllLights(cv::Mat& img)
     }
 }
 
-void PairedLights::drawPairedLights(cv::Mat& img)
+/////////////////// 工具函数 //////////////////////////
+
+void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness)
 {
-    for (const auto& pair_lights : paired_lights_) {
-        // 这个是画出角点
-        cv::circle(img, pair_lights[0].top_, 2, cv::Scalar(255, 0, 255), -1);
-        cv::circle(img, pair_lights[0].bottom_, 2, cv::Scalar(255, 0, 255), -1);
-        cv::circle(img, pair_lights[1].top_, 2, cv::Scalar(255, 0, 255), -1);
-        cv::circle(img, pair_lights[1].bottom_, 2, cv::Scalar(255, 0, 255), -1);
-        // 画出灯条
-        cv::line(img, pair_lights[0].top_, pair_lights[0].bottom_, cv::Scalar(255, 0, 255), 1);
-        cv::line(img, pair_lights[1].top_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 1);
-        cv::line(img, pair_lights[0].top_, pair_lights[1].top_, cv::Scalar(255, 0, 255), 1);
-        cv::line(img, pair_lights[0].bottom_, pair_lights[1].bottom_, cv::Scalar(255, 0, 255), 1);
+    cv::Point2f vertices[4];
+    rect.points(vertices);
+    for (int i = 0; i < 4; i++) {
+        cv::line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
     }
 }
 
-std::vector<std::vector<cv::Point2f>> PairedLights::getPairedLightPoints() const
+void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color, int thickness)
 {
-    std::vector<std::vector<cv::Point2f>> paired_points;
-    for (const auto& pair_lights : paired_lights_) {
-        std::vector<cv::Point2f> points = { pair_lights[0].top_, pair_lights[0].bottom_, pair_lights[1].top_, pair_lights[1].bottom_ };
-        paired_points.push_back(points);
-    }
-    return paired_points;
+    cv::line(img, p1, p2, color, thickness);
+    cv::line(img, p2, p3, color, thickness);
+    cv::line(img, p3, p4, color, thickness);
+    cv::line(img, p4, p1, color, thickness);
 }

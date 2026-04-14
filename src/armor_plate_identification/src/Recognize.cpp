@@ -2,18 +2,27 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-cv::Mat findTargetColor(cv::Mat& img)
+cv::Mat findTargetColor(cv::Mat& img, std::string target_color)
 {
-	// Blue - Red
-	cv::Mat channels[3];
-	cv::split(img, channels);
-	return channels[0] - channels[2];
+	if (target_color == "BLUE") {
+		// Blue - Red
+		cv::Mat channels[3];
+		cv::split(img, channels);
+		return channels[0] - channels[2];
+	}
+	else if (target_color == "RED") {
+		// Red - Blue
+		cv::Mat channels[3];
+		cv::split(img, channels);
+		return channels[2] - channels[0];
+	}
 }
 
 cv::Mat preProcessing(cv::Mat& img)
 {
 	// 通过大津法二值化
 	cv::Mat img_thre;
+	//cv::threshold(img, img_thre, 20, 255, cv::THRESH_BINARY);
 	cv::threshold(img, img_thre, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
 	
 	// 先不用

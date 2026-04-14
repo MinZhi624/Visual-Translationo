@@ -1,0 +1,6 @@
+armor_plate_tracker_node:
+  ros__parameters:
+    max_lost_time: 0.5
+    mutation_yaw_threshold: 3.0
+    mutation_pitch_threshold: 2.0
+    debug: true

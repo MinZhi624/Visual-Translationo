@@ -11,10 +11,8 @@ endif()
 set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
   src/CameraDriver.cpp
-  src/SolvePnP.cpp
+  src/PoseSolver.cpp
   src/Recognize.cpp
-  src/MyKalmanFilter.cpp
-  src/DrawTarget.cpp
   src/PairedLights.cpp
   src/TestFunc.cpp
   src/Tracker.cpp
@@ -24,35 +22,12 @@ set( Test
   src/Test.cpp
   src/TestFunc.cpp
   src/CameraDriver.cpp
-  src/SolvePnP.cpp
+  src/PoseSolver.cpp
   src/Recognize.cpp
-  src/MyKalmanFilter.cpp
-  src/DrawTarget.cpp
   src/PairedLights.cpp
   src/Tracker.cpp
   src/MyKalmanFilter.cpp
 )
-# ======================
-# 宏定义
-# ======================
-option(DEBUG_MODE "开始调试模式" OFF)
-option(DEBUG_INDENTIFICATION_MODE "识别调试模式" OFF)
-option(DEBUG_PREPROCESSING_MODE "预处理调试模式" OFF)
-
-if(DEBUG_MODE)
-    add_compile_definitions(DEBUG_PREPROCESSING)
-    add_compile_definitions(DEBUG_INDENTIFICATION)
-    add_compile_definitions(DEBUG_BASE)
-endif()
-
-if(DEBUG_INDENTIFICATION_MODE)
-    add_compile_definitions(DEBUG_BASE)
-    add_compile_definitions(DEBUG_INDENTIFICATION)
-endif()
-if (DEBUG_PREPROCESSING_MODE)
-    add_compile_definitions(DEBUG_BASE)
-    add_compile_definitions(DEBUG_PREPROCESSING)
-endif()
 # ======================
 # 依赖
 # ======================
@@ -60,6 +35,11 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(armor_plate_interfaces REQUIRED)
 
 # ======================
 # 相机 SDK 路径
@@ -102,6 +82,7 @@ ${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
 target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(Test PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 # ======================
 # 链接库
 # ======================
@@ -120,11 +101,21 @@ ament_target_dependencies(
   ArmorPlateIdentifcation
   "rclcpp"
   "OpenCV"
+  "geometry_msgs"
+  "sensor_msgs"
+  "cv_bridge"
+  "tf2_ros"
+  "armor_plate_interfaces"
 )
 ament_target_dependencies(
   Test
   "rclcpp"
   "OpenCV"
+  "geometry_msgs"
+  "sensor_msgs"
+  "cv_bridge"
+  "tf2_ros"
+  "armor_plate_interfaces"
 )
   
 # ======================
@@ -139,7 +130,7 @@ install(DIRECTORY
   DESTINATION include/${PROJECT_NAME}
 )
 install(DIRECTORY
-  video launch
+  config video launch
   DESTINATION share/${PROJECT_NAME}
 )
 

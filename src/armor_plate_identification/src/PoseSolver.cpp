@@ -1,10 +1,7 @@
 #include "armor_plate_identification/PoseSolver.hpp"
 #include <opencv2/calib3d.hpp>
 
-#ifdef DEBUG_POSE
-	#include <opencv2/highgui.hpp>
-	#include <opencv2/imgproc.hpp>
-#endif
+#include <opencv2/imgproc.hpp>
 
 PoseSolver::PoseSolver()
     : world_points_(),
@@ -47,59 +44,28 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
 }
 void PoseSolver::solve(const std::vector<cv::Point2f>& camera_points)
 {
-	cv::solvePnP(world_points_, camera_points, camera_matrix_, distortion_coefficients_, rvec_, tvec_, false, cv::SOLVEPNP_SQPNP);
+	cv::solvePnP(world_points_, camera_points, camera_matrix_, distortion_coefficients_, rvec_, tvec_, false, cv::SOLVEPNP_IPPE);
 	cv::Mat r_matrix;
 	cv::Rodrigues(rvec_, r_matrix);
 	image_points_ = camera_points;
 	r_matrix_= r_matrix;
-	yaw_ = calculateYaw(tvec_);
-	pitch_ = calculatePitch(tvec_);
-	distance_ = calculateDistance(tvec_);
+	q_ = calculateQuaternion(r_matrix);
+	cv::Point2f target_center_point = (camera_points[0] + camera_points[1] + camera_points[2] + camera_points[3])  / 4;
+	image_distance_to_center_ = calculateImageDistanceToCenter(target_center_point);
 }
-
-cv::Point2f PoseSolver::reprojection(cv::Point3f point3D)
+float PoseSolver::calculateImageDistanceToCenter(cv::Point2f target_center_point)
 {
-	// 创建3D点矩阵
-	cv::Mat point_mat = (cv::Mat_<double>(3, 1) <<
-		point3D.x, point3D.y, point3D.z);
-	// 投影（齐次坐标）
-	cv::Mat pixel_homogeneous = camera_matrix_ * point_mat;
-	// 归一化（齐次坐标除以z）
-	double z = pixel_homogeneous.at<double>(2);
-	double u = pixel_homogeneous.at<double>(0) / z;
-	double v = pixel_homogeneous.at<double>(1) / z;
-	return cv::Point2f(u, v);
+	// 计算图像中心到目标中心的距离，通过相机内参来求
+	double cx = camera_matrix_.at<double>(0, 2);
+	double cy = camera_matrix_.at<double>(1, 2);
+	cv::Point2f image_center_point(cx, cy);
+	return cv::norm(image_center_point - target_center_point);
 }
-float calculateYaw(cv::Mat tvec)
+Eigen::Quaterniond calculateQuaternion(const cv::Mat& R)
 {
-	// 双向量法：水平瞄准角误差
-	// tvec = [tx, ty, tz] 是装甲板中心在相机坐标系中的位置
-	// yaw = atan2(tx, tz)：水平面内的方位角（左右偏差）
-	double tx = tvec.at<double>(0);
-	double tz = tvec.at<double>(2);
-	return static_cast<float>(std::atan2(tx, tz) * 180.0 / CV_PI);
+	Eigen::Matrix3d eigen_R;
+	eigen_R << R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2),
+	           R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2),
+	           R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2);
+	return Eigen::Quaterniond(eigen_R);
 }
-float calculatePitch(cv::Mat tvec)
-{
-	// 双向量法：垂直瞄准角误差
-	// pitch = atan2(-ty, sqrt(tx^2 + tz^2))：与水平面的夹角（上下偏差）
-	double tx = tvec.at<double>(0);
-	double ty = tvec.at<double>(1);
-	double tz = tvec.at<double>(2);
-	double horizontal_dist = std::sqrt(tx * tx + tz * tz);
-	return static_cast<float>(std::atan2(-ty, horizontal_dist) * 180.0 / CV_PI);
-}
-float calculateDistance(cv::Mat tvec)
-{
-	// 到目标的直线距离
-	return static_cast<float>(cv::norm(tvec));
-}
-
-#ifdef DEBUG_POSE
-	void PoseSolver::drawPose(cv::Mat& image)
-	{
-		// 写出yaw pitch来。
-		cv::putText(image, "yaw: " + std::to_string(yaw_), (image_points_[0] + image_points_[1]) / 2, cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 255), 2);
-		cv::putText(image, "pitch: " + std::to_string(pitch_), (image_points_[2] + image_points_[3]) / 2, cv::FONT_HERSHEY_PLAIN, 1.5, cv::Scalar(0, 255, 255), 2);
-	}
-#endif
