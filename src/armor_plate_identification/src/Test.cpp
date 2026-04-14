@@ -27,39 +27,30 @@ private:
     cv::VideoCapture c_;
     cv::Mat img_show_;
     // 灯条匹配相关
+    std::string target_color_; // "RED" 或 "BLUE"
     PairedLights lights_;
     PoseSolver pose_solver_;
     // PoseSolver结果
     std::vector<ArmorPlate> armor_plates_;
-    std::vector<float> yaw_;
-    std::vector<float> pitch_;
     // 发布者
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    // 处理用时（毫秒）
+    float process_time_ms_ = 0.0f;
     // 时间和帧数
     rclcpp::TimerBase::SharedPtr timer_;
-    double fps_;
-    int frame_count_;           // 当前帧数->用于每秒多少fps
-    double current_time_;       // 当前时间（秒）= frame_count_ / fps_
-
     // ROS 参数控制 debug 开关
     bool debug_base_ = false;
     bool debug_identification_ = false;
     bool debug_preprocessing_ = false;
-    bool debug_pose_ = false;
     DebugParamController debug_controller_;
 
     void init(const std::string& video_path)
     {
         // ==== 读取 ROS 参数 ==== //
-        this->declare_parameter("debug_base", false);
-        this->declare_parameter("debug_identification", false);
-        this->declare_parameter("debug_preprocessing", false);
-        this->get_parameter("debug_base", debug_base_);
-        this->get_parameter("debug_identification", debug_identification_);
-        this->get_parameter("debug_preprocessing", debug_preprocessing_);
-        // ==== 相机初始化 ==== //
+        target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
+        // ===== 相机初始化 ==== //
         c_.open(video_path);
         if (!c_.isOpened()) {
             RCLCPP_ERROR(this->get_logger(), "无法打开视频: %s", video_path.c_str());
@@ -67,23 +58,19 @@ private:
             return;
         }
         // 获取视频FPS
-        fps_ = c_.get(cv::CAP_PROP_FPS);
-        if (fps_ <= 0) {
-            fps_ = 50.0;  // 默认50fps
-            RCLCPP_WARN(this->get_logger(), "无法获取视频FPS，使用默认值: %.1f", fps_);
+        double fps = c_.get(cv::CAP_PROP_FPS);
+        if (fps <= 0) {
+            RCLCPP_WARN(this->get_logger(), "无法获取视频FPS，使用默认值: 50.0");
         } else {
-            RCLCPP_INFO(this->get_logger(), "视频FPS: %.2f", fps_);
+            RCLCPP_INFO(this->get_logger(), "视频FPS: %.2f", fps);
         }
-        // 初始化时间和帧数
-        frame_count_ = 0;
-        current_time_ = 0.0;
-        // ==== 匹配参数初始化 ==== //
-        lights_.MAX_ANGLE_DIFF = 10.0f;
-        lights_.MIN_LENGTH_RATIO = 0.70f;
-        lights_.MIN_X_DIFF_RATIO = 0.75f;
-        lights_.MAX_Y_DIFF_RATIO = 1.0f;
-        lights_.MAX_DISTANCE_RATIO = 0.8f;
-        lights_.MIN_DISTANCE_RATIO = 0.1f;
+        // ==== 匹配参数初始化（ROS参数化） ==== //
+        lights_.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
+        lights_.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.70));
+        lights_.MIN_X_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
+        lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
+        lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
+        lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
         // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
@@ -105,16 +92,15 @@ private:
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-        // ===== DEBUG信息 ===== //
-        if (debug_identification_) {
-            RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
-        }
-        if (debug_preprocessing_) {
-            RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
-        }
-        if (debug_pose_) {
-            RCLCPP_INFO(this->get_logger(), "姿态估计DEBUG模式开启");
-        }
+        // ===== DEBUG ===== //
+        debug_base_ = this->declare_parameter<bool>("debug_base", false);
+        debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
+        debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
+        
+        if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
+        if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
+        if (debug_identification_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
+        if (debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
     }
     void info()
     {
@@ -127,13 +113,13 @@ private:
     }
     void Identification(cv::Mat& image)
     {
-        cv::Mat mask = findTargetColor(image);
+        cv::Mat mask = findTargetColor(image, target_color_);
         cv::Mat img_thre = preProcessing(mask);
         
         // 直接调用 findPairedLights 完成检测和匹配
         lights_.findPairedLights(img_thre);
         lights_.drawPairedLights(img_show_);
-        
+////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
             // 预处理四图拼接显示
             // 绘制目标区域
@@ -144,21 +130,17 @@ private:
             showMultiImages("PreProcessions-View", images, labels);
         }
         if (debug_identification_) {
-            debug_controller_.drawParams(img_show_, lights_);
+            debug_controller_.drawParams(img_show_, lights_, process_time_ms_);
             lights_.drawAllLights(img_show_);
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
     }
     void SolvePose()
     {
-        std::vector<float> yaw;
-        std::vector<float> pitch;
         std::vector<ArmorPlate> armor_plates;
         // 每一个匹配好的灯条解算
         for (const auto& points : lights_.getPairedLightPoints()) {
             pose_solver_.solve(points);
-            yaw.push_back(pose_solver_.getYaw());
-            pitch.push_back(pose_solver_.getPitch());
             // 存储解算结果
             ArmorPlate armor_plate;
             cv::Mat tvec = pose_solver_.getTvec();
@@ -176,22 +158,13 @@ private:
             armor_plate.pose = pose;
             armor_plate.image_distance_to_center = image_distance;
             armor_plates.push_back(armor_plate);
-            if (debug_pose_) {
-                pose_solver_.drawPose(img_show_);            
-            }
         }
-        yaw_ = yaw;
-        pitch_ = pitch;
         armor_plates_ = armor_plates;
     }
     void Publish()
     {
         int index = 0;
-        // 使用视频的模拟时间（frame_count / fps）作为消息时间戳
-        double sim_time = frame_count_ / fps_;
-        builtin_interfaces::msg::Time stamp;
-        stamp.sec = static_cast<int32_t>(sim_time);
-        stamp.nanosec = static_cast<uint32_t>((sim_time - stamp.sec) * 1e9);
+        builtin_interfaces::msg::Time stamp = this->now();
 
         for(const auto& armor_plate : armor_plates_)
         {
@@ -215,7 +188,8 @@ private:
         armor_plates_msg.header.frame_id = "camera_link";
         armor_plates_msg.armor_plates = armor_plates_;  // 直接拷贝赋值
         armor_plates_pub_->publish(armor_plates_msg);
-        
+
+////////////////////// DEUBG ////////////////////////
         // 发布调试图像
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
             auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", img_show_);
@@ -264,9 +238,11 @@ public:
             }
             if (!rclcpp::ok()) return;
             
-            // 更新帧数
-            frame_count_++;
             img_show_ = frame.clone();
+            
+            // 开始计时
+            auto t_start = std::chrono::steady_clock::now();
+            
             // 图像处理
             Identification(frame);
             // 解算
@@ -280,6 +256,12 @@ public:
             rclcpp::spin_some(this->get_node_base_interface());
             // 发布数据
             Publish();
+            
+            // 结束计时
+            auto t_end = std::chrono::steady_clock::now();
+            process_time_ms_ = static_cast<float>(
+                std::chrono::duration<double, std::milli>(t_end - t_start).count());
+            
             // 控制速度
             if (debug_base_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));

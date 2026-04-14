@@ -4,6 +4,17 @@
 #include <vector>
 #include <cmath>
 
+struct TrackingOverlayData {
+    bool has_result = false;
+    bool is_lost = false;
+    geometry_msgs::msg::Point measured_position;
+    float measured_yaw = 0.0f;
+    float measured_pitch = 0.0f;
+    float filter_yaw = 0.0f;
+    float filter_pitch = 0.0f;
+    float distance = 0.0f;
+};
+
 class Tracker
 {
 private:

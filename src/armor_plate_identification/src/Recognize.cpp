@@ -2,12 +2,20 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
-cv::Mat findTargetColor(cv::Mat& img)
+cv::Mat findTargetColor(cv::Mat& img, std::string target_color)
 {
-	// Blue - Red
-	cv::Mat channels[3];
-	cv::split(img, channels);
-	return channels[0] - channels[2];
+	if (target_color == "BLUE") {
+		// Blue - Red
+		cv::Mat channels[3];
+		cv::split(img, channels);
+		return channels[0] - channels[2];
+	}
+	else if (target_color == "RED") {
+		// Red - Blue
+		cv::Mat channels[3];
+		cv::split(img, channels);
+		return channels[2] - channels[0];
+	}
 }
 
 cv::Mat preProcessing(cv::Mat& img)

@@ -3,8 +3,9 @@
 
 /// @brief 查找目标颜色，对图像进行颜色分割
 /// @param img 待识别的图像
+/// @param target_color 目标颜色, "RED" 或 "BLUE"
 /// @return 目标颜色的图像
-cv::Mat findTargetColor(cv::Mat& img);
+cv::Mat findTargetColor(cv::Mat& img, std::string target_color);
 
 /// @brief 图像预处理
 /// @param img 颜色查找好后的图像

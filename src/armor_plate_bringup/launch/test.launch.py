@@ -3,6 +3,7 @@ from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from ament_index_python import get_package_share_directory
+import os
 
 
 def generate_launch_description():
@@ -17,16 +18,19 @@ def generate_launch_description():
         # default_value= video_true_path1 
         # default_value= video_true_path2 
     )
+
+    params_file = os.path.join(
+        get_package_share_directory('armor_plate_identification'),
+        'config',
+        'params.yaml'
+    )
+
     # 定义节点
     test_node = Node(
         package="armor_plate_identification",
         executable="Test",
         arguments=[LaunchConfiguration("video_path")],
-        parameters=[{
-            'debug_base': True,
-            'debug_identification': False,
-            'debug_preprocessing': False,
-        }]
+        parameters=[params_file]
     )
 
     tracker_node = Node(
@@ -52,5 +56,5 @@ def generate_launch_description():
         # 定义参数
         video_path_arg,
         # 启动节点
-        test_node,tracker_node,visualization_node,
+        test_node, tracker_node, visualization_node,
     ])

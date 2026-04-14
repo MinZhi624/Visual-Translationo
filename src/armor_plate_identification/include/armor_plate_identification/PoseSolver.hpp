@@ -17,9 +17,6 @@ private:
 	cv::Mat tvec_;
 	cv::Mat r_matrix_;
 	Eigen::Quaterniond q_;
-	float yaw_;			
-	float pitch_;		
-	float distance_;
 	float image_distance_to_center_;
 public:
 	
@@ -46,20 +43,19 @@ public:
 	/// @brief 初始化卡尔曼滤波器，恢复到初始状态
 	void initKF();
 	
+	/// @brief 计算图像中心到目标中心的距离（像素）
+	/// @param target_center_point 图像中目标中心点坐标
+	/// @return 距离（像素）
 	float calculateImageDistanceToCenter(cv::Point2f target_center_point);
 
 	cv::Mat getTvec() const { return tvec_; };
 	cv::Mat getRvec() const { return rvec_; };
 	cv::Mat getRMatrix() const { return r_matrix_; };
 	Eigen::Quaterniond getQuaternion() const { return q_; };
-	float getDistance() const { return distance_; };
 	float getImageDistanceToCenter() const { return image_distance_to_center_; }
-	float getYaw() const { return yaw_; }
-	float getPitch() const { return pitch_; }
-	void drawPose(cv::Mat& image);
 };
 
-float calculateYaw(cv::Mat tvec);
-float calculatePitch(cv::Mat tvec);
-float calculateDistance(cv::Mat tvec);
+/// @brief 将CV::MAT旋转矩阵转换为EIGEN中四元数
+/// @param R cv类型的旋转矩阵
+/// @return eigen类型的四元数
 Eigen::Quaterniond calculateQuaternion(const cv::Mat& R);

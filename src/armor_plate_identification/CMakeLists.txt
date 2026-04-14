@@ -98,6 +98,8 @@ ament_target_dependencies(
   "rclcpp"
   "OpenCV"
   "geometry_msgs"
+  "sensor_msgs"
+  "cv_bridge"
   "tf2_ros"
   "armor_plate_interfaces"
 )
@@ -124,7 +126,7 @@ install(DIRECTORY
   DESTINATION include/${PROJECT_NAME}
 )
 install(DIRECTORY
-  video launch
+  config video launch
   DESTINATION share/${PROJECT_NAME}
 )
 

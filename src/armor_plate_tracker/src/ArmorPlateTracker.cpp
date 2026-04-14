@@ -14,20 +14,14 @@ using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
 using armor_plate_interfaces::msg::DebugTracker;
 
-struct TrackingOverlayData {
-    bool has_result = false;
-    bool is_lost = false;
-    geometry_msgs::msg::Point measured_position;
-    float filter_yaw = 0.0f;
-    float filter_pitch = 0.0f;
-    float distance = 0.0f;
-};
-
 class ArmorPlateTracker : public rclcpp::Node
 {
 private:
     // ===== 装甲板跟踪器  ===== //
     Tracker tracker_;
+    double max_lost_time_;
+    double mutation_yaw_threshold_;
+    double mutation_pitch_threshold_;
     // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -46,6 +40,10 @@ private:
 
     void init()
     {
+        // ===== 参数获取 ===== //
+        max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
+        mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
+        mutation_pitch_threshold_ = this->declare_parameter<double>("mutation_pitch_threshold", 2.0);
         // ===== ROS 相关 ===== //
         armor_plates_sub_ = this->create_subscription<ArmorPlates>(
             "armor_plates", 
@@ -55,16 +53,14 @@ private:
         timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         // ===== DEBUG ===== //
-        this->declare_parameter("debug", false);
-        this->get_parameter("debug", debug_);
+        debug_ = this->declare_parameter<bool>("debug", false);
         // ===== 装甲板跟踪器 ===== //
-        tracker_.setMaxLostTime(0.5);           // 最大丢失0.5秒
-        tracker_.setMutationThreshold(3.0f, 2.0f);  // yaw突变3度，pitch突变2度
+        tracker_.setMaxLostTime(max_lost_time_);
+        tracker_.setMutationThreshold(mutation_yaw_threshold_, mutation_pitch_threshold_);
         tracker_.Init();
         
-        if (debug_) {
-            RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
-        }
+        if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
+        
     }
     void info()
     {
@@ -131,8 +127,15 @@ private:
         cv::line(img, cv::Point(pt.x - cross_len, pt.y), cv::Point(pt.x + cross_len, pt.y), color, 2);
         cv::line(img, cv::Point(pt.x, pt.y - cross_len), cv::Point(pt.x, pt.y + cross_len), color, 2);
         if (!label.empty()) {
-            cv::putText(img, label, cv::Point(pt.x + 15, pt.y), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
+            cv::putText(img, label, cv::Point(pt.x + 15, pt.y - 10), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
         }
+    }
+    void drawYawPitchText(cv::Mat& img, const cv::Point2f& pt, float yaw, float pitch, const cv::Scalar& color)
+    {
+        if (pt.x < 0 || pt.y < 0) return;
+        char buf[64];
+        snprintf(buf, sizeof(buf), "yaw:%.2f pitch:%.2f", yaw, pitch);
+        cv::putText(img, buf, cv::Point(pt.x + 15, pt.y + 15), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
     }
     void DebugImageCallBack(const sensor_msgs::msg::Image::SharedPtr msg)
     {
@@ -145,15 +148,18 @@ private:
             if (overlay_data_.has_result) {
                 cv::Point2f measured_pt = reprojection(overlay_data_.measured_position);
                 drawPoint(overlay, measured_pt, cv::Scalar(0, 0, 255), "measured");
+                drawYawPitchText(overlay, measured_pt, overlay_data_.measured_yaw, overlay_data_.measured_pitch, cv::Scalar(255, 0, 255));
 
                 if (!overlay_data_.is_lost) {
                     cv::Point2f filtered_pt = reprojectionFromYawPitch(
                         overlay_data_.filter_yaw, overlay_data_.filter_pitch, overlay_data_.distance);
                     drawPoint(overlay, filtered_pt, cv::Scalar(0, 255, 0), "filtered");
+                    drawYawPitchText(overlay, filtered_pt, overlay_data_.filter_yaw, overlay_data_.filter_pitch, cv::Scalar(0, 255, 0));
                 } else {
                     cv::Point2f predicted_pt = reprojectionFromYawPitch(
                         overlay_data_.filter_yaw, overlay_data_.filter_pitch, overlay_data_.distance);
                     drawPoint(overlay, predicted_pt, cv::Scalar(0, 255, 255), "predicted");
+                    drawYawPitchText(overlay, predicted_pt, overlay_data_.filter_yaw, overlay_data_.filter_pitch, cv::Scalar(0, 255, 0));
                 }
             }
 
@@ -200,6 +206,8 @@ private:
             overlay_data_.has_result = true;
             overlay_data_.is_lost = tracker_.isLost();
             overlay_data_.measured_position = measured_pos;
+            overlay_data_.measured_yaw = tracker_.getMeasuredYaw();
+            overlay_data_.measured_pitch = tracker_.getMeasuredPitch();
             overlay_data_.filter_yaw = tracker_.getYaw();
             overlay_data_.filter_pitch = tracker_.getPitch();
             overlay_data_.distance = distance;

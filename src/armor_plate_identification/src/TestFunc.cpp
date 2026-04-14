@@ -121,8 +121,18 @@ bool DebugParamController::handleKey(int key, PairedLights& lights, const rclcpp
     return false;
 }
 
-void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights)
+void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights, float process_time_ms)
 {
+    int row = 0;
+    // 第一行：处理用时
+    if (process_time_ms >= 0.0f) {
+        std::string time_text = "Process: " + std::to_string(process_time_ms) + " ms";
+        time_text = time_text.substr(0, time_text.find('.') + 3);
+        cv::putText(img, time_text, cv::Point(x_, y_ + row * line_h_),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 165, 255), 2);
+        row++;
+    }
+    // 下面6行：可调参数
     for (int i = 0; i < 6; ++i) {
         float val = 0.0f;
         switch (i) {
@@ -136,23 +146,25 @@ void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights)
         std::string text = param_names_[i] + ": " + std::to_string(val);
         text = text.substr(0, text.find('.') + 3);
         cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
-        cv::putText(img, text, cv::Point(x_, y_ + i * line_h_),
+        cv::putText(img, text, cv::Point(x_, y_ + row * line_h_),
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
+        row++;
     }
 }
 
 void DebugParamController::drawDebugInfo(cv::Mat& img, bool show_speed_control)
 {
+    int base_row = 7;  // 6 个参数 + 可能的 1 行 process_time
     if (show_speed_control) {
         cv::putText(img, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
-                    cv::Point(x_, y_ + 6 * line_h_ + 10),
+                    cv::Point(x_, y_ + base_row * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
         std::string speed_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
-        cv::putText(img, speed_text, cv::Point(x_, y_ + 7 * line_h_ + 20),
+        cv::putText(img, speed_text, cv::Point(x_, y_ + (base_row + 1) * line_h_ + 20),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
     } else {
         cv::putText(img, "1-6:select  T/G:adj  P:pause  ESC:exit",
-                    cv::Point(x_, y_ + 6 * line_h_ + 10),
+                    cv::Point(x_, y_ + base_row * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
     }
 }

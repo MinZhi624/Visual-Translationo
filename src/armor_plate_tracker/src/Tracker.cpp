@@ -304,8 +304,9 @@ void Tracker::Update(const std::vector<geometry_msgs::msg::Point>& positions,
 
 float Tracker::calculateYaw(float tx, float ty, float tz)
 {
+    // yaw: 左正右负（与atan2(tx, tz)的符号相反）
     (void)ty;
-    return static_cast<float>(std::atan2(tx, tz) * 180.0 / M_PI);
+    return -static_cast<float>(std::atan2(tx, tz) * 180.0 / M_PI);
 }
 
 float Tracker::calculatePitch(float tx, float ty, float tz)
