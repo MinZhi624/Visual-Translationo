@@ -1,4 +1,4 @@
-trakcer_node:
+armor_plate_tracker_node:
   ros__parameters:
     max_lost_time: 0.5
     mutation_yaw_threshold: 3.0

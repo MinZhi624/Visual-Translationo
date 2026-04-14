@@ -5,8 +5,13 @@ import os
 
 
 def generate_launch_description():
-    params_file = os.path.join(
+    identification_node_params_file = os.path.join(
         get_package_share_directory('armor_plate_identification'),
+        'config',
+        'params.yaml'
+    )
+    tracker_node_params_file = os.path.join(
+        get_package_share_directory('armor_plate_tracker'),
         'config',
         'params.yaml'
     )
@@ -16,7 +21,7 @@ def generate_launch_description():
         executable='ArmorPlateIdentifcation',
         output='screen',
         emulate_tty=True,
-        parameters=[params_file]
+        parameters=[identification_node_params_file]
     )
 
     tracker_node = Node(
@@ -25,6 +30,7 @@ def generate_launch_description():
         name='armor_plate_tracker_node',
         output='screen',
         emulate_tty=True,
+        parameters=[tracker_node_params_file]
     )
 
     visualization_node = Node(
@@ -32,12 +38,19 @@ def generate_launch_description():
         executable='data_visualization_node',
         name='data_visualization_node',
         output='screen',
-        emulate_tty=True,
+        emulate_tty=True
     )
-    
+
+    serial_node = Node( package='armor_plate_serial',
+        executable='serial_node',
+        name='armor_plate_serial_node',
+        output='screen',
+        emulate_tty=True
+    )
 
     return LaunchDescription([
         identification_node,
         tracker_node,
         visualization_node,
+        serial_node
     ])

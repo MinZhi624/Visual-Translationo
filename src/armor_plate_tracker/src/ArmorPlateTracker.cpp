@@ -187,12 +187,16 @@ private:
 
         tracker_.Update(positions, image_distances, current_time);
 
-        DebugTracker debug_msg;
-        debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
-        debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
-        debug_msg.filter_yaw = tracker_.getYaw();
-        debug_msg.filter_pitch = tracker_.getPitch();
-        debug_tracker_pub_->publish(debug_msg);
+        if (debug_) {
+            DebugTracker debug_msg;
+            debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
+            debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
+            debug_msg.filter_yaw = tracker_.getYaw();
+            debug_msg.filter_pitch = tracker_.getPitch();
+            if (debug_tracker_pub_) {
+                debug_tracker_pub_->publish(debug_msg);
+            }
+        }
 
         // 更新最新跟踪结果数据，不在此画图
         if (debug_) {
