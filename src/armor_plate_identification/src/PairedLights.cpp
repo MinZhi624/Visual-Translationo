@@ -70,6 +70,7 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
     // 1. 用椭圆拟合得到准确的方向
     // 2. 用 minAreaRect 的边界限制端点，防止超出轮廓
     for (auto & contour : contours) {
+        if (contour.size() < 5) continue;  // 椭圆拟合至少需要 5 个点
         // 1. 椭圆拟合提供准确方向
         cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
         // 2. minAreaRect 提供边长边界约束

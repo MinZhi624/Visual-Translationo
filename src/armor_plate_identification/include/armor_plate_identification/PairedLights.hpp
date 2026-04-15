@@ -35,7 +35,7 @@ public:
 	int num_lights_ = 0;
 	// ==调参列表== //
 	// Contuors筛选参数
-	int MIN_CONTOURS_AREA = 100;
+	int MIN_CONTOURS_AREA = 30;
 	float MIN_CONTOURS_RATIO = 0.06f;
 	float MAX_CONTOURS_RATIO = 0.5;
 	// 灯条匹配参

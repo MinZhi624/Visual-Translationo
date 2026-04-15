@@ -25,8 +25,8 @@ using armor_plate_interfaces::msg::ArmorPlates;
 class ArmorPlateIdentification : public rclcpp::Node
 {
 private:
-    cv::Mat img_show;
-    PairedLights lights;
+    cv::Mat img_show_;
+    PairedLights lights_;
     PoseSolver pose_solver_;
     std::string target_color_; // "RED" 或 "BLUE"
     // ros相关
@@ -50,12 +50,12 @@ private:
     void init()
     {
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
-        lights.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
-        lights.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.6));
-        lights.MIN_X_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
-        lights.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
-        lights.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
-        lights.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
+        lights_.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
+        lights_.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.6));
+        lights_.MIN_X_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
+        lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
+        lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
+        lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
 
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), 
             std::bind(&ArmorPlateIdentification::info, this));
@@ -100,7 +100,7 @@ private:
     {
         if (debug_identification_) {
             RCLCPP_INFO(this->get_logger(), "MAX_ANGLE_DIFF: %.2f, MAX_Y_DIFF_RATIO: %.2f, MIN_DISTANCE_RATIO: %.2f, MAX_DISTANCE_RATIO: %.2f, MIN_LENGTH_RATIO: %.2f, MIN_X_DIFF_RATIO: %.2f",
-            lights.MAX_ANGLE_DIFF, lights.MAX_Y_DIFF_RATIO, lights.MIN_DISTANCE_RATIO, lights.MAX_DISTANCE_RATIO, lights.MIN_LENGTH_RATIO, lights.MIN_X_DIFF_RATIO
+            lights_.MAX_ANGLE_DIFF, lights_.MAX_Y_DIFF_RATIO, lights_.MIN_DISTANCE_RATIO, lights_.MAX_DISTANCE_RATIO, lights_.MIN_LENGTH_RATIO, lights_.MIN_X_DIFF_RATIO
             );
         }
     }
@@ -136,7 +136,7 @@ private:
         auto t_start = std::chrono::steady_clock::now();
 
         cv::Mat frame = cv_ptr->image;
-        img_show = frame.clone();
+        img_show_ = frame.clone();
         Identification(frame);
         SolvePose();
         ImageShow();
@@ -154,31 +154,37 @@ private:
 
     void Identification(cv::Mat& image)
     {
-        //cv::Mat mask = findTargetColor(image, target_color_);
-        //cv::Mat img_thre = preProcessing(mask);
-        cv::Mat mask;
+        // 预处理
+        cv::Mat gary_thre;
+        cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
         cv::Mat img_thre;
-        lights.findPairedLights(img_thre, image);
-        lights.drawPairedLights(img_show);
-        
+        cv::threshold(gary_thre, img_thre, 160, 255, cv::THRESH_BINARY);
+        cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        cv::dilate(img_thre, img_thre, kernal);
+        // 灯条匹配
+        lights_.findPairedLights(img_thre, image);
+        lights_.drawPairedLights(img_show_);
+////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
+            // 预处理四图拼接显示
+            // 绘制目标区域
             cv::Mat img_target;
             cv::bitwise_and(image, image, img_target, img_thre);
-            std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
-            std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
+            std::vector<cv::Mat> images = {image, gary_thre, img_thre, img_target};
+            std::vector<std::string> labels = {"Original", "Grayscale", "Threshold", "Target Region"};
             showMultiImages("PreProcessions-View", images, labels);
         }
         if (debug_identification_) {
-            debug_controller_.drawParams(img_show, lights, process_time_ms_);
-            lights.drawAllLights(img_show);
-            debug_controller_.drawDebugInfo(img_show, debug_base_);
+            debug_controller_.drawParams(img_show_, lights_, process_time_ms_);
+            lights_.drawAllLights(img_show_);
+            debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
     }
 
     void SolvePose()
     {
         std::vector<ArmorPlate> armor_plates;
-        for (const auto& points : lights.getPairedLightPoints()) {
+        for (const auto& points : lights_.getPairedLightPoints()) {
             pose_solver_.solve(points);
             ArmorPlate armor_plate;
             cv::Mat tvec = pose_solver_.getTvec();
@@ -227,7 +233,7 @@ private:
         armor_plates_pub_->publish(armor_plates_msg);
         ////////////////// DEBUG ////////////////////////
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
-            cv::Mat undistorted = pose_solver_.undistortImage(img_show);
+            cv::Mat undistorted = pose_solver_.undistortImage(img_show_);
             cv::Mat resized;
             cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
             auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
@@ -256,7 +262,7 @@ private:
         }
 
         if (debug_base_) {
-            if (debug_controller_.handleKey(key, lights, this->get_logger())) {
+            if (debug_controller_.handleKey(key, lights_, this->get_logger())) {
                 return;
             }
         }
@@ -264,7 +270,7 @@ private:
 
     void ImageShow()
     {
-        cv::imshow("Detection Result", img_show);
+        cv::imshow("Detection Result", img_show_);
     }
     
 public:
