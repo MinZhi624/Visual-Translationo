@@ -10,18 +10,14 @@ endif()
 # ======================
 set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
-  src/CameraDriver.cpp
   src/PoseSolver.cpp
-  src/Recognize.cpp
   src/PairedLights.cpp
   src/TestFunc.cpp
 )
 set( Test
   src/Test.cpp
   src/TestFunc.cpp
-  src/CameraDriver.cpp
   src/PoseSolver.cpp
-  src/Recognize.cpp
   src/PairedLights.cpp
 )
 # ======================
@@ -35,23 +31,13 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
-
-# ======================
-# 相机 SDK 路径
-# ======================
-set(CAMERA_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/camera_sdk")
-set(CAMERA_SDK_INCLUDE_DIR "${CAMERA_SDK_ROOT}/include")
 
 # ======================
 # 库文件
 # ======================
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x64/libMVSDK.so")
-else()
-  set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x86/libMVSDK.so")
-endif()
-
 add_executable(ArmorPlateIdentifcation ${ArmorPlateIdentifcation})
 add_executable(Test ${Test})
 
@@ -69,12 +55,10 @@ $<INSTALL_INTERFACE:include>
 
 target_include_directories(ArmorPlateIdentifcation PUBLIC
 ${OpenCV_INCLUDE_DIRS}
-${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
 target_include_directories(Test PUBLIC
 ${OpenCV_INCLUDE_DIRS}
-${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
 target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
@@ -84,11 +68,9 @@ target_compile_features(Test PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++1
 # ======================
 target_link_libraries(ArmorPlateIdentifcation
 ${OpenCV_LIBS}
-${CAMERA_SDK_LIBRARY}
 )
 target_link_libraries(Test
 ${OpenCV_LIBS}
-${CAMERA_SDK_LIBRARY}
 )
 # ======================
 # 依赖关系
@@ -101,6 +83,8 @@ ament_target_dependencies(
   "sensor_msgs"
   "cv_bridge"
   "tf2_ros"
+  "image_transport"
+  "camera_info_manager"
   "armor_plate_interfaces"
 )
 ament_target_dependencies(

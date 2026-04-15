@@ -1,5 +1,3 @@
-#include "armor_plate_identification/CameraDriver.hpp"
-#include "armor_plate_identification/Recognize.hpp"
 #include "armor_plate_identification/PairedLights.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
@@ -18,6 +16,8 @@
 
 #include "tf2_ros/transform_broadcaster.hpp"
 #include <cv_bridge/cv_bridge.h>
+#include <image_transport/image_transport.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -25,21 +25,16 @@ using armor_plate_interfaces::msg::ArmorPlates;
 class ArmorPlateIdentification : public rclcpp::Node
 {
 private:
-    ArmorCameraCapture camera;
     cv::Mat img_show;
     PairedLights lights;
     PoseSolver pose_solver_;
-    // 可调参数
-    int exposure_time = 300;  // 初始曝光时间（微秒）
-    int gain = 20;             // 初始增益
     std::string target_color_; // "RED" 或 "BLUE"
     // ros相关
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    // 当前时间（秒）
-    double current_time_ = 0.0;
+    image_transport::CameraSubscriber camera_sub_;
     // 处理用时（毫秒）
     float process_time_ms_ = 0.0f;
     // 解算结果
@@ -49,25 +44,11 @@ private:
     bool debug_identification_ = false;
     bool debug_preprocessing_ = false;
     DebugParamController debug_controller_;
+    bool camera_info_received_ = false;
+    std::vector<cv::Point3f> world_points_;
 
-    // 初始化
     void init()
     {
-        // 打开相机
-        if (!camera.open()) {
-            RCLCPP_ERROR(this->get_logger(), "相机打开失败,请检查相机是否连接正确！");
-            return;
-        }
-        
-        // 设置为灯条识别优化的低曝光模式
-        if (camera.setLowExposureForLightBar(exposure_time, gain)) {
-            RCLCPP_INFO(this->get_logger(), "低曝光模式设置成功，当前曝光: %.0f us, 增益: %d", 
-                        camera.getExposureTime(), camera.getGain());
-        } else {
-            RCLCPP_WARN(this->get_logger(), "低曝光模式设置失败");
-        }
-
-        // 匹配参数初始化（ROS参数化）
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
         lights.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
         lights.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.6));
@@ -75,36 +56,31 @@ private:
         lights.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
         lights.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
         lights.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
-        // 创建定时器，5秒发布一次信息
+
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), 
             std::bind(&ArmorPlateIdentification::info, this));
-        // ===== 初始化PoseSolver ===== //
-        std::vector<cv::Point3f> world_points_;
+
         world_points_.push_back(cv::Point3f(-67.5f, -27.5f, 0)); // 0
         world_points_.push_back(cv::Point3f(67.5f, -27.5f, 0)); // 1
         world_points_.push_back(cv::Point3f(67.5f, 27.5f, 0)); // 2
         world_points_.push_back(cv::Point3f(-67.5f, 27.5f, 0)); // 3
-        cv::Mat camera_matrix_ = (cv::Mat_<double>(3, 3) <<
-            2374.54248, 0., 698.85288,
-            0., 2377.53648, 520.8649,
-            0., 0., 1.);
-        cv::Mat distortion_coefficients_ = (cv::Mat_<double>(1, 5) <<
-            -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
-        pose_solver_ = PoseSolver(world_points_, camera_matrix_, distortion_coefficients_);
-        // ===== 初始化发布器 ===== //
+
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-        current_time_ = 0.0;
+
+        camera_sub_ = image_transport::create_camera_subscription(
+            this, "image_raw",
+            std::bind(&ArmorPlateIdentification::imageCallback, this,
+                      std::placeholders::_1, std::placeholders::_2),
+            "raw");
         
-        // ===== DEBUG ===== //
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
 
-        // 操作说明
-        RCLCPP_INFO(this->get_logger(), "相机启动成功");
-        RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停  W/S-曝光  A/D-增益");
+        RCLCPP_INFO(this->get_logger(), "识别节点已启动，等待 /image_raw ...");
+        RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
         
         if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
         if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
@@ -119,7 +95,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "DEBUG模式：+/-调速度");
         }
     }
-    // 定时器回调，发布信息
+
     void info()
     {
         if (debug_identification_) {
@@ -128,18 +104,64 @@ private:
             );
         }
     }
+
+    void imageCallback(
+        const sensor_msgs::msg::Image::ConstSharedPtr& img_msg,
+        const sensor_msgs::msg::CameraInfo::ConstSharedPtr& info_msg)
+    {
+        // 相机初始化
+        if (!camera_info_received_ && info_msg) {
+            cv::Mat camera_matrix = cv::Mat::zeros(3, 3, CV_64F);
+            cv::Mat distortion_coefficients = cv::Mat::zeros(1, 5, CV_64F);
+            for (int i = 0; i < 9; ++i) {
+                camera_matrix.at<double>(i / 3, i % 3) = info_msg->k[i];
+            }
+            for (size_t i = 0; i < info_msg->d.size() && i < 5; ++i) {
+                distortion_coefficients.at<double>(0, static_cast<int>(i)) = info_msg->d[i];
+            }
+            pose_solver_ = PoseSolver(world_points_, camera_matrix, distortion_coefficients);
+            camera_info_received_ = true;
+            RCLCPP_INFO(this->get_logger(), "CameraInfo 已接收，内参已加载 (fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f)",
+                        info_msg->k[0], info_msg->k[4], info_msg->k[2], info_msg->k[5]);
+        }
+
+        cv_bridge::CvImageConstPtr cv_ptr;
+        try {
+            cv_ptr = cv_bridge::toCvCopy(img_msg, "bgr8");
+        } catch (const cv_bridge::Exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+            return;
+        }
+
+        auto t_start = std::chrono::steady_clock::now();
+
+        cv::Mat frame = cv_ptr->image;
+        img_show = frame.clone();
+        Identification(frame);
+        SolvePose();
+        ImageShow();
+        controlParams();
+        Publish();
+
+        auto t_end = std::chrono::steady_clock::now();
+        process_time_ms_ = static_cast<float>(
+            std::chrono::duration<double, std::milli>(t_end - t_start).count());
+
+        if (debug_base_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
+        }
+    }
+
     void Identification(cv::Mat& image)
     {
-        cv::Mat mask = findTargetColor(image, target_color_);
-        cv::Mat img_thre = preProcessing(mask);
-        
-        // 直接调用 findPairedLights 完成检测和匹配
-        lights.findPairedLights(img_thre);
+        //cv::Mat mask = findTargetColor(image, target_color_);
+        //cv::Mat img_thre = preProcessing(mask);
+        cv::Mat mask;
+        cv::Mat img_thre;
+        lights.findPairedLights(img_thre, image);
         lights.drawPairedLights(img_show);
         
-        // 图像显示逻辑
         if (debug_preprocessing_) {
-            // DEBUG_PREPROCESSING 模式：显示预处理四图
             cv::Mat img_target;
             cv::bitwise_and(image, image, img_target, img_thre);
             std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
@@ -152,18 +174,16 @@ private:
             debug_controller_.drawDebugInfo(img_show, debug_base_);
         }
     }
+
     void SolvePose()
     {
         std::vector<ArmorPlate> armor_plates;
-        // 每一个匹配好的灯条解算
         for (const auto& points : lights.getPairedLightPoints()) {
             pose_solver_.solve(points);
-            // 存储解算结果
             ArmorPlate armor_plate;
             cv::Mat tvec = pose_solver_.getTvec();
             Eigen::Quaternion q = pose_solver_.getQuaternion();
             geometry_msgs::msg::Pose pose;
-            // mm -> m
             pose.position.x = tvec.at<double>(0) / 1000;
             pose.position.y = tvec.at<double>(1) / 1000;
             pose.position.z = tvec.at<double>(2) / 1000;
@@ -186,7 +206,6 @@ private:
 
         for (const auto& armor_plate : armor_plates_)
         {
-            // 发布姿态
             geometry_msgs::msg::TransformStamped transformStamped;
             transformStamped.header.stamp = stamp;
             transformStamped.header.frame_id = "camera_link";
@@ -201,37 +220,35 @@ private:
             tf_broadcaster_->sendTransform(transformStamped);
         }
 
-        // 发布灯条信息
         ArmorPlates armor_plates_msg;
         armor_plates_msg.header.stamp = stamp;
         armor_plates_msg.header.frame_id = "camera_link";
-        armor_plates_msg.armor_plates = armor_plates_;  // 直接拷贝赋值
+        armor_plates_msg.armor_plates = armor_plates_;
         armor_plates_pub_->publish(armor_plates_msg);
-        
-        // 发布调试图像
+        ////////////////// DEBUG ////////////////////////
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
-            auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", img_show);
+            cv::Mat undistorted = pose_solver_.undistortImage(img_show);
+            cv::Mat resized;
+            cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
+            auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
             cv_img.header.stamp = stamp;
             cv_img.header.frame_id = "camera_link";
             debug_image_pub_->publish(*cv_img.toImageMsg());
         }
     }
 
-    // 控制参数函数
     void controlParams()
     {
         int key = cv::waitKey(1);
         if (key == -1) return;
         
-        // ESC：退出（最高优先级）
         if (key == 27) 
         {
-            camera.release();
             cv::destroyAllWindows();
-            exit(0);
+            rclcpp::shutdown();
+            return;
         }
         
-        // P：暂停（通用功能）
         if (key == 'p' || key == 'P') {
             RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
             cv::waitKey(0);
@@ -243,46 +260,10 @@ private:
                 return;
             }
         }
-        // 相机参数控制
-        // W/S：曝光时间
-        if (key == 'w' || key == 'W') {
-            exposure_time = std::min(exposure_time + 100, 10000);
-            camera.setLowExposureForLightBar(exposure_time, gain);
-            RCLCPP_INFO(this->get_logger(), "曝光时间: %d us", exposure_time);
-            return;
-        }
-        if (key == 's' || key == 'S') {
-            exposure_time = std::max(exposure_time - 100, 100);
-            camera.setLowExposureForLightBar(exposure_time, gain);
-            RCLCPP_INFO(this->get_logger(), "曝光时间: %d us", exposure_time);
-            return;
-        }
-        
-        // A/D：增益
-        if (key == 'a' || key == 'A') {
-            gain = std::min(gain + 10, 400);
-            camera.setLowExposureForLightBar(exposure_time, gain);
-            RCLCPP_INFO(this->get_logger(), "增益: %d", gain);
-            return;
-        }
-        if (key == 'd' || key == 'D') {
-            gain = std::max(gain - 10, 0);
-            camera.setLowExposureForLightBar(exposure_time, gain);
-            RCLCPP_INFO(this->get_logger(), "增益: %d", gain);
-            return;
-        }
     }
 
-    // 可视化
     void ImageShow()
     {
-        // 在 img_show 左下角显示相机参数
-        std::string params_text = "Exp: " + std::to_string(exposure_time) + "us  Gain: " + std::to_string(gain);
-        // 左下角位置（留 10px 边距）
-        cv::Point pos(10, img_show.rows - 10);
-        cv::putText(img_show, params_text, pos,
-                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
-        // 显示带参数的检测结果图
         cv::imshow("Detection Result", img_show);
     }
     
@@ -290,52 +271,10 @@ public:
     ArmorPlateIdentification() : Node("armor_plate_identification_node")
     {
         init();
-        cv::Mat frame;
-        while (true)
-        {
-            if (!camera.read(frame)) break;
-            if (!rclcpp::ok()) break;
-            
-            // 更新时间
-            current_time_ = this->now().seconds();
-            
-            // 开始计时
-            auto t_start = std::chrono::steady_clock::now();
-            
-            // 图像处理
-            img_show = frame.clone();
-            Identification(frame);
-            
-            // 解算
-            SolvePose();
-            
-            // 可视化
-            ImageShow();
-            controlParams();
-
-            // 让 ROS2 处理定时器等事件
-            rclcpp::spin_some(this->get_node_base_interface());
-            
-            // 发布数据
-            Publish();
-            
-            // 结束计时
-            auto t_end = std::chrono::steady_clock::now();
-            process_time_ms_ = static_cast<float>(
-                std::chrono::duration<double, std::milli>(t_end - t_start).count());
-
-            // 控制速度
-            if (debug_base_) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
-            }
-        }
-        camera.release();
-        cv::destroyAllWindows();
     }
     
     ~ArmorPlateIdentification()
     {
-        camera.release();
         cv::destroyAllWindows();
     }
 };

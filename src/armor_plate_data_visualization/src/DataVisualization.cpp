@@ -13,9 +13,9 @@ public:
     DataVisualizaiton() : Node("data_visualization_node_cpp")
     {
         RCLCPP_INFO(this->get_logger(), "数据化节点创建成功!");
-        plot_img_ = cv::Mat(800, 1920, CV_8UC3, cv::Scalar(0, 0, 0));
-        cv::Mat yaw_roi = plot_img_(cv::Rect(0, 0, 1920, 400));
-        cv::Mat pitch_roi = plot_img_(cv::Rect(0, 400, 1920, 400));
+        plot_img_ = cv::Mat(800, 960, CV_8UC3, cv::Scalar(0, 0, 0));
+        cv::Mat yaw_roi = plot_img_(cv::Rect(0, 0, 960, 400));
+        cv::Mat pitch_roi = plot_img_(cv::Rect(0, 400, 960, 400));
         yaw_plot_ = ScatterPlot(yaw_roi);
         pitch_plot_ = ScatterPlot(pitch_roi);
 

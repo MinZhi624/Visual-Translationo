@@ -40,8 +40,10 @@ public:
 	/// @return 图像坐标系二维点
 	cv::Point2f reprojection(cv::Point3f point3D);
 
-	/// @brief 初始化卡尔曼滤波器，恢复到初始状态
-	void initKF();
+	/// @brief 对输入图像进行去畸变
+	/// @param src 原始图像
+	/// @return 去畸变后的图像（若内参未初始化则返回原图拷贝）
+	cv::Mat undistortImage(const cv::Mat& src) const;
 	
 	/// @brief 计算图像中心到目标中心的距离（像素）
 	/// @param target_center_point 图像中目标中心点坐标

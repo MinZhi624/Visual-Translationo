@@ -1,5 +1,4 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
-#include "armor_plate_identification/Recognize.hpp"
 #include "armor_plate_identification/PairedLights.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
@@ -46,8 +45,6 @@ private:
 
     void init(const std::string& video_path)
     {
-        // ==== 读取 ROS 参数 ==== //
-        target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
         // ===== 相机初始化 ==== //
         c_.open(video_path);
         if (!c_.isOpened()) {
@@ -69,6 +66,7 @@ private:
         lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
         lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
         lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
+        lights_.TARGET_COLOR = this->declare_parameter<std::string>("target_color", "BLUE");
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
         // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
@@ -111,11 +109,13 @@ private:
     }
     void Identification(cv::Mat& image)
     {
-        cv::Mat mask = findTargetColor(image, target_color_);
-        cv::Mat img_thre = preProcessing(mask);
-        
-        // 直接调用 findPairedLights 完成检测和匹配
-        lights_.findPairedLights(img_thre);
+        // 预处理
+        cv::Mat gary_thre;
+        cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
+        cv::Mat img_thre;
+        cv::threshold(gary_thre, img_thre, 160, 255, cv::THRESH_BINARY);
+        // 灯条匹配
+        lights_.findPairedLights(img_thre, image);
         lights_.drawPairedLights(img_show_);
 ////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
@@ -123,8 +123,8 @@ private:
             // 绘制目标区域
             cv::Mat img_target;
             cv::bitwise_and(image, image, img_target, img_thre);
-            std::vector<cv::Mat> images = {image, mask, img_thre, img_target};
-            std::vector<std::string> labels = {"Original", "Color Mask", "Preprocessed", "Target Region"};
+            std::vector<cv::Mat> images = {image, gary_thre, img_thre, img_target};
+            std::vector<std::string> labels = {"Original", "Grayscale", "Threshold", "Target Region"};
             showMultiImages("PreProcessions-View", images, labels);
         }
         if (debug_identification_) {
@@ -188,9 +188,11 @@ private:
         armor_plates_pub_->publish(armor_plates_msg);
 
 ////////////////////// DEUBG ////////////////////////
-        // 发布调试图像
+        // 发布调试图像（降采样 0.5x，与主节点对齐）
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
-            auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", img_show_);
+            cv::Mat resized;
+            cv::resize(img_show_, resized, cv::Size(), 0.5, 0.5);
+            auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
             cv_img.header.stamp = stamp;
             cv_img.header.frame_id = "camera_link";
             debug_image_pub_->publish(*cv_img.toImageMsg());

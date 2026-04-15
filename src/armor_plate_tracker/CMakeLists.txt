@@ -14,16 +14,20 @@ find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(camera_info_manager REQUIRED)
 
 add_executable(armor_plate_tracker_node
   src/ArmorPlateTracker.cpp
   src/MyKalmanFilter.cpp
   src/Tracker.cpp
+  
 )
 
 target_include_directories(armor_plate_tracker_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+  ${CAMERA_SDK_INCLUDE_DIR}
   ${EIGEN3_INCLUDE_DIR}
   ${OpenCV_INCLUDE_DIRS}
 )
@@ -39,6 +43,8 @@ ament_target_dependencies(
   "OpenCV"
   "Eigen3"
   "armor_plate_interfaces"
+  "image_transport"
+  "camera_info_manager"
 )
 
 target_link_libraries(armor_plate_tracker_node

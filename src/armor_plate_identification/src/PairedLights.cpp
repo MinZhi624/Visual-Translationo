@@ -1,11 +1,7 @@
 ﻿#include "armor_plate_identification/PairedLights.hpp"
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
-
-#ifdef DEBUG_INDENTIFICATION
-    #include <iostream>
-    #include <rclcpp/rclcpp.hpp>
-#endif
-
 
 /////////////////////// Lights /////////////////////////////// 
 Lights::Lights() :
@@ -23,12 +19,12 @@ void PairedLights::init()
     num_lights_ = 0;
 }
 
-void PairedLights::findPairedLights(cv::Mat& img_thre)
+void PairedLights::findPairedLights(cv::Mat& img_thre, const cv::Mat& image)
 {
     // 初始化（重置）参数
     init();
     // 找到灯条然后拟合成直线
-    std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre);
+    std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre, image);
     find_lights_ = findLightLines(valued_contours);
     // 拿到灯条后匹配 按x轴排序,从左到右
     std::sort(find_lights_.begin(), find_lights_.end(), [](const Lights& a, const Lights& b) {
@@ -44,7 +40,7 @@ void PairedLights::findPairedLights(cv::Mat& img_thre)
     // 更新灯条数量
     num_lights_ = paired_lights_.size();
 }
-std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& img_thre)
+std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& img_thre, const cv::Mat& image)
 {
     std::vector<std::vector<cv::Point>> contours;
     std::vector<std::vector<cv::Point>> target_contours;
@@ -58,7 +54,10 @@ std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& im
             double short_length = std::min(min_rect.size.width, min_rect.size.height);
             double ratio =short_length / long_length;
             if (ratio < MAX_CONTOURS_RATIO && ratio > MIN_CONTOURS_RATIO) {
-                target_contours.push_back(contour);
+                // 判断颜色是否符合要求
+                if (TargetColorDectect(image, min_rect, contour)) {
+                    target_contours.push_back(contour);
+                }
             }
         }
     }
@@ -110,24 +109,36 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
     return lights_list;
 }
 
+bool PairedLights::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
+{
+    cv::Rect bbox = rect.boundingRect();
+    // 裁剪到图像边界内，防止 ROI 越界崩溃
+    bbox &= cv::Rect(0, 0, image.cols, image.rows);
+    if (bbox.empty()) return false;
+    // ROI bbox范围内的图像,进行颜色检测
+    int sum_r = 0;
+    int sum_b = 0;
+    cv::Mat roi = image(bbox);
+    for (int rows = 0; rows < bbox.height; rows++) {
+        for (int cols = 0; cols < bbox.width; cols++) {
+            if (cv::pointPolygonTest(contour, cv::Point2f(cols + bbox.x, rows + bbox.y), false) >= 0) {
+              // if point is inside contour
+              sum_r += roi.at<cv::Vec3b>(rows, cols)[2];
+              sum_b += roi.at<cv::Vec3b>(rows, cols)[0];
+            }
+        }
+    }
+    return (sum_r > sum_b && TARGET_COLOR == "RED") || 
+       (sum_b > sum_r && TARGET_COLOR == "BLUE");
+}
+
 bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
     float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
     diff = std::min(diff, 180 - diff);
     float length_ratio = std::min(light_left.length_, light_right.length_) / std::max(light_left.length_, light_right.length_);
     //角度差（方向） -> 边长比例（距离）
-    if (diff > MAX_ANGLE_DIFF) {
-#ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "交差过大 差距为\t%lf", diff);
-#endif
-        return false;
-    }
-    if (length_ratio < MIN_LENGTH_RATIO) {
-#ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "长度 相差 太大\t%lf", length_ratio);
-#endif
-        return false;
-    }
+    if (diff > MAX_ANGLE_DIFF || length_ratio < MIN_LENGTH_RATIO) return false;
     // 相机坐标系下面的距离
     double global_x_diff = light_right.center_.x - light_left.center_.x;   // 已经按x排过序，自然 >= 0
     double global_y_diff = light_right.center_.y - light_left.center_.y;   // 保留符号！
@@ -143,30 +154,9 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
     double x_diff_ratio = local_x / men_length;
     double y_diff_ratio = local_y / men_length;
     double distance_ratio = men_length / cv::norm(light_left.center_ - light_right.center_) ;
-    if ( x_diff_ratio < MIN_X_DIFF_RATIO) {
-#ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "X 差太近\t%lf",x_diff_ratio);
-#endif
-        return false;
-    }
-    if ( y_diff_ratio > MAX_Y_DIFF_RATIO) {
-#ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "Y 差太远\t%lf",y_diff_ratio);
-#endif
-        return false;
-    }
-    if ( distance_ratio > MAX_DISTANCE_RATIO) {
-#ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "距离 相差 太 大\t%lf",distance_ratio);
-#endif
-        return false;
-    }
-    if (distance_ratio < MIN_DISTANCE_RATIO) {
-#ifdef DEBUG_INDENTIFICATION
-        RCLCPP_WARN(rclcpp::get_logger("rclcpp"), "距离 相差 太 小\t%lf",distance_ratio);
-#endif
-        return false;
-    }
+    if ( x_diff_ratio < MIN_X_DIFF_RATIO || y_diff_ratio > MAX_Y_DIFF_RATIO
+        || distance_ratio > MAX_DISTANCE_RATIO || distance_ratio < MIN_DISTANCE_RATIO
+    )  return false;
     // 全部检测通过
     return true;
 }

@@ -3,6 +3,8 @@
 #include "armor_plate_interfaces/msg/aim_command.hpp"
 #include "armor_plate_interfaces/msg/debug_tracker.hpp"
 
+#include <sensor_msgs/msg/camera_info.hpp>
+
 #include "rclcpp/rclcpp.hpp"
 
 #include <cv_bridge/cv_bridge.h>
@@ -43,6 +45,30 @@ private:
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
         mutation_pitch_threshold_ = this->declare_parameter<double>("mutation_pitch_threshold", 2.0);
+        
+        // 相机内参（默认值为视屏）
+        std::vector<double> default_camera_matrix = {
+            2374.54248, 0.0, 698.85288,
+            0.0, 2377.53648, 520.8649,
+            0.0, 0.0, 1.0};
+        auto camera_matrix_param = this->declare_parameter<std::vector<double>>("camera_matrix", default_camera_matrix);
+        if (camera_matrix_param.size() == 9) {
+            camera_matrix_ = cv::Mat::zeros(3, 3, CV_64F);
+            for (int i = 0; i < 9; ++i) {
+                camera_matrix_.at<double>(i / 3, i % 3) = camera_matrix_param[i];
+            }
+        } else {
+            RCLCPP_WARN(this->get_logger(), "camera_matrix 参数长度不是 9，使用默认值");
+            camera_matrix_ = (cv::Mat_<double>(3, 3) <<
+                2374.54248, 0., 698.85288,
+                0., 2377.53648, 520.8649,
+                0., 0., 1.);
+        }
+        // 因为 debug_image 已被 Identification resize 到 0.5x，内参也对应缩放
+        camera_matrix_.at<double>(0, 0) *= 0.5; // fx
+        camera_matrix_.at<double>(1, 1) *= 0.5; // fy
+        camera_matrix_.at<double>(0, 2) *= 0.5; // cx
+        camera_matrix_.at<double>(1, 2) *= 0.5; // cy
         // ===== ROS 相关 ===== //
         armor_plates_sub_ = this->create_subscription<ArmorPlates>(
             "armor_plates", 
@@ -139,10 +165,6 @@ private:
             std::bind(&ArmorPlateTracker::DebugImageCallBack, this, std::placeholders::_1)
         );
         debug_tracker_pub_ = this->create_publisher<DebugTracker>("debug_tracker", 10); 
-        camera_matrix_ = (cv::Mat_<double>(3, 3) <<
-            2374.54248, 0., 698.85288,
-            0., 2377.53648, 520.8649,
-            0., 0., 1.);
     }
     cv::Point2f reprojection(const cv::Vec3d& position)
     {
@@ -165,7 +187,7 @@ private:
         double yaw_rad = yaw;
         double pitch_rad = pitch;
         cv::Vec3d p;
-        p[0] = distance * std::sin(yaw_rad) * std::cos(pitch_rad);
+        p[0] = -distance * std::sin(yaw_rad) * std::cos(pitch_rad);
         p[1] = -distance * std::sin(pitch_rad);
         p[2] = distance * std::cos(yaw_rad) * std::cos(pitch_rad);
         return reprojection(p);

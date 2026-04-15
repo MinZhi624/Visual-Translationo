@@ -45,14 +45,16 @@ public:
 	float MAX_Y_DIFF_RATIO = 5.0f;
 	float MAX_DISTANCE_RATIO = 1.0f;
 	float MIN_DISTANCE_RATIO = 0.2f;
+	std::string TARGET_COLOR = "BLUE"; // "RED" 或 "BLUE"
 	// =========== //
 
 	// ================ //
 	
 	/// @brief 找到所有灯条的轮廓，进行的简单的筛选--面积还有长宽比
 	/// @param img_thre 预处理后二值化图像
+	/// @param image 原始图像
 	/// @return 所有灯条的轮廓
-	std::vector<std::vector<cv::Point>> findLightsContours(cv::Mat& img_thre);
+	std::vector<std::vector<cv::Point>> findLightsContours(cv::Mat& img_thre, const cv::Mat& image);
 	
 	/// @brief 将灯条拟合成直线
 	/// @param contours 所有灯条的轮廓
@@ -79,7 +81,8 @@ public:
 	
 	/// @brief 这个灯条匹配类的主函数。找到并匹配好灯条
 	/// @param img_thre 预处理后二值化图像
-	void findPairedLights(cv::Mat& img_thre);
+	/// @param image 原始图像
+	void findPairedLights(cv::Mat& img_thre, const cv::Mat& image);
 	
 	/// @brief 画出所有匹配好的灯条对
 	/// @param img 要绘制的图像
@@ -88,6 +91,9 @@ public:
 	/// @brief 得到所有匹配好的灯条按照顺时针的顺序排列
 	/// @return 所有匹配好的灯条按照顺时针的顺序排列的四个点
 	std::vector<std::vector<cv::Point2f>> getPairedLightPoints() const {return paired_lights_points_;}
+
+
+	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
 
 ///////////////////////// debug ////////////////////////////////////
 	/// @brief 测试用的，检查所有的灯条轮廓，并标记bottom还有top

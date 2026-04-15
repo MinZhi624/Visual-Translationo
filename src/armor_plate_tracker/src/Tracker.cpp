@@ -65,7 +65,7 @@ void Tracker::initFilter(MyKalmanFilter& kf)
     
     // 测量噪声协方差 R (1x1)
     Eigen::MatrixXf R(1, 1);
-    R << 0.001f;
+    R << 0.005f;
     kf.setMeasurementNoiseCov(R);
     
     // 初始化状态（设为0）
