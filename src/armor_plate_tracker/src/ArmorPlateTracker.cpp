@@ -5,7 +5,6 @@
 
 #include "rclcpp/rclcpp.hpp"
 
-#include "sensor_msgs/msg/image.hpp"
 #include <cv_bridge/cv_bridge.h>
 
 #include <opencv2/highgui.hpp>
@@ -50,7 +49,7 @@ private:
             10,
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), std::bind(&ArmorPlateTracker::info, this));
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
@@ -62,21 +61,74 @@ private:
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
         
     }
+    void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
+    {
+        // 数据获取
+        double current_time = this->now().seconds();
+        current_time_ = current_time;
+        size_t num = msg->armor_plates.size();
+        std::vector<cv::Vec3d> positions;
+        std::vector<float> image_distances;
+        positions.reserve(num);
+        image_distances.reserve(num);
+        for (size_t i = 0; i < num; ++i) {
+            const auto& pos = msg->armor_plates[i].pose.position;
+            positions.emplace_back(pos.x, pos.y, pos.z);
+            image_distances.push_back(msg->armor_plates[i].image_distance_to_center);
+        }
+        tracker_.Update(positions, image_distances, current_time);
+        publish();
+        ///////// DEBUG ////////////////////////
+        if (debug_) {
+            DebugTracker debug_msg;
+            debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
+            debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
+            debug_msg.filter_yaw = tracker_.getYaw();
+            debug_msg.filter_pitch = tracker_.getPitch();
+            if (debug_tracker_pub_ && debug_tracker_pub_) {
+                debug_tracker_pub_->publish(debug_msg);
+            }
+        }
+
+        // 更新最新跟踪结果数据，不在此画图
+        if (debug_) {
+            auto measured_pos = tracker_.getMeasuredPosition();
+            float distance = static_cast<float>(std::sqrt(
+                measured_pos[0] * measured_pos[0] +
+                measured_pos[1] * measured_pos[1] +
+                measured_pos[2] * measured_pos[2]));
+
+            std::lock_guard<std::mutex> lock(overlay_mutex_);
+            overlay_data_.has_result = true;
+            overlay_data_.is_lost = tracker_.isLost();
+            overlay_data_.measured_position = measured_pos;
+            overlay_data_.measured_yaw = tracker_.getMeasuredYaw();
+            overlay_data_.measured_pitch = tracker_.getMeasuredPitch();
+            overlay_data_.filter_yaw = tracker_.getYaw();
+            overlay_data_.filter_pitch = tracker_.getPitch();
+            overlay_data_.distance = distance;
+        }
+    }
     void info()
     {
         float measurement_yaw = tracker_.getMeasuredYaw();
         float measurement_pitch = tracker_.getMeasuredPitch();
         float filter_yaw = tracker_.getYaw();
         float filter_pitch = tracker_.getPitch();
-        RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.2f, pitch = %.2f||滤波数据: yaw = %.2f, pitch = %.2f",
+        RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
     }
     void publish()
     {
-        AimCommand aim_command;
-        aim_command.delta_pitch = tracker_.getPitch();
-        aim_command.delta_yaw = tracker_.getYaw();
-        aim_command_pub_->publish(aim_command);
+        if (tracker_.isLost()) {
+            RCLCPP_WARN(this->get_logger(), "目标丢失");
+            return;
+        } else {
+            AimCommand aim_command;
+            aim_command.delta_pitch = tracker_.getPitch();
+            aim_command.delta_yaw = tracker_.getYaw();
+            aim_command_pub_->publish(aim_command);
+        }
     }
     ///////// DEBUG ///////////////////
     void Debug()
@@ -92,16 +144,16 @@ private:
             0., 2377.53648, 520.8649,
             0., 0., 1.);
     }
-    cv::Point2f reprojection(const geometry_msgs::msg::Point& position)
+    cv::Point2f reprojection(const cv::Vec3d& position)
     {
         // 直接用 tvec 重投影到图像坐标
         double fx = camera_matrix_.at<double>(0, 0);
         double fy = camera_matrix_.at<double>(1, 1);
         double cx = camera_matrix_.at<double>(0, 2);
         double cy = camera_matrix_.at<double>(1, 2);
-        double X = position.x;
-        double Y = position.y;
-        double Z = position.z;
+        double X = position[0];
+        double Y = position[1];
+        double Z = position[2];
         if (std::abs(Z) < 1e-6) return cv::Point2f(-1, -1);
         double u = fx * X / Z + cx;
         double v = fy * Y / Z + cy;
@@ -110,12 +162,12 @@ private:
     cv::Point2f reprojectionFromYawPitch(float yaw, float pitch, float distance)
     {
         // 从 yaw/pitch/distance 重建 tvec 并重投影
-        double yaw_rad = yaw * CV_PI / 180.0;
-        double pitch_rad = pitch * CV_PI / 180.0;
-        geometry_msgs::msg::Point p;
-        p.x = distance * std::sin(yaw_rad) * std::cos(pitch_rad);
-        p.y = -distance * std::sin(pitch_rad);
-        p.z = distance * std::cos(yaw_rad) * std::cos(pitch_rad);
+        double yaw_rad = yaw;
+        double pitch_rad = pitch;
+        cv::Vec3d p;
+        p[0] = distance * std::sin(yaw_rad) * std::cos(pitch_rad);
+        p[1] = -distance * std::sin(pitch_rad);
+        p[2] = distance * std::cos(yaw_rad) * std::cos(pitch_rad);
         return reprojection(p);
     }
     void drawPoint(cv::Mat& img, const cv::Point2f& pt, const cv::Scalar& color, const std::string& label)
@@ -134,7 +186,7 @@ private:
     {
         if (pt.x < 0 || pt.y < 0) return;
         char buf[64];
-        snprintf(buf, sizeof(buf), "yaw:%.2f pitch:%.2f", yaw, pitch);
+        snprintf(buf, sizeof(buf), "yaw:%.4f pitch:%.4f", yaw, pitch);
         cv::putText(img, buf, cv::Point(pt.x + 15, pt.y + 15), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
     }
     void DebugImageCallBack(const sensor_msgs::msg::Image::SharedPtr msg)
@@ -169,66 +221,15 @@ private:
             RCLCPP_ERROR(this->get_logger(), "cv_bridge 转换失败: %s", e.what());
         }
     }
-    void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
-    {
-        double current_time = this->now().seconds();
-        current_time_ = current_time;
-        size_t num = msg->armor_plates.size();
-
-        std::vector<geometry_msgs::msg::Point> positions;
-        std::vector<float> image_distances;
-        positions.reserve(num);
-        image_distances.reserve(num);
-
-        for (size_t i = 0; i < num; ++i) {
-            positions.push_back(msg->armor_plates[i].pose.position);
-            image_distances.push_back(msg->armor_plates[i].image_distance_to_center);
-        }
-
-        tracker_.Update(positions, image_distances, current_time);
-        
-        ///////// DEBUG ////////////////////////
-        if (debug_) {
-            DebugTracker debug_msg;
-            debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
-            debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
-            debug_msg.filter_yaw = tracker_.getYaw();
-            debug_msg.filter_pitch = tracker_.getPitch();
-            if (debug_tracker_pub_ && debug_tracker_pub_) {
-                debug_tracker_pub_->publish(debug_msg);
-            }
-        }
-
-        // 更新最新跟踪结果数据，不在此画图
-        if (debug_) {
-            auto measured_pos = tracker_.getMeasuredPosition();
-            float distance = static_cast<float>(std::sqrt(
-                measured_pos.x * measured_pos.x +
-                measured_pos.y * measured_pos.y +
-                measured_pos.z * measured_pos.z));
-
-            std::lock_guard<std::mutex> lock(overlay_mutex_);
-            overlay_data_.has_result = true;
-            overlay_data_.is_lost = tracker_.isLost();
-            overlay_data_.measured_position = measured_pos;
-            overlay_data_.measured_yaw = tracker_.getMeasuredYaw();
-            overlay_data_.measured_pitch = tracker_.getMeasuredPitch();
-            overlay_data_.filter_yaw = tracker_.getYaw();
-            overlay_data_.filter_pitch = tracker_.getPitch();
-            overlay_data_.distance = distance;
-        }
-
-        publish();
-    }
 
 public:
     ArmorPlateTracker() : Node("armor_plate_tracker_node_cpp")
     {
         RCLCPP_INFO(this->get_logger(), "Armor Plate Tracker节点创建成功！");
+        init();
         if (debug_) {
             Debug();
         }
-        init();
     }
 };
 

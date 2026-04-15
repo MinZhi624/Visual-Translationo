@@ -1,13 +1,11 @@
 #pragma once
 #include "armor_plate_tracker/MyKalmanFilter.hpp"
-#include <geometry_msgs/msg/point.hpp>
-#include <vector>
-#include <cmath>
+#include <opencv2/core.hpp>
 
 struct TrackingOverlayData {
     bool has_result = false;
     bool is_lost = false;
-    geometry_msgs::msg::Point measured_position;
+    cv::Vec3d measured_position;
     float measured_yaw = 0.0f;
     float measured_pitch = 0.0f;
     float filter_yaw = 0.0f;
@@ -35,7 +33,7 @@ private:
     float measured_pitch_;
     
     // 当前测量对应的原始位置（tvec，单位米）
-    geometry_msgs::msg::Point measured_position_;
+    cv::Vec3d tvec_;
     
     // 时间相关
     double last_update_time_;   // 上次更新时间（秒）
@@ -57,10 +55,10 @@ private:
     void updateTransitionMatrix(MyKalmanFilter& kf, double dt);
     
     // 选择最佳匹配目标
-    bool selectBestMatch(const std::vector<geometry_msgs::msg::Point>& positions,
+    bool selectBestMatch(const std::vector<cv::Vec3d>& positions,
                          const std::vector<float>& image_distances,
                          float& out_yaw, float& out_pitch,
-                         geometry_msgs::msg::Point& out_position);
+                         cv::Vec3d& out_position);
     
     // 检查是否突变
     bool isMutation(float measured_yaw, float measured_pitch);
@@ -93,7 +91,7 @@ public:
     // positions: 检测到的所有装甲板的pose.position（即tvec，单位米）
     // image_distances: 对应的image_distance_to_center
     // current_time: 当前时间戳（秒）
-    void Update(const std::vector<geometry_msgs::msg::Point>& positions,
+    void Update(const std::vector<cv::Vec3d>& positions,
                 const std::vector<float>& image_distances,
                 double current_time);
     
@@ -106,7 +104,7 @@ public:
     float getMeasuredPitch() const { return measured_pitch_; }
     
     // 获取原始测量对应的tvec位置
-    geometry_msgs::msg::Point getMeasuredPosition() const { return measured_position_; }
+    cv::Vec3d getMeasuredPosition() const { return tvec_; }
     
     // 获取是否丢失目标
     bool isLost() const { return is_lost_; }

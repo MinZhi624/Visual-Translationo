@@ -40,6 +40,8 @@ def generate_launch_description():
         package="armor_plate_identification",
         executable="Test",
         arguments=[LaunchConfiguration("video_path")],
+        output='screen',
+        emulate_tty=True,
         parameters=[identification_node_params_file]
     )
 

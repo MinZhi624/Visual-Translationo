@@ -21,7 +21,7 @@ void ScatterPlot::drawPlot(std::deque<float>& data, cv::Scalar color)
     for (int i = 0; i < numPoints; i++) {
         //映射到坐标轴位置
         int x = PLOT_MARGIN + (i * (plot_.cols - PLOT_MARGIN *2)) / MAX_POINTS;
-        int y = (plot_.rows / 2) - (int)(data[i] * 15);
+        int y = (plot_.rows / 2) - (int)(data[i] * 5000);
         // 绘制散点
         cv::circle(plot_, cv::Point(x, y), 2, color, cv::FILLED);
     }
