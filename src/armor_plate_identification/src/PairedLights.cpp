@@ -116,21 +116,29 @@ bool PairedLights::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect
     // 裁剪到图像边界内，防止 ROI 越界崩溃
     bbox &= cv::Rect(0, 0, image.cols, image.rows);
     if (bbox.empty()) return false;
-    // ROI bbox范围内的图像,进行颜色检测
-    int sum_r = 0;
-    int sum_b = 0;
-    cv::Mat roi = image(bbox);
-    for (int rows = 0; rows < bbox.height; rows++) {
-        for (int cols = 0; cols < bbox.width; cols++) {
-            if (cv::pointPolygonTest(contour, cv::Point2f(cols + bbox.x, rows + bbox.y), false) >= 0) {
-              // if point is inside contour
-              sum_r += roi.at<cv::Vec3b>(rows, cols)[2];
-              sum_b += roi.at<cv::Vec3b>(rows, cols)[0];
-            }
-        }
+
+    // 1. 生成轮廓 mask（只统计轮廓内部像素，且腐蚀后只看中心，避开光晕边缘）
+    // 这样避免双重循环然后得到目标内容
+    cv::Mat mask = cv::Mat::zeros(bbox.size(), CV_8UC1);
+    std::vector<cv::Point> local_contour;
+    local_contour.reserve(contour.size());
+    for (const auto& pt : contour) {
+        local_contour.emplace_back(pt - cv::Point(bbox.x, bbox.y));
     }
-    return (sum_r > sum_b && TARGET_COLOR == "RED") || 
-       (sum_b > sum_r && TARGET_COLOR == "BLUE");
+    cv::drawContours(mask, std::vector<std::vector<cv::Point>>{local_contour}, -1, 255, -1);
+    cv::erode(mask, mask, cv::Mat());
+    // 2. 提取 ROI 并分离 B/R 通道，用 mask 求平均
+    cv::Mat roi = image(bbox);
+    std::vector<cv::Mat> bgr;
+    cv::split(roi, bgr);
+    double mean_b = cv::mean(bgr[0], mask)[0];
+    double mean_r = cv::mean(bgr[2], mask)[0];
+
+    // 3. 比例判断，对光照变化更鲁棒 --> 避免杂光
+    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.2;
+    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.2;
+
+    return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
 }
 
 bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {

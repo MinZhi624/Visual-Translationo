@@ -33,8 +33,10 @@ private:
     bool debug_;
     rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr debug_image_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
     // 相机内参
     cv::Mat camera_matrix_;
+    bool camera_info_received_ = false;
     // 最新跟踪结果（用于图像叠加）
     TrackingOverlayData overlay_data_;
     std::mutex overlay_mutex_;
@@ -46,36 +48,24 @@ private:
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
         mutation_pitch_threshold_ = this->declare_parameter<double>("mutation_pitch_threshold", 2.0);
         
-        // 相机内参（默认值为视屏）
-        std::vector<double> default_camera_matrix = {
-            2374.54248, 0.0, 698.85288,
-            0.0, 2377.53648, 520.8649,
-            0.0, 0.0, 1.0};
-        auto camera_matrix_param = this->declare_parameter<std::vector<double>>("camera_matrix", default_camera_matrix);
-        if (camera_matrix_param.size() == 9) {
-            camera_matrix_ = cv::Mat::zeros(3, 3, CV_64F);
-            for (int i = 0; i < 9; ++i) {
-                camera_matrix_.at<double>(i / 3, i % 3) = camera_matrix_param[i];
-            }
-        } else {
-            RCLCPP_WARN(this->get_logger(), "camera_matrix 参数长度不是 9，使用默认值");
-            camera_matrix_ = (cv::Mat_<double>(3, 3) <<
-                2374.54248, 0., 698.85288,
-                0., 2377.53648, 520.8649,
-                0., 0., 1.);
-        }
-        // 因为 debug_image 已被 Identification resize 到 0.5x，内参也对应缩放
-        camera_matrix_.at<double>(0, 0) *= 0.5; // fx
-        camera_matrix_.at<double>(1, 1) *= 0.5; // fy
-        camera_matrix_.at<double>(0, 2) *= 0.5; // cx
-        camera_matrix_.at<double>(1, 2) *= 0.5; // cy
+        // 相机内参 fallback（视频默认值，0.5x 已缩放）
+        camera_matrix_ = (cv::Mat_<double>(3, 3) <<
+            1187.27124, 0., 349.42644,
+            0., 1188.76824, 260.43245,
+            0., 0., 1.);
+        // ===== 订阅 CameraInfo 动态读取 P 矩阵 ===== //
+        camera_info_sub_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
+            "camera_info",
+            rclcpp::SensorDataQoS(),
+            std::bind(&ArmorPlateTracker::CameraInfoCallBack, this, std::placeholders::_1)
+        );
         // ===== ROS 相关 ===== //
         armor_plates_sub_ = this->create_subscription<ArmorPlates>(
             "armor_plates", 
             10,
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ArmorPlateTracker::info, this));
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(10000), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
@@ -203,6 +193,34 @@ private:
         if (!label.empty()) {
             cv::putText(img, label, cv::Point(pt.x + 15, pt.y - 10), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
         }
+    }
+    void CameraInfoCallBack(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
+    {
+        if (camera_info_received_) return;
+        if (msg->p.size() >= 9) {
+            camera_matrix_ = cv::Mat::zeros(3, 3, CV_64F);
+            cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
+            for (int i = 0; i < 12; ++i) {
+                projection_matrix.at<double>(i / 4, i % 4) = msg->p[i];
+            }
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    camera_matrix_.at<double>(i, j) = projection_matrix.at<double>(i, j);
+                }
+            }
+            // debug_image 已被 Identification resize 到 0.5x，内参也对应缩放
+            camera_matrix_.at<double>(0, 0) = 0.5 * projection_matrix.at<double>(0, 0); // fx
+            camera_matrix_.at<double>(1, 1) = 0.5 * projection_matrix.at<double>(1, 1); // fy
+            camera_matrix_.at<double>(0, 2) = 0.5 * projection_matrix.at<double>(0, 2); // cx
+            camera_matrix_.at<double>(1, 2) = 0.5 * projection_matrix.at<double>(1, 2); // cy
+            RCLCPP_INFO(this->get_logger(), "CameraInfo 已接收，P矩阵前3x3已加载 (fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f)",
+                        camera_matrix_.at<double>(0, 0), camera_matrix_.at<double>(1, 1),
+                        camera_matrix_.at<double>(0, 2), camera_matrix_.at<double>(1, 2));
+        } else {
+            RCLCPP_WARN(this->get_logger(), "CameraInfo P 矩阵长度不足 9，使用 fallback 内参 --- 视屏内参");
+        }
+        camera_info_received_ = true;
+        camera_info_sub_.reset(); // 只读取一次
     }
     void drawYawPitchText(cv::Mat& img, const cv::Point2f& pt, float yaw, float pitch, const cv::Scalar& color)
     {

@@ -249,7 +249,6 @@ public:
             Identification(frame);
             // 解算
             SolvePose();
-            // （本地 Tracker 已禁用，由 armor_plate_tracker 节点处理）
             // 图片展示
             cv::imshow("img_show_", img_show_);
             // 按键控制

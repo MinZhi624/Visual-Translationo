@@ -29,6 +29,8 @@ private:
     PairedLights lights_;
     PoseSolver pose_solver_;
     std::string target_color_; // "RED" 或 "BLUE"
+    std::string camera_type_;  // "mindvision" 或 "galaxy"
+    std::string camera_frame_id_ = "camera_link";
     // ros相关
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
@@ -50,6 +52,12 @@ private:
     void init()
     {
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
+        camera_type_ = this->declare_parameter<std::string>("camera_type", "mindvision");
+        if (camera_type_ == "galaxy") {
+            camera_frame_id_ = "camera_optical_frame";
+        } else {
+            camera_frame_id_ = "camera_link";
+        }
         lights_.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
         lights_.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.6));
         lights_.MIN_X_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
@@ -69,17 +77,19 @@ private:
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
+        rmw_qos_profile_t image_qos = rmw_qos_profile_sensor_data;
         camera_sub_ = image_transport::create_camera_subscription(
             this, "image_raw",
             std::bind(&ArmorPlateIdentification::imageCallback, this,
                       std::placeholders::_1, std::placeholders::_2),
-            "raw");
+            "raw",
+            image_qos);
         
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
 
-        RCLCPP_INFO(this->get_logger(), "识别节点已启动，等待 /image_raw ...");
+        RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s, frame_id: %s, 等待 /image_raw ...", camera_type_.c_str(), camera_frame_id_.c_str());
         RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
         
         if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
@@ -113,16 +123,20 @@ private:
         if (!camera_info_received_ && info_msg) {
             cv::Mat camera_matrix = cv::Mat::zeros(3, 3, CV_64F);
             cv::Mat distortion_coefficients = cv::Mat::zeros(1, 5, CV_64F);
+            cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
             for (int i = 0; i < 9; ++i) {
                 camera_matrix.at<double>(i / 3, i % 3) = info_msg->k[i];
             }
             for (size_t i = 0; i < info_msg->d.size() && i < 5; ++i) {
                 distortion_coefficients.at<double>(0, static_cast<int>(i)) = info_msg->d[i];
             }
-            pose_solver_ = PoseSolver(world_points_, camera_matrix, distortion_coefficients);
+            for (int i = 0; i < 12; ++i) {
+                projection_matrix.at<double>(i / 4, i % 4) = info_msg->p[i];
+            }
+            pose_solver_ = PoseSolver(world_points_, camera_matrix, distortion_coefficients, projection_matrix);
             camera_info_received_ = true;
-            RCLCPP_INFO(this->get_logger(), "CameraInfo 已接收，内参已加载 (fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f)",
-                        info_msg->k[0], info_msg->k[4], info_msg->k[2], info_msg->k[5]);
+            RCLCPP_INFO(this->get_logger(), "CameraInfo 已接收，相机类型: %s, 内参已加载 (fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f)",
+                        camera_type_.c_str(), info_msg->k[0], info_msg->k[4], info_msg->k[2], info_msg->k[5]);
         }
 
         cv_bridge::CvImageConstPtr cv_ptr;
@@ -214,7 +228,7 @@ private:
         {
             geometry_msgs::msg::TransformStamped transformStamped;
             transformStamped.header.stamp = stamp;
-            transformStamped.header.frame_id = "camera_link";
+            transformStamped.header.frame_id = camera_frame_id_;
             transformStamped.child_frame_id = "armor_plate_" + std::to_string(index++);
             transformStamped.transform.translation.x = armor_plate.pose.position.x;
             transformStamped.transform.translation.y = armor_plate.pose.position.y;
@@ -228,17 +242,18 @@ private:
 
         ArmorPlates armor_plates_msg;
         armor_plates_msg.header.stamp = stamp;
-        armor_plates_msg.header.frame_id = "camera_link";
+        armor_plates_msg.header.frame_id = camera_frame_id_;
         armor_plates_msg.armor_plates = armor_plates_;
         armor_plates_pub_->publish(armor_plates_msg);
         ////////////////// DEBUG ////////////////////////
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
-            cv::Mat undistorted = pose_solver_.undistortImage(img_show_);
+        cv::Mat undistorted = pose_solver_.undistortImage(img_show_);
             cv::Mat resized;
-            cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
+            //cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
+            cv::resize(img_show_, resized, cv::Size(), 0.5, 0.5);
             auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
             cv_img.header.stamp = stamp;
-            cv_img.header.frame_id = "camera_link";
+            cv_img.header.frame_id = camera_frame_id_;
             debug_image_pub_->publish(*cv_img.toImageMsg());
         }
     }

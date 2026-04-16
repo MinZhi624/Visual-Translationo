@@ -13,6 +13,8 @@ test_node_cpp:
 
 armor_plate_identification_node:
   ros__parameters:
+  # camera_type: "mindvision"
+    camera_type: "galaxy"
     target_color: "BLUE"
     debug_base: true
     debug_identification: true

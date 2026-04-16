@@ -33,7 +33,7 @@ private:
   {
     rclcpp::Rate rate(100);  // 100 Hz
     while (running_.load() && rclcpp::ok()) {
-      if (has_target_.load()) {
+      if (has_target_.load() && latest_yaw_.load() != 0.0f && latest_pitch_.load() != 0.0f) {
         // 数据获取
         has_target_.store(false);
         float yaw = latest_yaw_.load();

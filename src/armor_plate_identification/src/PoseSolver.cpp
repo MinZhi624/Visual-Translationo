@@ -67,7 +67,8 @@ cv::Mat PoseSolver::undistortImage(const cv::Mat& src) const
     if (camera_matrix_.empty() || distortion_coefficients_.empty()) {
         return src.clone();
     }
-    cv::undistort(src, dst, camera_matrix_, distortion_coefficients_);
+    cv::Mat new_camera_matrix = projection_matrix_(cv::Rect(0, 0, 3, 3));
+    cv::undistort(src, dst, camera_matrix_, distortion_coefficients_, new_camera_matrix);
     return dst;
 }
 
