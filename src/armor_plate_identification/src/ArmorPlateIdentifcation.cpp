@@ -64,7 +64,7 @@ private:
         lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
         lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
         lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
-
+        lights_.TARGET_COLOR = target_color_;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), 
             std::bind(&ArmorPlateIdentification::info, this));
 

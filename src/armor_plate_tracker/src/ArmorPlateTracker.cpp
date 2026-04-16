@@ -197,7 +197,8 @@ private:
     void CameraInfoCallBack(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
     {
         if (camera_info_received_) return;
-        if (msg->p.size() >= 9) {
+        if (msg->p.size() >= 12) {
+            // P矩阵前3X4包含了内参信息，直接提取并缩放
             camera_matrix_ = cv::Mat::zeros(3, 3, CV_64F);
             cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
             for (int i = 0; i < 12; ++i) {
@@ -217,7 +218,7 @@ private:
                         camera_matrix_.at<double>(0, 0), camera_matrix_.at<double>(1, 1),
                         camera_matrix_.at<double>(0, 2), camera_matrix_.at<double>(1, 2));
         } else {
-            RCLCPP_WARN(this->get_logger(), "CameraInfo P 矩阵长度不足 9，使用 fallback 内参 --- 视屏内参");
+            RCLCPP_WARN(this->get_logger(), "CameraInfo P 矩阵长度不足 12，使用 fallback 内参 --- 视屏内参");
         }
         camera_info_received_ = true;
         camera_info_sub_.reset(); // 只读取一次

@@ -2,6 +2,7 @@
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
+#include <rclcpp/rclcpp.hpp>
 
 /////////////////////// Lights /////////////////////////////// 
 Lights::Lights() :
@@ -133,11 +134,9 @@ bool PairedLights::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect
     cv::split(roi, bgr);
     double mean_b = cv::mean(bgr[0], mask)[0];
     double mean_r = cv::mean(bgr[2], mask)[0];
-
     // 3. 比例判断，对光照变化更鲁棒 --> 避免杂光
-    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.2;
-    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.2;
-
+    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.5;
+    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.5;
     return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
 }
 
