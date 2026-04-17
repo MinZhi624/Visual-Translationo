@@ -68,7 +68,7 @@ DebugParamController::DebugParamController()
       })
 {}
 
-bool DebugParamController::handleKey(int key, PairedLights& lights, const rclcpp::Logger& logger)
+bool DebugParamController::handleKey(int key, Detector& lights, const rclcpp::Logger& logger)
 {
     // 1-6：选择参数
     if (key >= '1' && key <= '6') {
@@ -121,7 +121,7 @@ bool DebugParamController::handleKey(int key, PairedLights& lights, const rclcpp
     return false;
 }
 
-void DebugParamController::drawParams(cv::Mat& img, const PairedLights& lights, float process_time_ms)
+void DebugParamController::drawParams(cv::Mat& img, const Detector& lights, float process_time_ms)
 {
     int row = 0;
     // 第一行：处理用时

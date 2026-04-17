@@ -1,11 +1,14 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
-#include "armor_plate_identification/PairedLights.hpp"
+#include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
+#include "armor_plate_identification/NumberClassifier.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <cv_bridge/cv_bridge.h>
 
 #include <opencv2/highgui.hpp>
@@ -20,15 +23,18 @@ using armor_plate_interfaces::msg::ArmorPlates;
 class Test : public rclcpp::Node
 {
 private:
-    // 相机相关
+    std::vector<Armor> armors_;
+    // 视频相关
     cv::VideoCapture c_;
     cv::Mat img_show_;
     // 灯条匹配相关
     std::string target_color_; // "RED" 或 "BLUE"
-    PairedLights lights_;
-    PoseSolver pose_solver_;
+    Detector lights_;
     // PoseSolver结果
+    PoseSolver pose_solver_;
     std::vector<ArmorPlate> armor_plates_;
+    // 数字识别相关
+    NumberClassifier number_classifier_;
     // 发布者
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
@@ -38,11 +44,11 @@ private:
     // 时间和帧数
     rclcpp::TimerBase::SharedPtr timer_;
     // ROS 参数控制 debug 开关
-    bool debug_base_ = false;
-    bool debug_identification_ = false;
-    bool debug_preprocessing_ = false;
+    bool debug_base_;
+    bool debug_identification_;
+    bool debug_preprocessing_;
+    bool debug_number_classification_;
     DebugParamController debug_controller_;
-
     void init(const std::string& video_path)
     {
         // ===== 相机初始化 ==== //
@@ -84,6 +90,16 @@ private:
         cv::Mat distortion_coefficients_ = (cv::Mat_<double>(1, 5) <<
             -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
         pose_solver_ = PoseSolver(world_points_,camera_matrix_, distortion_coefficients_);
+        // ===== 初始化数字识别 ===== //
+        std::string package_share_dir = ament_index_cpp::get_package_share_directory("armor_plate_identification");
+        std::string model_relative_path = this->declare_parameter<std::string>("model_path", "");
+        std::string label_relative_path = this->declare_parameter<std::string>("label_path", "");
+        std::string model_path = package_share_dir + "/" + model_relative_path;
+        std::string label_path = package_share_dir + "/" + label_relative_path;
+        double number_threshold = this->declare_parameter<double>("number_threshold", 0.15);
+        std::vector<std::string> empty;
+        std::vector<std::string> ignore_labels = this->declare_parameter<std::vector<std::string>>("ignore_labels", empty);
+        number_classifier_ = NumberClassifier(model_path, label_path, number_threshold, ignore_labels);
         // ===== 初始化发布器 ===== //
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
@@ -92,11 +108,13 @@ private:
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
-        
+        debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
+
         if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
         if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
         if (debug_identification_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
         if (debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
+        if (debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");
     }
     void info()
     {
@@ -117,9 +135,10 @@ private:
         cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
         cv::dilate(img_thre, img_thre, kernal);
         // 灯条匹配
-        lights_.findPairedLights(img_thre, image);
-        lights_.drawPairedLights(img_show_);
-////////////////////// DEUBG ////////////////////////
+        lights_.detectArmors(img_thre, image);
+        lights_.drawArmors(img_show_);
+        armors_ = lights_.getArmors();
+        ////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
             // 预处理四图拼接显示
             // 绘制目标区域
@@ -134,13 +153,16 @@ private:
             lights_.drawAllLights(img_show_);
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
+        if (debug_number_classification_) {
+            lights_.showNumberROI();
+        }
     }
     void SolvePose()
     {
         std::vector<ArmorPlate> armor_plates;
         // 每一个匹配好的灯条解算
-        for (const auto& points : lights_.getPairedLightPoints()) {
-            pose_solver_.solve(points);
+        for (const auto& armor : armors_) {
+            pose_solver_.solve(armor.points_);
             // 存储解算结果
             ArmorPlate armor_plate;
             cv::Mat tvec = pose_solver_.getTvec();
@@ -160,6 +182,19 @@ private:
             armor_plates.push_back(armor_plate);
         }
         armor_plates_ = armor_plates;
+    }
+    void NumberClassify()
+    {
+        number_classifier_.classify(armors_);
+        // 保存数据
+        for (size_t i = 0; i < armors_.size() && i < armor_plates_.size(); i++) {
+            armor_plates_[i].number = armors_[i].number_;
+        }
+        ////////// DEBUG /////////
+        if (debug_number_classification_) { 
+            drawAllNumberTest(img_show_, armors_);
+        }
+        
     }
     void Publish()
     {
@@ -189,7 +224,7 @@ private:
         armor_plates_msg.armor_plates = armor_plates_;  // 直接拷贝赋值
         armor_plates_pub_->publish(armor_plates_msg);
 
-////////////////////// DEUBG ////////////////////////
+        ////////////////////// DEUBG ////////////////////////
         // 发布调试图像（降采样 0.5x，与主节点对齐）
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
             cv::Mat resized;
@@ -239,9 +274,7 @@ public:
                 return;
             }
             if (!rclcpp::ok()) return;
-            
             img_show_ = frame.clone();
-            
             // 开始计时
             auto t_start = std::chrono::steady_clock::now();
             
@@ -249,6 +282,8 @@ public:
             Identification(frame);
             // 解算
             SolvePose();
+            // 数字识别
+            NumberClassify();
             // 图片展示
             cv::imshow("img_show_", img_show_);
             // 按键控制

@@ -1,4 +1,4 @@
-#include "armor_plate_identification/PairedLights.hpp"
+#include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
 
@@ -26,7 +26,7 @@ class ArmorPlateIdentification : public rclcpp::Node
 {
 private:
     cv::Mat img_show_;
-    PairedLights lights_;
+    Detector lights_;
     PoseSolver pose_solver_;
     std::string target_color_; // "RED" 或 "BLUE"
     std::string camera_type_;  // "mindvision" 或 "galaxy"
@@ -176,8 +176,8 @@ private:
         cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
         cv::dilate(img_thre, img_thre, kernal);
         // 灯条匹配
-        lights_.findPairedLights(img_thre, image);
-        lights_.drawPairedLights(img_show_);
+        lights_.detectArmors(img_thre, image);
+        lights_.drawArmors(img_show_);
 ////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
             // 预处理四图拼接显示
@@ -198,8 +198,8 @@ private:
     void SolvePose()
     {
         std::vector<ArmorPlate> armor_plates;
-        for (const auto& points : lights_.getPairedLightPoints()) {
-            pose_solver_.solve(points);
+        for (const auto& armor : lights_.getArmors()) {
+            pose_solver_.solve(armor.points_);
             ArmorPlate armor_plate;
             cv::Mat tvec = pose_solver_.getTvec();
             Eigen::Quaternion q = pose_solver_.getQuaternion();

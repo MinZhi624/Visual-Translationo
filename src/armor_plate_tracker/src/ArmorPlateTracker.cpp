@@ -13,6 +13,7 @@
 #include <opencv2/imgproc.hpp>
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
+
 using armor_plate_interfaces::msg::DebugTracker;
 
 class ArmorPlateTracker : public rclcpp::Node
@@ -47,7 +48,6 @@ private:
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
         mutation_pitch_threshold_ = this->declare_parameter<double>("mutation_pitch_threshold", 2.0);
-        
         // 相机内参 fallback（视频默认值，0.5x 已缩放）
         camera_matrix_ = (cv::Mat_<double>(3, 3) <<
             1187.27124, 0., 349.42644,
@@ -85,12 +85,15 @@ private:
         size_t num = msg->armor_plates.size();
         std::vector<cv::Vec3d> positions;
         std::vector<float> image_distances;
+        std::vector<std::string> numbers;
         positions.reserve(num);
         image_distances.reserve(num);
+        numbers.reserve(num);
         for (size_t i = 0; i < num; ++i) {
             const auto& pos = msg->armor_plates[i].pose.position;
             positions.emplace_back(pos.x, pos.y, pos.z);
             image_distances.push_back(msg->armor_plates[i].image_distance_to_center);
+            numbers.push_back(msg->armor_plates[i].number);
         }
         tracker_.Update(positions, image_distances, current_time);
         publish();

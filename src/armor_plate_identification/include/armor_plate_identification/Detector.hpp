@@ -1,55 +1,29 @@
 ﻿#pragma once
-#include <opencv2/core.hpp>
+#include "armor_plate_identification/Armor.hpp"
+#include <opencv2/core/types.hpp>
 
-/// @brief 灯条类
-class Lights
-{
-public:
-	cv::Point2f center_;
-	cv::RotatedRect rect_;
-	cv::Point2f top_;
-	cv::Point2f bottom_;
-	double angle_;
-	double length_;
-	double width_;
-	int area_;
-	// 暂时先不用 is_paired_
-	bool is_paired_;
-	int id_;
-
-	Lights();
-};
-
-class PairedLights
+class Detector
 {
 private:
-
-std::vector<Lights> find_lights_;
-std::vector<std::array<Lights, 2>> paired_lights_;
-std::vector<std::vector<cv::Point2f>> paired_lights_points_;
-
-/// @brief 初始化（重置）参数
-void init();
-
-public:
-	int num_lights_ = 0;
-	// ==调参列表== //
-	// Contuors筛选参数
-	int MIN_CONTOURS_AREA = 30;
-	float MIN_CONTOURS_RATIO = 0.06f;
-	float MAX_CONTOURS_RATIO = 0.5;
-	// 灯条匹配参
-	float MAX_ANGLE_DIFF = 5.0f; // 角度差这里不是比值！ 
-	float MIN_LENGTH_RATIO = 0.5f;
-	float MIN_X_DIFF_RATIO = 0.3f;
-	float MAX_Y_DIFF_RATIO = 5.0f;
-	float MAX_DISTANCE_RATIO = 1.0f;
-	float MIN_DISTANCE_RATIO = 0.2f;
-	std::string TARGET_COLOR = "BLUE"; // "RED" 或 "BLUE"
-	// =========== //
-
+	std::vector<Lights> find_lights_;
+	std::vector<Armor> armors_;
+	// 数字图像提取数据
+	const int WARP_HEIGHT = 28;
+	const int WARP_WIDTH = 32;
+	const int LIGHT_HEIGHT = 10;
+	const int TOP_LIGHT_Y = (WARP_HEIGHT - LIGHT_HEIGHT) / 2 - 1;
+	const int BOTTOM_LIGHT_Y = TOP_LIGHT_Y + LIGHT_HEIGHT;
+	const cv::Size ROI_SIZE = cv::Size(20, 28);
+	// 四个点安装顺时针的顺序，从左上角开始
+	const std::vector<cv::Point2f> NUMBER_TARGET_POINTS = {
+		cv::Point2f(0, TOP_LIGHT_Y),
+		cv::Point2f(WARP_WIDTH - 1, TOP_LIGHT_Y),
+		cv::Point2f(WARP_WIDTH - 1, BOTTOM_LIGHT_Y),
+		cv::Point2f(0, BOTTOM_LIGHT_Y)
+	};
+	/// @brief 初始化（重置）参数
+	void init();
 	// ================ //
-	
 	/// @brief 找到所有灯条的轮廓，进行的简单的筛选--面积还有长宽比
 	/// @param img_thre 预处理后二值化图像
 	/// @param image 原始图像
@@ -76,29 +50,59 @@ public:
 	/// @brief 得到所有灯条的匹配结果，匹配的主函数
 	/// @param all_lights 所有灯条的信息
 	/// @return 匹配好的灯条对
-	std::vector<std::array<Lights, 2>> matchLights(std::vector<Lights>& all_lights);
+	std::vector<Armor> matchLights(std::vector<Lights>& all_lights);
+
+	/// @brief 得到装甲板的号码ROI
+	/// @param image 原始图像
+	/// @param armor 一个装甲板的信息
+	/// @return 号码ROI图像
+	cv::Mat getNumberROI(const cv::Mat& image, const Armor& armor);
+
+	/// @brief 判断一个灯条的颜色是否符合要求
+	/// @param image 原始图像
+	/// @param rect 灯条的最小外接矩形
+	/// @param contour 灯条的轮廓
+	/// @return 是否符合要求
+	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
 	// ================= //
+
+public:
+	int num_lights_ = 0;
+	// ==调参列表== //
+	// Contuors筛选参数
+	int MIN_CONTOURS_AREA = 30;
+	float MIN_CONTOURS_RATIO = 0.06f;
+	float MAX_CONTOURS_RATIO = 0.5;
+	// 灯条匹配参
+	float MAX_ANGLE_DIFF = 5.0f; // 角度差这里不是比值！ 
+	float MIN_LENGTH_RATIO = 0.5f;
+	float MIN_X_DIFF_RATIO = 0.3f;
+	float MAX_Y_DIFF_RATIO = 5.0f;
+	float MAX_DISTANCE_RATIO = 1.0f;
+	float MIN_DISTANCE_RATIO = 0.2f;
+	std::string TARGET_COLOR = "BLUE"; // "RED" 或 "BLUE"
+	// =========== //
 	
 	/// @brief 这个灯条匹配类的主函数。找到并匹配好灯条
 	/// @param img_thre 预处理后二值化图像
 	/// @param image 原始图像
-	void findPairedLights(cv::Mat& img_thre, const cv::Mat& image);
+	void detectArmors(cv::Mat& img_thre, const cv::Mat& image);
 	
 	/// @brief 画出所有匹配好的灯条对
 	/// @param img 要绘制的图像
-	void drawPairedLights(cv::Mat& img);
+	void drawArmors(cv::Mat& img);
 
 	/// @brief 得到所有匹配好的灯条按照顺时针的顺序排列
 	/// @return 所有匹配好的灯条按照顺时针的顺序排列的四个点
-	std::vector<std::vector<cv::Point2f>> getPairedLightPoints() const {return paired_lights_points_;}
-
-
-	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
+	const std::vector<Armor>& getArmors() const { return armors_; }
 
 ///////////////////////// debug ////////////////////////////////////
 	/// @brief 测试用的，检查所有的灯条轮廓，并标记bottom还有top
 	/// @param img 要绘制的图像
 	void drawAllLights(cv::Mat& img);
+
+	/// @brief 测试用的，显示所有装甲板号码ROI
+	void showNumberROI();
 };
 
 /// @brief 画出一个旋转矩形

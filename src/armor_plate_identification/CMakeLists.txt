@@ -11,14 +11,16 @@ endif()
 set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
   src/PoseSolver.cpp
-  src/PairedLights.cpp
+  src/Detector.cpp
   src/TestFunc.cpp
+  src/NumberClassifier.cpp
 )
 set( Test
   src/Test.cpp
   src/TestFunc.cpp
   src/PoseSolver.cpp
-  src/PairedLights.cpp
+  src/Detector.cpp
+  src/NumberClassifier.cpp
 )
 # ======================
 # 依赖
@@ -110,7 +112,7 @@ install(DIRECTORY
   DESTINATION include/${PROJECT_NAME}
 )
 install(DIRECTORY
-  config video launch
+  config video launch model
   DESTINATION share/${PROJECT_NAME}
 )
 

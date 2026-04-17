@@ -1,27 +1,46 @@
 test_node_cpp:
   ros__parameters:
+    # === 目标颜色 ===
     target_color: "BLUE"
-    debug_base: true
-    debug_identification: true
-    debug_preprocessing: true
+    # === 灯条匹配参数 ===
     max_angle_diff: 10.0
     min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
+    # === 数字分类器参数 ===
+    model_path: "model/mlp.onnx"
+    label_path: "model/label.txt"
+    classifier_threshold: 0.5
+    ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
+    # === DEBUG ===
+    debug_base: true
+    debug_identification: true
+    debug_preprocessing: false
+    debug_number_classification: true
 
 armor_plate_identification_node:
   ros__parameters:
-  # camera_type: "mindvision"
-    camera_type: "galaxy"
-    target_color: "RED"
-    debug_base: true
-    debug_identification: true
-    debug_preprocessing: true
+    # === 目标颜色 ===
+    target_color: "BLUE"
+    # === 相机类型 ===
+    camera_type: "mindvision"
+  # camera_type: "galaxy"
+    # === 灯条匹配参数 ===
     max_angle_diff: 10.0
     min_length_ratio: 0.6
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
+    # === 数字分类器参数 ===
+    model_path: "model/mlp.onnx"
+    label_path: "model/label.txt"
+    classifier_threshold: 0.5
+    ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
+    # === DEBUG ===
+    debug_base: true
+    debug_identification: true
+    debug_preprocessing: false
+    debug_number_classification: true

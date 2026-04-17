@@ -1,26 +1,16 @@
-﻿#include "armor_plate_identification/PairedLights.hpp"
-#include <opencv2/core/mat.hpp>
-#include <opencv2/core/types.hpp>
+﻿#include "armor_plate_identification/Detector.hpp"
 #include <opencv2/imgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
-
-/////////////////////// Lights /////////////////////////////// 
-Lights::Lights() :
-    center_(0, 0), top_(0, 0), bottom_(0, 0),
-    angle_(0), length_(0), width_(0), area_(0),
-    is_paired_(false), id_(-1)
-{}
-
-////////////////////// PairedLights /////////////////////////
-void PairedLights::init()
+#include <opencv2/highgui.hpp>
+////////////////////// Detector /////////////////////////
+void Detector::init()
 {
     find_lights_.clear();
-    paired_lights_.clear();
-    paired_lights_points_.clear();
+    armors_.clear();
     num_lights_ = 0;
 }
 
-void PairedLights::findPairedLights(cv::Mat& img_thre, const cv::Mat& image)
+void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& image)
 {
     // 初始化（重置）参数
     init();
@@ -32,16 +22,15 @@ void PairedLights::findPairedLights(cv::Mat& img_thre, const cv::Mat& image)
         return a.center_.x < b.center_.x;
     });
     // 匹配灯条
-    paired_lights_ = matchLights(find_lights_);
-    // 将匹配好的装甲板4个点存储下来
-    for (auto& lights : paired_lights_) {
-        std::vector<cv::Point2f> points = {lights[0].top_, lights[1].top_, lights[1].bottom_, lights[0].bottom_};
-        paired_lights_points_.push_back(points);
+    armors_ = matchLights(find_lights_);
+    // 得到装甲板的号码ROI
+    for (auto& armor : armors_) {
+        armor.number_roi_ = getNumberROI(image, armor);
     }
-    // 更新灯条数量
-    num_lights_ = paired_lights_.size();
+    // 更新装甲板数量
+    num_lights_ = armors_.size();
 }
-std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& img_thre, const cv::Mat& image)
+std::vector<std::vector<cv::Point>> Detector::findLightsContours(cv::Mat& img_thre, const cv::Mat& image)
 {
     std::vector<std::vector<cv::Point>> contours;
     std::vector<std::vector<cv::Point>> target_contours;
@@ -64,7 +53,7 @@ std::vector<std::vector<cv::Point>> PairedLights::findLightsContours(cv::Mat& im
     }
     return target_contours;
 }
-std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Point>>& contours)
+std::vector<Lights> Detector::findLightLines(std::vector<std::vector<cv::Point>>& contours)
 {
     std::vector<Lights> lights_list;
     // 结合椭圆和 minAreaRect 的优点：
@@ -111,7 +100,7 @@ std::vector<Lights> PairedLights::findLightLines(std::vector<std::vector<cv::Poi
     return lights_list;
 }
 
-bool PairedLights::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
+bool Detector::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
 {
     cv::Rect bbox = rect.boundingRect();
     // 裁剪到图像边界内，防止 ROI 越界崩溃
@@ -140,7 +129,7 @@ bool PairedLights::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect
     return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
 }
 
-bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light_right) {
+bool Detector::checkPairLights(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
     float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
     diff = std::min(diff, 180 - diff);
@@ -168,7 +157,7 @@ bool PairedLights::checkPairLights(const Lights& light_left, const Lights& light
     // 全部检测通过
     return true;
 }
-float PairedLights::computePairScore(const Lights& light_left, const Lights& light_right) {
+float Detector::computePairScore(const Lights& light_left, const Lights& light_right) {
     // 1. 平行度：角度差越小越好
     float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
     diff = std::min(diff, 180.0f - diff);
@@ -185,7 +174,7 @@ float PairedLights::computePairScore(const Lights& light_left, const Lights& lig
 
     return angle_score + length_ratio + dist_score;
 }
-std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>& all_lights)
+std::vector<Armor> Detector::matchLights(std::vector<Lights>& all_lights)
 {
     struct Candidate {
         std::array<Lights, 2> pair;
@@ -207,38 +196,70 @@ std::vector<std::array<Lights, 2>> PairedLights::matchLights(std::vector<Lights>
         return a.score > b.score;
     });
     // NMS 去重：一个灯条只能属于一个装甲板
-    std::vector<std::array<Lights, 2>> paired_lights;
+    std::vector<Armor> armors;
     std::vector<bool> used(all_lights.size(), false);
     for (const auto& c : candidates) {
         if (!used[c.idx1] && !used[c.idx2]) {
-            paired_lights.push_back(c.pair);
+            Armor armor;
+            armor.paired_lights_ = c.pair;
+            armor.points_ = {c.pair[0].top_, c.pair[1].top_, c.pair[1].bottom_, c.pair[0].bottom_};
+            armors.push_back(armor);
             used[c.idx1] = true;
             used[c.idx2] = true;
         }
     }
-    return paired_lights;
+    return armors;
 }
 
-void PairedLights::drawPairedLights(cv::Mat& img)
+void Detector::drawArmors(cv::Mat& img)
 {
-    for (const auto& points : paired_lights_points_) {
-        
+    for (const auto& armor : armors_) {
         for (int i = 0; i < 4; i++) {
             // 画出点
-            cv::circle(img, points[i], 3, cv::Scalar(0, 255, 0), -1);
-            cv::putText(img, std::to_string(i), points[i], cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(255, 0, 255));
+            cv::circle(img, armor.points_[i], 3, cv::Scalar(0, 255, 0), -1);
+            cv::putText(img, std::to_string(i), armor.points_[i], cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(255, 0, 255));
             // 画出线条
-            cv::line(img, points[i], points[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
+            cv::line(img, armor.points_[i], armor.points_[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
         }
     }
 }
-void PairedLights::drawAllLights(cv::Mat& img)
+void Detector::drawAllLights(cv::Mat& img)
 {
     for (const auto& light : find_lights_) {
         drawRotatedRect(img, light.rect_);
         cv::putText(img, "top", light.top_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
         cv::putText(img, "bottom", light.bottom_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
     }
+}
+
+cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
+{
+    // 保证是有内容的装甲板
+    if (armor.points_.size() != 4) return cv::Mat();
+    // 透视转换
+    auto rotation_matrix = cv::getPerspectiveTransform(armor.points_, NUMBER_TARGET_POINTS);
+    cv::Mat number_roi;
+    cv::warpPerspective(image, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
+    // 数字部分ROI
+    number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
+    // 预处理：灰度化 + 二值化
+    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
+    cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    return number_roi;
+}
+
+void Detector::showNumberROI()
+{
+    if (armors_.empty()) return;
+    std::vector<cv::Mat> valid_rois;
+    for (const auto& armor : armors_) {
+        if (!armor.number_roi_.empty()) {
+            valid_rois.push_back(armor.number_roi_);
+        }
+    }
+    cv::Mat concat_img;
+    cv::hconcat(valid_rois, concat_img);
+    cv::imshow("Number ROIs", concat_img);
 }
 
 /////////////////// 工具函数 //////////////////////////
