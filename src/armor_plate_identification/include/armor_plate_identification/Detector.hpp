@@ -66,6 +66,7 @@ private:
 	/// @return 是否符合要求
 	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
 	// =======DEBUG========== //
+	std::vector<cv::Mat> number_origin_rois_;
 public:
 	int num_lights_ = 0;
 	// ==调参列表== //
@@ -101,8 +102,11 @@ public:
 	/// @param img 要绘制的图像
 	void drawAllLights(cv::Mat& img);
 
-	/// @brief 测试用的，显示所有装甲板号码ROI
-	void showNumberROI();
+	/// @brief 测试用的，显示原始图像所有装甲板号码的ROI
+	void showNumberROI(); 
+
+	/// @brief 测试用的，显示所有二值化装甲板号码ROI
+	void showNumberBinaryROI();
 };
 
 /// @brief 画出一个旋转矩形

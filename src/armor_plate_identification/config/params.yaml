@@ -16,7 +16,7 @@ test_node_cpp:
     ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
     # === DEBUG ===
     debug_base: true
-    debug_identification: true
+    debug_identification: false
     debug_preprocessing: false
     debug_number_classification: true
 
@@ -27,9 +27,7 @@ armor_plate_identification_node:
     # === 相机类型 ===
     # camera_type: "mindvision"
     camera_type: "galaxy"
-    # === 相机参数（大恒） ===
-    camera_name: "narrow_stereo"
-    camera_info_url: "package://armor_plate_identification/config/camera_info.yaml"
+    # === 相机参数 ===
     exposure_time: 3500.0
     gain: 1.0
     # === 灯条匹配参数 ===
@@ -46,6 +44,6 @@ armor_plate_identification_node:
     ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
     # === DEBUG ===
     debug_base: true
-    debug_identification: true
+    debug_identification: false
     debug_preprocessing: false
     debug_number_classification: true

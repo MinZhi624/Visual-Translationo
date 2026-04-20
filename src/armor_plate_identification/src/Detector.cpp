@@ -242,12 +242,24 @@ cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
     cv::warpPerspective(image, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
     // 数字部分ROI
     number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
+    number_origin_rois_.push_back(number_roi.clone());
     // 预处理：灰度化 + 二值化
     cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY); cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
     return number_roi;
 }
 
 void Detector::showNumberROI()
+{
+    if(number_origin_rois_.empty()) return;
+    // 简单拼接显示所有号码ROI
+    cv::Mat concat_img;
+    cv::hconcat(number_origin_rois_, concat_img);
+    cv::imshow("Number Origin ROIs", concat_img);
+    // 清除数据，避免重复显示
+    number_origin_rois_.clear();
+}
+
+void Detector::showNumberBinaryROI()
 {
     if (armors_.empty()) return;
     std::vector<cv::Mat> valid_rois;

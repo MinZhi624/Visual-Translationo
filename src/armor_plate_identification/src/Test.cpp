@@ -149,12 +149,12 @@ private:
             showMultiImages("PreProcessions-View", images, labels);
         }
         if (debug_identification_) {
-            debug_controller_.drawParams(img_show_, lights_, process_time_ms_);
+            debug_controller_.drawParams(img_show_, lights_);
             lights_.drawAllLights(img_show_);
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
         if (debug_number_classification_) {
-            lights_.showNumberROI();
+            lights_.showNumberBinaryROI();
         }
     }
     void SolvePose()
@@ -259,6 +259,13 @@ private:
             }
         }
     }
+    void imageShow()
+    {
+        // 绘制处理用时
+        debug_controller_.drawProcessTime(img_show_, process_time_ms_);
+        // 显示图像
+        cv::imshow("img_show_", img_show_);
+    }
 public:
     Test(std::string video_path) : Node("test_node_cpp")
     {
@@ -284,12 +291,6 @@ public:
             SolvePose();
             // 数字识别
             NumberClassify();
-            // 图片展示
-            cv::imshow("img_show_", img_show_);
-            // 按键控制
-            controlParams();
-            // 打印
-            rclcpp::spin_some(this->get_node_base_interface());
             // 发布数据
             Publish();
             
@@ -297,6 +298,13 @@ public:
             auto t_end = std::chrono::steady_clock::now();
             process_time_ms_ = static_cast<float>(
                 std::chrono::duration<double, std::milli>(t_end - t_start).count());
+            
+            // 图片展示
+            imageShow();
+            // 按键控制
+            controlParams();
+            // 打印
+            rclcpp::spin_some(this->get_node_base_interface());
             
             // 控制速度
             if (debug_base_) {
