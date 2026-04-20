@@ -20,23 +20,6 @@ def generate_launch_description():
         'config',
         'params.yaml'
     )
-    galaxy_camera_params_file = os.path.join(
-        get_package_share_directory('galaxy_camera'),
-        'config',
-        'camera_params.yaml'
-    )
-    galaxy_camera_info_url = 'package://galaxy_camera/config/camera_info.yaml'
-
-    galaxy_camera_node = Node(
-        package='galaxy_camera',
-        executable='galaxy_camera_node',
-        name='galaxy_camera',
-        output='screen',
-        emulate_tty=True,
-        parameters=[galaxy_camera_params_file, {
-            'camera_info_url': galaxy_camera_info_url,
-        }]
-    )
 
     identification_node = Node(
         package='armor_plate_identification',
@@ -73,7 +56,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        galaxy_camera_node,
         identification_node,
         tracker_node,
         visualization_node,

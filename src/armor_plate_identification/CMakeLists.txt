@@ -44,11 +44,17 @@ add_executable(ArmorPlateIdentifcation ${ArmorPlateIdentifcation})
 add_executable(Test ${Test})
 
 # ======================
+# 大恒 SDK 路径
+# ======================
+set(GALAXY_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../rm_vision_ros2_galaxy_camera-master/GalaxySDK")
+
+# ======================
 # include 路径
 # ======================
 target_include_directories(ArmorPlateIdentifcation PUBLIC
 $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 $<INSTALL_INTERFACE:include>
+${GALAXY_SDK_ROOT}/include
 )
 target_include_directories(Test PUBLIC
 $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -68,8 +74,12 @@ target_compile_features(Test PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++1
 # ======================
 # 链接库
 # ======================
+target_link_directories(ArmorPlateIdentifcation PUBLIC
+  ${GALAXY_SDK_ROOT}/lib/amd64
+)
 target_link_libraries(ArmorPlateIdentifcation
 ${OpenCV_LIBS}
+gxiapi
 )
 target_link_libraries(Test
 ${OpenCV_LIBS}

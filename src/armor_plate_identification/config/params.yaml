@@ -27,6 +27,11 @@ armor_plate_identification_node:
     # === 相机类型 ===
     # camera_type: "mindvision"
     camera_type: "galaxy"
+    # === 相机参数（大恒） ===
+    camera_name: "narrow_stereo"
+    camera_info_url: "package://armor_plate_identification/config/camera_info.yaml"
+    exposure_time: 3500.0
+    gain: 1.0
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
     min_length_ratio: 0.7

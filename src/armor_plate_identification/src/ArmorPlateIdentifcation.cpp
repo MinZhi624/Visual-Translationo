@@ -19,6 +19,13 @@
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
+#include <camera_info_manager/camera_info_manager.hpp>
+
+// Galaxy SDK
+#include "GxIAPI.h"
+#include "DxImageProc.h"
+
+#define GX_SUCCESS(X) (X == GX_STATUS_SUCCESS)
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -36,8 +43,8 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    image_transport::CameraSubscriber camera_sub_;
     // 处理用时（毫秒）
     float process_time_ms_ = 0.0f;
     // 检测结果缓存（供数字识别使用）
@@ -52,13 +59,34 @@ private:
     bool debug_preprocessing_ = false;
     bool debug_number_classification_ = false;
     DebugParamController debug_controller_;
-    bool camera_info_received_ = false;
     std::vector<cv::Point3f> world_points_;
+
+    // === 相机相关 ===
+    bool camera_initialized_ = false;
+
+    // Galaxy
+    GX_DEV_HANDLE galaxy_handle_ = nullptr;
+    int64_t galaxy_payload_size_ = 0;
+    std::vector<char> galaxy_bayer_buffer_;
+    std::vector<unsigned char> galaxy_rgb_buffer_;
+    struct {
+        int64_t nWidthValue, nWidthMax;
+        int64_t nHeightValue, nHeightMax;
+    } img_info_;
+
+    // Camera info
+    std::string camera_name_;
+    std::unique_ptr<camera_info_manager::CameraInfoManager> camera_info_manager_;
+    sensor_msgs::msg::CameraInfo camera_info_msg_;
+
+    // 相机参数
+    double exposure_time_ = 5000;
+    double gain_ = 0;
 
     void init()
     {
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
-        camera_type_ = this->declare_parameter<std::string>("camera_type", "mindvision");
+        camera_type_ = this->declare_parameter<std::string>("camera_type", "galaxy");
         if (camera_type_ == "galaxy") {
             camera_frame_id_ = "camera_optical_frame";
         } else {
@@ -92,22 +120,18 @@ private:
 
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
+        camera_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera_info", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
-        rmw_qos_profile_t image_qos = rmw_qos_profile_sensor_data;
-        camera_sub_ = image_transport::create_camera_subscription(
-            this, "image_raw",
-            std::bind(&ArmorPlateIdentification::imageCallback, this,
-                      std::placeholders::_1, std::placeholders::_2),
-            "raw",
-            image_qos);
-        
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
         debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
 
-        RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s, frame_id: %s, 等待 /image_raw ...", camera_type_.c_str(), camera_frame_id_.c_str());
+        // ===== 相机初始化 ===== //
+        camera_init();
+
+        RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s, frame_id: %s", camera_type_.c_str(), camera_frame_id_.c_str());
         RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
         
         if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
@@ -125,6 +149,129 @@ private:
         }
     }
 
+    void camera_init()
+    {
+        if (camera_type_ == "galaxy") {
+            camera_init_galaxy();
+        } else if (camera_type_ == "mindvision") {
+            RCLCPP_WARN(this->get_logger(), "mindvision 相机初始化预留，暂未实现");
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "未知相机类型: %s", camera_type_.c_str());
+        }
+    }
+
+    void camera_init_galaxy()
+    {
+        GX_STATUS status;
+        RCLCPP_INFO(this->get_logger(), "Starting GalaxyCamera init!");
+
+        // Init lib
+        do {
+            status = GXInitLib();
+            if (!GX_SUCCESS(status)) {
+                RCLCPP_FATAL(this->get_logger(), "Init GxIAPI failed, code = %x!", status);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        } while (!GX_SUCCESS(status) && rclcpp::ok());
+
+        // Constantly try opening one camera
+        while (rclcpp::ok()) {
+            uint32_t device_count = 0;
+            status = GXUpdateDeviceList(&device_count, 100);
+            if (device_count < 1) {
+                RCLCPP_WARN(this->get_logger(), "No camera found. device_count = %d", device_count);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                continue;
+            }
+            status = GXOpenDeviceByIndex(1, &galaxy_handle_);
+            if (!GX_SUCCESS(status)) {
+                RCLCPP_ERROR(this->get_logger(), "Can not open camera, status = %d", status);
+            } else {
+                break;
+            }
+        };
+
+        // Get camera information
+        GXGetInt(galaxy_handle_, GX_INT_WIDTH, &img_info_.nWidthValue);
+        GXGetInt(galaxy_handle_, GX_INT_WIDTH_MAX, &img_info_.nWidthMax);
+        GXGetInt(galaxy_handle_, GX_INT_HEIGHT, &img_info_.nHeightValue);
+        GXGetInt(galaxy_handle_, GX_INT_HEIGHT_MAX, &img_info_.nHeightMax);
+
+        // Allocate buffers
+        int64_t payloadSize;
+        GXGetInt(galaxy_handle_, GX_INT_PAYLOAD_SIZE, &payloadSize);
+        galaxy_payload_size_ = payloadSize;
+        galaxy_bayer_buffer_.resize(galaxy_payload_size_);
+        galaxy_rgb_buffer_.reserve(img_info_.nHeightMax * img_info_.nWidthMax * 3);
+
+        // Declare parameters and set to camera
+        declareCameraParameters();
+
+        GXSendCommand(galaxy_handle_, GX_COMMAND_ACQUISITION_START);
+
+        // Load camera info
+        camera_name_ = this->declare_parameter("camera_name", "narrow_stereo");
+        camera_info_manager_ =
+          std::make_unique<camera_info_manager::CameraInfoManager>(this, camera_name_);
+        auto camera_info_url =
+          this->declare_parameter("camera_info_url", "package://armor_plate_identification/config/camera_info.yaml");
+        if (camera_info_manager_->validateURL(camera_info_url)) {
+            camera_info_manager_->loadCameraInfo(camera_info_url);
+            camera_info_msg_ = camera_info_manager_->getCameraInfo();
+        } else {
+            RCLCPP_WARN(this->get_logger(), "Invalid camera info URL: %s", camera_info_url.c_str());
+        }
+
+        // Init PoseSolver from loaded camera info
+        cv::Mat camera_matrix = cv::Mat::zeros(3, 3, CV_64F);
+        cv::Mat distortion_coefficients = cv::Mat::zeros(1, 5, CV_64F);
+        cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
+        for (int i = 0; i < 9; ++i) {
+            camera_matrix.at<double>(i / 3, i % 3) = camera_info_msg_.k[i];
+        }
+        for (size_t i = 0; i < camera_info_msg_.d.size() && i < 5; ++i) {
+            distortion_coefficients.at<double>(0, static_cast<int>(i)) = camera_info_msg_.d[i];
+        }
+        for (int i = 0; i < 12; ++i) {
+            projection_matrix.at<double>(i / 4, i % 4) = camera_info_msg_.p[i];
+        }
+        pose_solver_ = PoseSolver(world_points_, camera_matrix, distortion_coefficients, projection_matrix);
+
+        camera_initialized_ = true;
+        RCLCPP_INFO(this->get_logger(), "GalaxyCamera initialized: %ld x %ld", img_info_.nWidthValue, img_info_.nHeightValue);
+    }
+
+    void declareCameraParameters()
+    {
+        if (camera_type_ != "galaxy" || !galaxy_handle_) return;
+
+        rcl_interfaces::msg::ParameterDescriptor param_desc;
+        double f_value;
+        GX_FLOAT_RANGE f_range;
+        param_desc.integer_range.resize(1);
+        param_desc.integer_range[0].step = 1;
+
+        // Exposure time
+        param_desc.description = "Exposure time in microseconds";
+        GXGetFloat(galaxy_handle_, GX_FLOAT_EXPOSURE_TIME, &f_value);
+        GXGetFloatRange(galaxy_handle_, GX_FLOAT_EXPOSURE_TIME, &f_range);
+        param_desc.integer_range[0].from_value = f_range.dMin;
+        param_desc.integer_range[0].to_value = f_range.dMax;
+        exposure_time_ = this->declare_parameter("exposure_time", f_value, param_desc);
+        GXSetFloat(galaxy_handle_, GX_FLOAT_EXPOSURE_TIME, exposure_time_);
+        RCLCPP_INFO(this->get_logger(), "Exposure time: %f", exposure_time_);
+
+        // Gain
+        param_desc.description = "Gain";
+        GXGetFloat(galaxy_handle_, GX_FLOAT_GAIN, &f_value);
+        GXGetFloatRange(galaxy_handle_, GX_FLOAT_GAIN, &f_range);
+        param_desc.integer_range[0].from_value = f_range.dMin;
+        param_desc.integer_range[0].to_value = f_range.dMax;
+        gain_ = this->declare_parameter("gain", f_value, param_desc);
+        GXSetFloat(galaxy_handle_, GX_FLOAT_GAIN, gain_);
+        RCLCPP_INFO(this->get_logger(), "Gain: %f", gain_);
+    }
+
     void info()
     {
         if (debug_identification_) {
@@ -134,55 +281,51 @@ private:
         }
     }
 
-    void imageCallback(
-        const sensor_msgs::msg::Image::ConstSharedPtr& img_msg,
-        const sensor_msgs::msg::CameraInfo::ConstSharedPtr& info_msg)
+    bool cameraRead(cv::Mat& frame)
     {
-        // 相机初始化
-        if (!camera_info_received_ && info_msg) {
-            cv::Mat camera_matrix = cv::Mat::zeros(3, 3, CV_64F);
-            cv::Mat distortion_coefficients = cv::Mat::zeros(1, 5, CV_64F);
-            cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
-            for (int i = 0; i < 9; ++i) {
-                camera_matrix.at<double>(i / 3, i % 3) = info_msg->k[i];
-            }
-            for (size_t i = 0; i < info_msg->d.size() && i < 5; ++i) {
-                distortion_coefficients.at<double>(0, static_cast<int>(i)) = info_msg->d[i];
-            }
-            for (int i = 0; i < 12; ++i) {
-                projection_matrix.at<double>(i / 4, i % 4) = info_msg->p[i];
-            }
-            pose_solver_ = PoseSolver(world_points_, camera_matrix, distortion_coefficients, projection_matrix);
-            camera_info_received_ = true;
-            RCLCPP_INFO(this->get_logger(), "CameraInfo 已接收，相机类型: %s, 内参已加载 (fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f)",
-                        camera_type_.c_str(), info_msg->k[0], info_msg->k[4], info_msg->k[2], info_msg->k[5]);
+        if (camera_type_ == "galaxy") {
+            return cameraReadGalaxy(frame);
+        }
+        return false;
+    }
+
+    bool cameraReadGalaxy(cv::Mat& frame)
+    {
+        GX_FRAME_DATA bayer_frame {};
+        GX_STATUS status;
+        bayer_frame.pImgBuf = galaxy_bayer_buffer_.data();
+
+        status = GXGetImage(galaxy_handle_, &bayer_frame, 500);
+        if (!GX_SUCCESS(status)) {
+            RCLCPP_WARN(this->get_logger(), "Get buffer failed, status = %d", status);
+            GXSendCommand(galaxy_handle_, GX_COMMAND_ACQUISITION_STOP);
+            GXSendCommand(galaxy_handle_, GX_COMMAND_ACQUISITION_START);
+            return false;
         }
 
-        cv_bridge::CvImageConstPtr cv_ptr;
-        try {
-            cv_ptr = cv_bridge::toCvCopy(img_msg, "bgr8");
-        } catch (const cv_bridge::Exception& e) {
-            RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
-            return;
+        DX_PIXEL_COLOR_FILTER bayer_type;
+        switch (bayer_frame.nPixelFormat) {
+            case GX_PIXEL_FORMAT_BAYER_GR8: bayer_type = BAYERGR; break;
+            case GX_PIXEL_FORMAT_BAYER_RG8: bayer_type = BAYERRG; break;
+            case GX_PIXEL_FORMAT_BAYER_GB8: bayer_type = BAYERGB; break;
+            case GX_PIXEL_FORMAT_BAYER_BG8: bayer_type = BAYERBG; break;
+            default:
+                RCLCPP_FATAL(this->get_logger(), "Unsupported Bayer layout: %d!", bayer_frame.nPixelFormat);
+                return false;
         }
 
-        auto t_start = std::chrono::steady_clock::now();
-
-        cv::Mat frame = cv_ptr->image;
-        img_show_ = frame.clone();
-        Identification(frame);
-        SolvePose();
-        NumberClassify();
-        ImageShow();
-        controlParams();
-        Publish();
-        auto t_end = std::chrono::steady_clock::now();
-        process_time_ms_ = static_cast<float>(
-            std::chrono::duration<double, std::milli>(t_end - t_start).count());
-
-        if (debug_base_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
+        galaxy_rgb_buffer_.resize(bayer_frame.nWidth * bayer_frame.nHeight * 3);
+        status = DxRaw8toRGB24(bayer_frame.pImgBuf, galaxy_rgb_buffer_.data(),
+                               bayer_frame.nWidth, bayer_frame.nHeight,
+                               RAW2RGB_NEIGHBOUR, bayer_type, false);
+        if (!GX_SUCCESS(status)) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to convert Bayer to RGB, status = %d", status);
+            return false;
         }
+
+        cv::Mat rgb_img(bayer_frame.nHeight, bayer_frame.nWidth, CV_8UC3, galaxy_rgb_buffer_.data());
+        cv::cvtColor(rgb_img, frame, cv::COLOR_RGB2BGR);
+        return true;
     }
 
     void Identification(cv::Mat& image)
@@ -198,7 +341,7 @@ private:
         lights_.detectArmors(img_thre, image);
         lights_.drawArmors(img_show_);
         armors_ = lights_.getArmors();
-////////////////////// DEUBG ////////////////////////
+        ////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
             // 预处理四图拼接显示
             // 绘制目标区域
@@ -281,6 +424,12 @@ private:
         armor_plates_msg.header.frame_id = camera_frame_id_;
         armor_plates_msg.armor_plates = armor_plates_;
         armor_plates_pub_->publish(armor_plates_msg);
+
+        // 发布 camera_info
+        camera_info_msg_.header.stamp = stamp;
+        camera_info_msg_.header.frame_id = camera_frame_id_;
+        camera_info_pub_->publish(camera_info_msg_);
+
         ////////////////// DEBUG ////////////////////////
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
             cv::Mat undistorted = pose_solver_.undistortImage(img_show_);
@@ -331,14 +480,64 @@ public:
     
     ~ArmorPlateIdentification()
     {
+        if (galaxy_handle_) {
+            GXSendCommand(galaxy_handle_, GX_COMMAND_ACQUISITION_STOP);
+            GXCloseDevice(galaxy_handle_);
+        }
+        GXCloseLib();
         cv::destroyAllWindows();
+    }
+    
+    void run()
+    {
+        if (!camera_initialized_) {
+            RCLCPP_ERROR(this->get_logger(), "相机未初始化，无法运行");
+            return;
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "开始图像处理循环");
+        
+        int fail_count = 0;
+        while (rclcpp::ok()) {
+            cv::Mat frame;
+            if (!cameraRead(frame)) {
+                fail_count++;
+                if (fail_count > 5) {
+                    RCLCPP_FATAL(this->get_logger(), "Camera failed!");
+                    rclcpp::shutdown();
+                }
+                continue;
+            }
+            fail_count = 0;
+            
+            auto t_start = std::chrono::steady_clock::now();
+
+            img_show_ = frame.clone();
+            Identification(frame);
+            SolvePose();
+            NumberClassify();
+            ImageShow();
+            controlParams();
+            Publish();
+            
+            auto t_end = std::chrono::steady_clock::now();
+            process_time_ms_ = static_cast<float>(
+                std::chrono::duration<double, std::milli>(t_end - t_start).count());
+
+            if (debug_base_) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
+            }
+        }
     }
 };
 
 int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<ArmorPlateIdentification>());
+    auto node = std::make_shared<ArmorPlateIdentification>();
+    std::thread spin_thread([&]() { rclcpp::spin(node); });
+    node->run();
     rclcpp::shutdown();
+    if (spin_thread.joinable()) spin_thread.join();
     return 0;
 }
