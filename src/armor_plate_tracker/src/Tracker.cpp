@@ -108,8 +108,8 @@ bool Tracker::selectBestMatch(const std::vector<cv::Vec3d>& positions,
     // 如果只有一个目标，直接选择
     if (positions.size() == 1) {
         out_position = positions[0];
-        out_yaw = calculateYaw(positions[0][0], positions[0][1], positions[0][2]);
-        out_pitch = calculatePitch(positions[0][0], positions[0][1], positions[0][2]);
+        out_yaw = calculateYaw(positions[0]);
+        out_pitch = calculatePitch(positions[0]);
         return true;
     }
     
@@ -131,8 +131,8 @@ bool Tracker::selectBestMatch(const std::vector<cv::Vec3d>& positions,
             }
         }
         out_position = positions[min_idx];
-        out_yaw = calculateYaw(positions[min_idx][0], positions[min_idx][1], positions[min_idx][2]);
-        out_pitch = calculatePitch(positions[min_idx][0], positions[min_idx][1], positions[min_idx][2]);
+        out_yaw = calculateYaw(positions[min_idx]);
+        out_pitch = calculatePitch(positions[min_idx]);
         return true;
     }
     
@@ -140,8 +140,8 @@ bool Tracker::selectBestMatch(const std::vector<cv::Vec3d>& positions,
     size_t best_idx = 0;
     
     for (size_t i = 0; i < positions.size(); ++i) {
-        float yaw = calculateYaw(positions[i][0], positions[i][1], positions[i][2]);
-        float pitch = calculatePitch(positions[i][0], positions[i][1], positions[i][2]);
+        float yaw = calculateYaw(positions[i]);
+        float pitch = calculatePitch(positions[i]);
         // 计算欧氏距离的平方（避免开方运算）
         float dy = yaw - pred_yaw;
         float dp = pitch - pred_pitch;
@@ -154,8 +154,8 @@ bool Tracker::selectBestMatch(const std::vector<cv::Vec3d>& positions,
     }
     
     out_position = positions[best_idx];
-    out_yaw = calculateYaw(positions[best_idx][0], positions[best_idx][1], positions[best_idx][2]);
-    out_pitch = calculatePitch(positions[best_idx][0], positions[best_idx][1], positions[best_idx][2]);
+    out_yaw = calculateYaw(positions[best_idx]);
+    out_pitch = calculatePitch(positions[best_idx]);
     return true;
 }
 
@@ -300,21 +300,18 @@ void Tracker::Update(const std::vector<cv::Vec3d>& positions,
     is_lost_ = false;
 }
 
-float Tracker::calculateYaw(float tx, float ty, float tz)
+float Tracker::calculateYaw(const cv::Vec3d& tvec)
 {
-    // yaw: 左正右负（与atan2(tx, tz)的符号相反）
-    (void)ty;
-    return -static_cast<float>(std::atan2(tx, tz));
+    return -static_cast<float>(std::atan2(tvec[0], tvec[2]));
 }
 
-float Tracker::calculatePitch(float tx, float ty, float tz)
+float Tracker::calculatePitch(const cv::Vec3d& tvec)
 {
-    (void)tx;
-    double horizontal_dist = std::sqrt(static_cast<double>(tx) * tx + static_cast<double>(tz) * tz);
-    return static_cast<float>(std::atan2(-ty, horizontal_dist));
+    double horizontal_dist = cv::norm(cv::Vec2d(tvec[0], tvec[2]));
+    return static_cast<float>(std::atan2(-tvec[1], horizontal_dist));
 }
 
-float Tracker::calculateDistance(float tx, float ty, float tz)
+float Tracker::calculateDistance(const cv::Vec3d& tvec)
 {
-    return std::sqrt(tx * tx + ty * ty + tz * tz);
+    return static_cast<float>(cv::norm(tvec));
 }

@@ -1,6 +1,7 @@
 #include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
+#include "armor_plate_identification/NumberClassifier.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
@@ -10,9 +11,9 @@
 
 #include <iostream>
 #include <rclcpp/rclcpp.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <thread>
 #include <chrono>
-#include <cmath>
 
 #include "tf2_ros/transform_broadcaster.hpp"
 #include <cv_bridge/cv_bridge.h>
@@ -39,12 +40,17 @@ private:
     image_transport::CameraSubscriber camera_sub_;
     // 处理用时（毫秒）
     float process_time_ms_ = 0.0f;
+    // 检测结果缓存（供数字识别使用）
+    std::vector<Armor> armors_;
     // 解算结果
     std::vector<ArmorPlate> armor_plates_;
+    // 数字识别
+    NumberClassifier number_classifier_;
     // debug 
     bool debug_base_ = false;
     bool debug_identification_ = false;
     bool debug_preprocessing_ = false;
+    bool debug_number_classification_ = false;
     DebugParamController debug_controller_;
     bool camera_info_received_ = false;
     std::vector<cv::Point3f> world_points_;
@@ -59,7 +65,7 @@ private:
             camera_frame_id_ = "camera_link";
         }
         lights_.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
-        lights_.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.6));
+        lights_.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.7));
         lights_.MIN_X_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
         lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
         lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
@@ -72,6 +78,17 @@ private:
         world_points_.push_back(cv::Point3f(67.5f, -27.5f, 0)); // 1
         world_points_.push_back(cv::Point3f(67.5f, 27.5f, 0)); // 2
         world_points_.push_back(cv::Point3f(-67.5f, 27.5f, 0)); // 3
+
+        // ===== 初始化数字识别 ===== //
+        std::string package_share_dir = ament_index_cpp::get_package_share_directory("armor_plate_identification");
+        std::string model_relative_path = this->declare_parameter<std::string>("model_path", "");
+        std::string label_relative_path = this->declare_parameter<std::string>("label_path", "");
+        std::string model_path = package_share_dir + "/" + model_relative_path;
+        std::string label_path = package_share_dir + "/" + label_relative_path;
+        double number_threshold = this->declare_parameter<double>("number_threshold", 0.15);
+        std::vector<std::string> empty;
+        std::vector<std::string> ignore_labels = this->declare_parameter<std::vector<std::string>>("ignore_labels", empty);
+        number_classifier_ = NumberClassifier(model_path, label_path, number_threshold, ignore_labels);
 
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
@@ -88,6 +105,7 @@ private:
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
+        debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
 
         RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s, frame_id: %s, 等待 /image_raw ...", camera_type_.c_str(), camera_frame_id_.c_str());
         RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
@@ -96,6 +114,7 @@ private:
         if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
         if (debug_identification_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
         if (debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
+        if (debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");
         
         if (debug_identification_ && debug_base_) {
             RCLCPP_INFO(this->get_logger(), "DEBUG模式：1-6选参数  T/G调值  +/-调速度");
@@ -153,10 +172,10 @@ private:
         img_show_ = frame.clone();
         Identification(frame);
         SolvePose();
+        NumberClassify();
         ImageShow();
         controlParams();
         Publish();
-
         auto t_end = std::chrono::steady_clock::now();
         process_time_ms_ = static_cast<float>(
             std::chrono::duration<double, std::milli>(t_end - t_start).count());
@@ -178,6 +197,7 @@ private:
         // 灯条匹配
         lights_.detectArmors(img_thre, image);
         lights_.drawArmors(img_show_);
+        armors_ = lights_.getArmors();
 ////////////////////// DEUBG ////////////////////////
         if (debug_preprocessing_) {
             // 预处理四图拼接显示
@@ -193,12 +213,15 @@ private:
             lights_.drawAllLights(img_show_);
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
+        if (debug_number_classification_) {
+            lights_.showNumberROI();
+        }
     }
 
     void SolvePose()
     {
         std::vector<ArmorPlate> armor_plates;
-        for (const auto& armor : lights_.getArmors()) {
+        for (const auto& armor : armors_) {
             pose_solver_.solve(armor.points_);
             ArmorPlate armor_plate;
             cv::Mat tvec = pose_solver_.getTvec();
@@ -217,6 +240,19 @@ private:
             armor_plates.push_back(armor_plate);
         }
         armor_plates_ = armor_plates;
+    }
+
+    void NumberClassify()
+    {
+        number_classifier_.classify(armors_);
+        // 保存数据
+        for (size_t i = 0; i < armors_.size() && i < armor_plates_.size(); i++) {
+            armor_plates_[i].number = armors_[i].number_;
+        }
+        ////////// DEBUG /////////
+        if (debug_number_classification_) { 
+            drawAllNumberTest(img_show_, armors_);
+        }
     }
     
     void Publish()
@@ -247,10 +283,9 @@ private:
         armor_plates_pub_->publish(armor_plates_msg);
         ////////////////// DEBUG ////////////////////////
         if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
-        cv::Mat undistorted = pose_solver_.undistortImage(img_show_);
+            cv::Mat undistorted = pose_solver_.undistortImage(img_show_);
             cv::Mat resized;
-            //cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
-            cv::resize(img_show_, resized, cv::Size(), 0.5, 0.5);
+            cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
             auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
             cv_img.header.stamp = stamp;
             cv_img.header.frame_id = camera_frame_id_;

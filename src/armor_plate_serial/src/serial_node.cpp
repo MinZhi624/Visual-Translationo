@@ -55,8 +55,6 @@ private:
           RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
         }
         RCLCPP_INFO(this->get_logger(), "发送数据: yaw=%f, pitch=%f", yaw, pitch);
-      } else {
-        RCLCPP_INFO(this->get_logger(), "没有目标");
       }
       rate.sleep();
     }

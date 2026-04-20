@@ -12,7 +12,7 @@ test_node_cpp:
     # === 数字分类器参数 ===
     model_path: "model/mlp.onnx"
     label_path: "model/label.txt"
-    classifier_threshold: 0.5
+    number_threshold: 0.2
     ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
     # === DEBUG ===
     debug_base: true
@@ -25,11 +25,11 @@ armor_plate_identification_node:
     # === 目标颜色 ===
     target_color: "BLUE"
     # === 相机类型 ===
-    camera_type: "mindvision"
-  # camera_type: "galaxy"
+    # camera_type: "mindvision"
+    camera_type: "galaxy"
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
-    min_length_ratio: 0.6
+    min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
@@ -37,7 +37,7 @@ armor_plate_identification_node:
     # === 数字分类器参数 ===
     model_path: "model/mlp.onnx"
     label_path: "model/label.txt"
-    classifier_threshold: 0.5
+    number_threshold: 0.2
     ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
     # === DEBUG ===
     debug_base: true

@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "armor_plate_identification/Armor.hpp"
 #include <opencv2/core/types.hpp>
+#include <vector>
 
 class Detector
 {
@@ -64,8 +65,7 @@ private:
 	/// @param contour 灯条的轮廓
 	/// @return 是否符合要求
 	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
-	// ================= //
-
+	// =======DEBUG========== //
 public:
 	int num_lights_ = 0;
 	// ==调参列表== //

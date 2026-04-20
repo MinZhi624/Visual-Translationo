@@ -70,9 +70,9 @@ private:
     bool isLostTooLong(double current_time) const;
 
     // 从tvec计算yaw/pitch/distance（放在Tracker内部）
-    static float calculateYaw(float tx, float ty, float tz);
-    static float calculatePitch(float tx, float ty, float tz);
-    static float calculateDistance(float tx, float ty, float tz);
+    static float calculateYaw(const cv::Vec3d& tvec);
+    static float calculatePitch(const cv::Vec3d& tvec);
+    static float calculateDistance(const cv::Vec3d& tvec);
 
 public:
     // 默认构造函数

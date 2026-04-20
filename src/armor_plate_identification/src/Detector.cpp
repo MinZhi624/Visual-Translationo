@@ -124,8 +124,8 @@ bool Detector::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& re
     double mean_b = cv::mean(bgr[0], mask)[0];
     double mean_r = cv::mean(bgr[2], mask)[0];
     // 3. 比例判断，对光照变化更鲁棒 --> 避免杂光
-    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.5;
-    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.5;
+    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.2;
+    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.2;
     return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
 }
 
@@ -243,8 +243,7 @@ cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
     // 数字部分ROI
     number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
     // 预处理：灰度化 + 二值化
-    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
-    cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY); cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
     return number_roi;
 }
 
