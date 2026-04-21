@@ -155,6 +155,7 @@ private:
         }
         if (debug_number_classification_) {
             lights_.showNumberBinaryROI();
+            lights_.showNumberROI();
         }
     }
     void SolvePose()

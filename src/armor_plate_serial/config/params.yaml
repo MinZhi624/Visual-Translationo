@@ -1,4 +1,4 @@
-serial_driver_node_cpp:
+armor_plate_serial_node:
   ros__parameters:
     device_name: "/dev/ttyACM0"
     baud_rate: 115200

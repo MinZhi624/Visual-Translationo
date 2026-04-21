@@ -182,6 +182,7 @@ private:
         }
         if (debug_number_classification_) {
             lights_.showNumberBinaryROI();
+            lights_.showNumberROI();
         }
     }
 
@@ -290,7 +291,7 @@ private:
         cv::imshow("Identifacation", img_show_);
     }
 public:
-    ArmorPlateIdentification() : Node("armor_plate_identification_node")
+    ArmorPlateIdentification() : Node("armor_plate_identification_node"), camera_driver_(this)
     {
         init();
     }

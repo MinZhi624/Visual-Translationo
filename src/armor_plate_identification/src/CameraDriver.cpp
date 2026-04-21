@@ -127,7 +127,7 @@ bool CameraDriver::initMindVision(double exposure, double gain)
     CameraPlay(mv_handle_);
 
     // Load camera info
-    camera_name_ = "mv_camera";
+    camera_name_ = "narrow_stereo";
     camera_info_manager_ = std::make_unique<camera_info_manager::CameraInfoManager>(node_, camera_name_);
     std::string camera_info_url = "package://armor_plate_identification/config/mindvision_camera_info.yaml";
     if (camera_info_manager_->validateURL(camera_info_url)) {

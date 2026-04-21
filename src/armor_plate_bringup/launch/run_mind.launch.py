@@ -20,23 +20,6 @@ def generate_launch_description():
         'config',
         'params.yaml'
     )
-    mv_camera_params_file = os.path.join(
-        get_package_share_directory('mindvision_camera'),
-        'config',
-        'camera_params.yaml'
-    )
-    mv_camera_info_url = 'package://mindvision_camera/config/camera_info.yaml'
-
-    mv_camera_node = Node(
-        package='mindvision_camera',
-        executable='mindvision_camera_node',
-        name='mv_camera',
-        output='screen',
-        emulate_tty=True,
-        parameters=[mv_camera_params_file, {
-            'camera_info_url': mv_camera_info_url,
-        }]
-    )
 
     identification_node = Node(
         package='armor_plate_identification',
@@ -73,7 +56,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        mv_camera_node,
         identification_node,
         tracker_node,
         visualization_node,
