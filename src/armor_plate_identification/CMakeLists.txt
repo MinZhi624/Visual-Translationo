@@ -47,11 +47,11 @@ add_executable(Test ${Test})
 # ======================
 # 大恒 SDK 路径
 # ======================
-set(GALAXY_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../rm_vision_ros2_galaxy_camera-master/GalaxySDK")
+set(GALAXY_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_parties/GalaxySDK")
 # ======================
 # 迈德 SDK 路径
 # ======================
-set(MINDVISION_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../ros2_mindvision_camera/mvsdk")
+set(MINDVISION_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_parties/mvsdk")
 
 # ======================
 # include 路径
@@ -118,6 +118,23 @@ ament_target_dependencies(
   "armor_plate_interfaces"
 )
   
+# ======================
+# 安装第三方动态库
+# ======================
+file(GLOB GALAXY_LIBS "${GALAXY_SDK_ROOT}/lib/amd64/*")
+install(FILES ${GALAXY_LIBS}
+  DESTINATION lib/${PROJECT_NAME}
+)
+file(GLOB MINDVISION_LIBS "${MINDVISION_SDK_ROOT}/lib/amd64/*")
+install(FILES ${MINDVISION_LIBS}
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# ======================
+# 环境钩子：自动配置 LD_LIBRARY_PATH / GENICAM_GENTL64_PATH
+# ======================
+ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/third_parties_lib_path.sh.in")
+
 # ======================
 # 安装
 # ======================
