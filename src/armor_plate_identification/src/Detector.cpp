@@ -268,8 +268,8 @@ cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
     }
     //////////////////
 
-    cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-    // 开运算
+    // CNN模型直接输入灰度图，不再二值化
+    // cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
     return number_roi;
 }
 

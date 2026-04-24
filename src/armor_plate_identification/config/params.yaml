@@ -10,10 +10,10 @@ test_node_cpp:
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
     # === 数字分类器参数 ===
-    model_path: "model/mlp.onnx"
-    label_path: "model/label.txt"
+    model_path: "model/number_cnn.onnx"
+    label_path: "model/label_cnn.txt"
     number_threshold: 0.2
-    ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
+    ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
     debug_identification: false
@@ -38,10 +38,10 @@ armor_plate_identification_node:
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
     # === 数字分类器参数 ===
-    model_path: "model/mlp.onnx"
-    label_path: "model/label.txt"
+    model_path: "model/number_cnn.onnx"
+    label_path: "model/label_cnn.txt"
     number_threshold: 0.2
-    ignore_labels: ["negative", "outpost", "guard", "base", "negative"]
+    ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
     debug_identification: false

@@ -32,11 +32,9 @@ void NumberClassifier::classify(std::vector<Armor>& armors)
             continue;
         }
         cv::Mat image = armor.number_roi_;
-        // 归一化
-        image = image / 255.0;
-        // 打包成blob
+        // 打包成blob，同时做归一化 (1/255) 和尺寸校验
         cv::Mat blob;
-        cv::dnn::blobFromImage(image, blob);
+        cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(20, 28), 0, false, false);
         // 把blob输入网络
         net_.setInput(blob);
         // 前向传播
