@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 #include <cmath>
+#include <mutex>
 
 using armor_plate_interfaces::msg::AimCommand;
 
@@ -16,10 +17,11 @@ using armor_plate_interfaces::msg::AimCommand;
 class SerialDriver : public rclcpp::Node
 {
 private:
-  // 核心数据
-  std::atomic<float> latest_yaw_{0.0f};
-  std::atomic<float> latest_pitch_{0.0f};
-  std::atomic<bool> has_target_{false};
+  // 核心数据（受 mutex 保护）
+  float latest_yaw_{0.0f};
+  float latest_pitch_{0.0f};
+  bool has_target_{false};
+  std::mutex data_mutex_;
   rclcpp::Subscription<AimCommand>::SharedPtr aim_command_sub_;
   // 串口
   std::unique_ptr<IoContext> owned_ctx_;
@@ -33,12 +35,22 @@ private:
   {
     rclcpp::Rate rate(100);  // 100 Hz
     while (running_.load() && rclcpp::ok()) {
-      if (has_target_.load() && latest_yaw_.load() != 0.0f && latest_pitch_.load() != 0.0f) {
-        // 数据获取
-        has_target_.store(false);
-        float yaw = latest_yaw_.load();
-        float pitch = latest_pitch_.load();
-        // 数据打包
+      float yaw = 0.0f;
+      float pitch = 0.0f;
+      bool do_send = false;
+
+      {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        if (has_target_ && latest_yaw_ != 0.0f && latest_pitch_ != 0.0f) {
+          has_target_ = false;
+          yaw = latest_yaw_;
+          pitch = latest_pitch_;
+          do_send = true;
+        }
+      }
+      
+      if (do_send) {
+        // 数据打包（此时已有局部副本，不受回调影响）
         VisionToEcFrame_t frame;
         frame.sof1 = 0xA5;
         frame.sof2 = 0x5A;
@@ -50,11 +62,16 @@ private:
           reinterpret_cast<uint8_t *>(&frame),
           reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
         try {
-          serial_driver_->port()->send(data);
+          size_t sent = serial_driver_->port()->send(data);
+          if (sent != data.size()) {
+            RCLCPP_ERROR(
+              this->get_logger(), "发送不完整: 期望 %zu, 实际 %zu", data.size(), sent);
+          } else {
+            RCLCPP_INFO(this->get_logger(), "发送数据: yaw=%f, pitch=%f", yaw, pitch);
+          }
         } catch (const std::exception & e) {
           RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
         }
-        RCLCPP_INFO(this->get_logger(), "发送数据: yaw=%f, pitch=%f", yaw, pitch);
       }
       rate.sleep();
     }
@@ -80,9 +97,10 @@ private:
     aim_command_sub_ = this->create_subscription<AimCommand>(
       "aim_command", 10,
       [this](const AimCommand::SharedPtr msg) {
-        latest_yaw_.store(msg->delta_yaw);
-        latest_pitch_.store(msg->delta_pitch);
-        has_target_.store(true);
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        latest_yaw_ = msg->delta_yaw;
+        latest_pitch_ = msg->delta_pitch;
+        has_target_ = true;
       }
     );
     // ===== 启动发送线程 =====
