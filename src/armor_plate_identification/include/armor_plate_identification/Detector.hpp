@@ -67,6 +67,9 @@ private:
 	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
 	// =======DEBUG========== //
 	std::vector<cv::Mat> number_origin_rois_;
+	int outputPictureCounts_ = 0;
+	std::string outputPath_ = "./picture";
+	bool is_star_save_ = false;
 public:
 	int num_lights_ = 0;
 	// ==调参列表== //
@@ -82,6 +85,7 @@ public:
 	float MAX_DISTANCE_RATIO = 1.0f;
 	float MIN_DISTANCE_RATIO = 0.2f;
 	std::string TARGET_COLOR = "BLUE"; // "RED" 或 "BLUE"
+
 	// =========== //
 	
 	/// @brief 这个灯条匹配类的主函数。找到并匹配好灯条
@@ -107,6 +111,10 @@ public:
 
 	/// @brief 测试用的，显示所有二值化装甲板号码ROI
 	void showNumberBinaryROI();
+
+	/// @brief 设置是否保存图片
+	/// @param is_star_save 是否保存图片
+	void setSave(bool is_star_save) { is_star_save_ = is_star_save; }
 };
 
 /// @brief 画出一个旋转矩形

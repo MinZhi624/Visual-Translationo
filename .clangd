@@ -1,0 +1,25 @@
+CompileFlags:
+  CompilationDatabase: build
+  Compiler: /usr/bin/g++
+  Add:
+    - -std=c++17
+    - -I/opt/ros/humble/include
+    - -I/usr/include/eigen3
+    - -I/usr/include/opencv4
+    - -Isrc/rm_vision_ros2_galaxy_camera-master/GalaxySDK/include
+    - -Isrc/ros2_mindvision_camera/mvsdk/include
+  Remove:
+    - -Werror
+    - -fno-exceptions
+
+Index:
+  Background: Build
+
+Diagnostics:
+  UnusedIncludes: None
+  ClangTidy:
+    Add: ["bugprone-*", "performance-*", "portability-*"]
+    Remove: ["readability-*", "cppcoreguidelines-*", "modernize-*", "google-*", "bugprone-narrowing-conversions", "performance-unnecessary-value-param", "bugprone-easily-swappable-parameters"]
+
+InlayHints:
+  Enabled: false

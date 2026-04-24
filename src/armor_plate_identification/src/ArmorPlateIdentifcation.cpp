@@ -279,6 +279,9 @@ private:
             cv::waitKey(0);
             return;
         }
+        if (key == 's' || key == 'S') {
+            lights_.setSave(true);
+        }
         if (debug_base_) {
             if (debug_controller_.handleKey(key, lights_, this->get_logger())) {
                 return;

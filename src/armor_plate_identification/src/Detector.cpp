@@ -1,7 +1,10 @@
 ﻿#include "armor_plate_identification/Detector.hpp"
+#include <opencv2/core/types.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/core/utils/filesystem.hpp>
 ////////////////////// Detector /////////////////////////
 void Detector::init()
 {
@@ -244,7 +247,29 @@ cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
     number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
     number_origin_rois_.push_back(number_roi.clone());
     // 预处理：灰度化 + 二值化
-    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY); cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
+    
+    ///// 图像输出 /////
+    if (++outputPictureCounts_ < 300 && is_star_save_) {
+        // 确保输出目录存在
+        if (!cv::utils::fs::createDirectories(outputPath_)) {
+            RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
+                "Failed to create directory: %s", outputPath_.c_str());
+        }
+        std::string file_name = outputPath_ + "/roi_" + std::to_string(outputPictureCounts_) + ".png";
+        if (!cv::imwrite(file_name, number_roi.clone())) {
+            RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
+                "Failed to write image: %s", file_name.c_str());
+        }
+        RCLCPP_INFO(rclcpp::get_logger("Detector"), "保存成功");
+    } else if(outputPictureCounts_ >= 300 && is_star_save_) {
+        outputPictureCounts_ = 0;
+        is_star_save_ = false;
+    }
+    //////////////////
+
+    cv::threshold(number_roi, number_roi, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    // 开运算
     return number_roi;
 }
 
