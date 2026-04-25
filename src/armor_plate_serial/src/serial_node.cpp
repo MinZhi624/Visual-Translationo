@@ -50,7 +50,7 @@ private:
       }
       
       if (do_send) {
-        // 数据打包（此时已有局部副本，不受回调影响）
+        // 数据打包（此时已有局部副本，不受回调影响）-- 实现数据读取与处理分离
         VisionToEcFrame_t frame;
         frame.sof1 = 0xA5;
         frame.sof2 = 0x5A;

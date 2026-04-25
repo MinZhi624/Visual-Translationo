@@ -246,12 +246,14 @@ private:
             rclcpp::shutdown();
             return;
         }
-
         // P：暂停
         if (key == 'p' || key == 'P') {
             RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
             cv::waitKey(0);
             return;
+        }
+        if (key == 's' || key == 'S') {
+            lights_.setSave(true);
         }
 
         if (debug_base_) {
@@ -267,63 +269,59 @@ private:
         // 显示图像
         cv::imshow("img_show_", img_show_);
     }
-public:
-    Test(std::string video_path) : Node("test_node_cpp")
+    void Save()
     {
-        RCLCPP_INFO(this->get_logger(), "测试节点已经启动");
-        init(video_path);
-
+        ////////// DEBUG ///////////
+        if(debug_number_classification_) {
+            lights_.saveNumberRoi();
+        }        
+    }
+public:
+    void run()
+    {
         cv::Mat frame;
-        while(true)
+        while(rclcpp::ok())
         {
             c_ >> frame;
             if (frame.empty()) {
                 RCLCPP_INFO(this->get_logger(), "视频播放结束");
                 return;
             }
-            if (!rclcpp::ok()) return;
             img_show_ = frame.clone();
-            // 开始计时
             auto t_start = std::chrono::steady_clock::now();
-            
-            // 图像处理
+
             Identification(frame);
-            // 解算
             SolvePose();
-            // 数字识别
             NumberClassify();
-            // 发布数据
             Publish();
-            
-            // 结束计时
+
             auto t_end = std::chrono::steady_clock::now();
-            process_time_ms_ = static_cast<float>(
-                std::chrono::duration<double, std::milli>(t_end - t_start).count());
+            process_time_ms_ = static_cast<float>(std::chrono::duration<double, std::milli>(t_end - t_start).count());
             
-            // 图片展示
             imageShow();
-            // 按键控制
             controlParams();
-            // 打印
-            rclcpp::spin_some(this->get_node_base_interface());
-            
-            // 控制速度
+            Save();
             if (debug_base_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
             }
         }
         RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
     }
+    
+    Test(std::string video_path) : Node("test_node_cpp")
+    {
+        RCLCPP_INFO(this->get_logger(), "测试节点已经启动");
+        init(video_path);
+    }
 };
 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    if (argc < 2) {
-        RCLCPP_ERROR(rclcpp::get_logger("rclcpp"), "请输入正确的参数，输入视频地址");
-        return 1;
-    }
     auto node = std::make_shared<Test>(argv[1]);
+    std::thread spin_thread([&](){rclcpp::spin(node);});
+    node->run();
     rclcpp::shutdown();
+    if(spin_thread.joinable()) spin_thread.join();
     return 0;
 }

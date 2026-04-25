@@ -115,6 +115,8 @@ public:
 	/// @brief 设置是否保存图片
 	/// @param is_star_save 是否保存图片
 	void setSave(bool is_star_save) { is_star_save_ = is_star_save; }
+
+	void saveNumberRoi();
 };
 
 /// @brief 画出一个旋转矩形

@@ -225,9 +225,12 @@ private:
     
     void Publish()
     {
-        int index = 0;
         builtin_interfaces::msg::Time stamp = this->now();
-
+        
+        // 只发布数字识别有效的装甲板
+        std::vector<ArmorPlate> valid_armor_plates;
+        valid_armor_plates.reserve(armor_plates_.size());
+        int index = 0;
         for (const auto& armor_plate : armor_plates_)
         {
             geometry_msgs::msg::TransformStamped transformStamped;
@@ -242,11 +245,13 @@ private:
             transformStamped.transform.rotation.z = armor_plate.pose.orientation.z;
             transformStamped.transform.rotation.w = armor_plate.pose.orientation.w;
             tf_broadcaster_->sendTransform(transformStamped);
+            valid_armor_plates.push_back(armor_plate);
         }
+        
         ArmorPlates armor_plates_msg;
         armor_plates_msg.header.stamp = stamp;
         armor_plates_msg.header.frame_id = camera_frame_id_;
-        armor_plates_msg.armor_plates = armor_plates_;
+        armor_plates_msg.armor_plates = valid_armor_plates;
         armor_plates_pub_->publish(armor_plates_msg);
         // 发布 camera_info
         camera_info_msg_.header.stamp = stamp;
@@ -293,6 +298,13 @@ private:
         debug_controller_.drawProcessTime(img_show_, process_time_ms_);
         cv::imshow("Identifacation", img_show_);
     }
+    void Save()
+    {
+        ////////// DEBUG ///////////
+        if(debug_number_classification_) {
+            lights_.saveNumberRoi();
+        }        
+    }
 public:
     ArmorPlateIdentification() : Node("armor_plate_identification_node"), camera_driver_(this)
     {
@@ -308,7 +320,6 @@ public:
     void run()
     {
         RCLCPP_INFO(this->get_logger(), "开始图像处理循环");
-        
         int fail_count = 0;
         while (rclcpp::ok()) {
             cv::Mat frame = camera_driver_.Read();
@@ -328,12 +339,11 @@ public:
             SolvePose();
             NumberClassify();
             Publish();
-            
+            Save();
             auto t_end = std::chrono::steady_clock::now();
             process_time_ms_ = static_cast<float>(std::chrono::duration<double, std::milli>(t_end - t_start).count());
             ImageShow();
             controlParams();
-
             if (debug_base_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
             }
