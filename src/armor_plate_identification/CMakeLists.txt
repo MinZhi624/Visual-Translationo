@@ -12,21 +12,16 @@ set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
   src/CameraDriver.cpp
   src/PoseSolver.cpp
-  src/Recognize.cpp
-  src/PairedLights.cpp
+  src/Detector.cpp
   src/TestFunc.cpp
-  src/Tracker.cpp
-  src/MyKalmanFilter.cpp
+  src/NumberClassifier.cpp
 )
 set( Test
   src/Test.cpp
   src/TestFunc.cpp
-  src/CameraDriver.cpp
   src/PoseSolver.cpp
-  src/Recognize.cpp
-  src/PairedLights.cpp
-  src/Tracker.cpp
-  src/MyKalmanFilter.cpp
+  src/Detector.cpp
+  src/NumberClassifier.cpp
 )
 # ======================
 # 依赖
@@ -39,25 +34,24 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
-
-# ======================
-# 相机 SDK 路径
-# ======================
-set(CAMERA_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/camera_sdk")
-set(CAMERA_SDK_INCLUDE_DIR "${CAMERA_SDK_ROOT}/include")
 
 # ======================
 # 库文件
 # ======================
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x64/libMVSDK.so")
-else()
-  set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x86/libMVSDK.so")
-endif()
-
 add_executable(ArmorPlateIdentifcation ${ArmorPlateIdentifcation})
 add_executable(Test ${Test})
+
+# ======================
+# 大恒 SDK 路径
+# ======================
+set(GALAXY_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_parties/GalaxySDK")
+# ======================
+# 迈德 SDK 路径
+# ======================
+set(MINDVISION_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_parties/mvsdk")
 
 # ======================
 # include 路径
@@ -65,6 +59,8 @@ add_executable(Test ${Test})
 target_include_directories(ArmorPlateIdentifcation PUBLIC
 $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 $<INSTALL_INTERFACE:include>
+${GALAXY_SDK_ROOT}/include
+${MINDVISION_SDK_ROOT}/include
 )
 target_include_directories(Test PUBLIC
 $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -73,12 +69,10 @@ $<INSTALL_INTERFACE:include>
 
 target_include_directories(ArmorPlateIdentifcation PUBLIC
 ${OpenCV_INCLUDE_DIRS}
-${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
 target_include_directories(Test PUBLIC
 ${OpenCV_INCLUDE_DIRS}
-${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
 target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
@@ -86,13 +80,17 @@ target_compile_features(Test PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++1
 # ======================
 # 链接库
 # ======================
+target_link_directories(ArmorPlateIdentifcation PUBLIC
+  ${GALAXY_SDK_ROOT}/lib/amd64
+  ${MINDVISION_SDK_ROOT}/lib/amd64
+)
 target_link_libraries(ArmorPlateIdentifcation
 ${OpenCV_LIBS}
-${CAMERA_SDK_LIBRARY}
+gxiapi
+MVSDK
 )
 target_link_libraries(Test
 ${OpenCV_LIBS}
-${CAMERA_SDK_LIBRARY}
 )
 # ======================
 # 依赖关系
@@ -105,6 +103,8 @@ ament_target_dependencies(
   "sensor_msgs"
   "cv_bridge"
   "tf2_ros"
+  "image_transport"
+  "camera_info_manager"
   "armor_plate_interfaces"
 )
 ament_target_dependencies(
@@ -119,6 +119,23 @@ ament_target_dependencies(
 )
   
 # ======================
+# 安装第三方动态库
+# ======================
+file(GLOB GALAXY_LIBS "${GALAXY_SDK_ROOT}/lib/amd64/*")
+install(FILES ${GALAXY_LIBS}
+  DESTINATION lib/${PROJECT_NAME}
+)
+file(GLOB MINDVISION_LIBS "${MINDVISION_SDK_ROOT}/lib/amd64/*")
+install(FILES ${MINDVISION_LIBS}
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# ======================
+# 环境钩子：自动配置 LD_LIBRARY_PATH / GENICAM_GENTL64_PATH
+# ======================
+ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/third_parties_lib_path.sh.in")
+
+# ======================
 # 安装
 # ======================
 install(TARGETS 
@@ -130,7 +147,7 @@ install(DIRECTORY
   DESTINATION include/${PROJECT_NAME}
 )
 install(DIRECTORY
-  config video launch
+  config video launch model
   DESTINATION share/${PROJECT_NAME}
 )
 

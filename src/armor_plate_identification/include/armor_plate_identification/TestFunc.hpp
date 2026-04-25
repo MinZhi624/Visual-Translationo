@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include "rclcpp/rclcpp.hpp"
-#include "armor_plate_identification/PairedLights.hpp"
+#include "armor_plate_identification/Detector.hpp"
 
 ///  @brief 将多个图像拼接显示在一个窗口中（2x2 布局）
 ///  @param window_name 窗口名称
@@ -23,11 +23,14 @@ public:
     ///  @param lights 要调节的灯条匹配参数对象
     ///  @param logger ROS2 日志器
     ///  @return true 表示按键已被消费
-    bool handleKey(int key, PairedLights& lights, const rclcpp::Logger& logger);
+    bool handleKey(int key, Detector& lights, const rclcpp::Logger& logger);
 
-    ///  @brief 在图像左上角绘制处理用时和 6 个可调参数
+    ///  @brief 在图像左上角第一行绘制处理用时
     ///  @param process_time_ms 图像从获取到处理完成的用时（毫秒），传负数则不显示
-    void drawParams(cv::Mat& img, const PairedLights& lights, float process_time_ms = -1.0f);
+    void drawProcessTime(cv::Mat& img, float process_time_ms);
+
+    ///  @brief 在图像左上角绘制 6 个可调参数（从第二行开始）
+    void drawParams(cv::Mat& img, const Detector& lights);
 
     ///  @brief 在图像上绘制帮助文字与播放延迟
     ///  @param show_speed_control 是否显示 +/- speed 提示和 Delay 数值

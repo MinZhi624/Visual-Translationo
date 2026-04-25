@@ -1,6 +1,5 @@
 #include "armor_plate_tracker/Tracker.hpp"
 #include <algorithm>
-#include <limits>
 
 // 默认构造函数
 Tracker::Tracker()
@@ -10,10 +9,10 @@ Tracker::Tracker()
     , last_update_time_(0.0)
     , last_detection_time_(0.0)
     , initialized_(false)
-    , max_lost_time_(0.5)  // 默认最大丢失0.5秒
+    , max_lost_time_(0.1)
     , is_lost_(false)
-    , yaw_mutation_threshold_(3.0f)   // yaw突变阈值3度
-    , pitch_mutation_threshold_(2.0f) // pitch突变阈值2度
+    , yaw_mutation_threshold_(0.05f)   
+    , pitch_mutation_threshold_(0.015f) 
 {
 }
 
@@ -59,14 +58,14 @@ void Tracker::initFilter(MyKalmanFilter& kf)
     
     // 过程噪声协方差 Q (3x3)
     Eigen::MatrixXf Q(3, 3);
-    Q << 0.01f, 0.0f, 0.0f,
-         0.0f, 0.1f, 0.0f,
-         0.0f, 0.0f, 1.0f;
+    Q << 0.001f, 0.0f, 0.0f,
+         0.0f, 0.01f, 0.0f,
+         0.0f, 0.0f, 0.01f;
     kf.setProcessNoiseCov(Q);
     
     // 测量噪声协方差 R (1x1)
     Eigen::MatrixXf R(1, 1);
-    R << 0.05f;
+    R << 0.005f;
     kf.setMeasurementNoiseCov(R);
     
     // 初始化状态（设为0）
@@ -96,10 +95,10 @@ void Tracker::updateTransitionMatrix(MyKalmanFilter& kf, double dt)
 }
 
 // 选择最佳匹配目标
-bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& positions,
+bool Tracker::selectBestMatch(const std::vector<cv::Vec3d>& positions,
                               const std::vector<float>& image_distances,
                               float& out_yaw, float& out_pitch,
-                              geometry_msgs::msg::Point& out_position)
+                              cv::Vec3d& out_position)
 {
     if (positions.empty() || image_distances.empty() || 
         positions.size() != image_distances.size()) {
@@ -109,8 +108,8 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
     // 如果只有一个目标，直接选择
     if (positions.size() == 1) {
         out_position = positions[0];
-        out_yaw = calculateYaw(positions[0].x, positions[0].y, positions[0].z);
-        out_pitch = calculatePitch(positions[0].x, positions[0].y, positions[0].z);
+        out_yaw = calculateYaw(positions[0]);
+        out_pitch = calculatePitch(positions[0]);
         return true;
     }
     
@@ -132,8 +131,8 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
             }
         }
         out_position = positions[min_idx];
-        out_yaw = calculateYaw(positions[min_idx].x, positions[min_idx].y, positions[min_idx].z);
-        out_pitch = calculatePitch(positions[min_idx].x, positions[min_idx].y, positions[min_idx].z);
+        out_yaw = calculateYaw(positions[min_idx]);
+        out_pitch = calculatePitch(positions[min_idx]);
         return true;
     }
     
@@ -141,8 +140,8 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
     size_t best_idx = 0;
     
     for (size_t i = 0; i < positions.size(); ++i) {
-        float yaw = calculateYaw(positions[i].x, positions[i].y, positions[i].z);
-        float pitch = calculatePitch(positions[i].x, positions[i].y, positions[i].z);
+        float yaw = calculateYaw(positions[i]);
+        float pitch = calculatePitch(positions[i]);
         // 计算欧氏距离的平方（避免开方运算）
         float dy = yaw - pred_yaw;
         float dp = pitch - pred_pitch;
@@ -155,8 +154,8 @@ bool Tracker::selectBestMatch(const std::vector<geometry_msgs::msg::Point>& posi
     }
     
     out_position = positions[best_idx];
-    out_yaw = calculateYaw(positions[best_idx].x, positions[best_idx].y, positions[best_idx].z);
-    out_pitch = calculatePitch(positions[best_idx].x, positions[best_idx].y, positions[best_idx].z);
+    out_yaw = calculateYaw(positions[best_idx]);
+    out_pitch = calculatePitch(positions[best_idx]);
     return true;
 }
 
@@ -201,7 +200,7 @@ double Tracker::getLostTime(double current_time) const
 }
 
 // 主更新函数
-void Tracker::Update(const std::vector<geometry_msgs::msg::Point>& positions,
+void Tracker::Update(const std::vector<cv::Vec3d>& positions,
                      const std::vector<float>& image_distances,
                      double current_time)
 {
@@ -226,7 +225,6 @@ void Tracker::Update(const std::vector<geometry_msgs::msg::Point>& positions,
     if (!has_detection) {
         // 没有检测到目标，进入丢失状态
         is_lost_ = true;
-        
         if (isLostTooLong(current_time)) {
             // 丢失太久，重置滤波器
             resetFilter();
@@ -246,14 +244,14 @@ void Tracker::Update(const std::vector<geometry_msgs::msg::Point>& positions,
     
     // 有检测结果，选择最佳匹配
     float target_yaw, target_pitch;
-    geometry_msgs::msg::Point target_position;
+    cv::Vec3d target_position;
     if (!selectBestMatch(positions, image_distances, target_yaw, target_pitch, target_position)) {
         return;
     }
     
     measured_yaw_ = target_yaw;
     measured_pitch_ = target_pitch;
-    measured_position_ = target_position;
+    tvec_ = target_position;
     
     // 检查是否突变
     if (isMutation(target_yaw, target_pitch)) {
@@ -302,21 +300,18 @@ void Tracker::Update(const std::vector<geometry_msgs::msg::Point>& positions,
     is_lost_ = false;
 }
 
-float Tracker::calculateYaw(float tx, float ty, float tz)
+float Tracker::calculateYaw(const cv::Vec3d& tvec)
 {
-    // yaw: 左正右负（与atan2(tx, tz)的符号相反）
-    (void)ty;
-    return -static_cast<float>(std::atan2(tx, tz) * 180.0 / M_PI);
+    return -static_cast<float>(std::atan2(tvec[0], tvec[2]));
 }
 
-float Tracker::calculatePitch(float tx, float ty, float tz)
+float Tracker::calculatePitch(const cv::Vec3d& tvec)
 {
-    (void)tx;
-    double horizontal_dist = std::sqrt(static_cast<double>(tx) * tx + static_cast<double>(tz) * tz);
-    return static_cast<float>(std::atan2(-ty, horizontal_dist) * 180.0 / M_PI);
+    double horizontal_dist = cv::norm(cv::Vec2d(tvec[0], tvec[2]));
+    return static_cast<float>(std::atan2(-tvec[1], horizontal_dist));
 }
 
-float Tracker::calculateDistance(float tx, float ty, float tz)
+float Tracker::calculateDistance(const cv::Vec3d& tvec)
 {
-    return std::sqrt(tx * tx + ty * ty + tz * tz);
+    return static_cast<float>(cv::norm(tvec));
 }

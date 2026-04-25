@@ -61,6 +61,17 @@ float PoseSolver::calculateImageDistanceToCenter(cv::Point2f target_center_point
 	cv::Point2f image_center_point(cx, cy);
 	return cv::norm(image_center_point - target_center_point);
 }
+cv::Mat PoseSolver::undistortImage(const cv::Mat& src) const
+{
+    cv::Mat dst;
+    if (camera_matrix_.empty() || distortion_coefficients_.empty()) {
+        return src.clone();
+    }
+    cv::Mat new_camera_matrix = projection_matrix_(cv::Rect(0, 0, 3, 3));
+    cv::undistort(src, dst, camera_matrix_, distortion_coefficients_, new_camera_matrix);
+    return dst;
+}
+
 Eigen::Quaterniond calculateQuaternion(const cv::Mat& R)
 {
 	Eigen::Matrix3d eigen_R;

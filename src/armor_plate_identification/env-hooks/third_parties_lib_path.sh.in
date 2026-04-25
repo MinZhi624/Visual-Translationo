@@ -1,0 +1,5 @@
+# Add third-party shared libraries to LD_LIBRARY_PATH
+ament_prepend_unique_value LD_LIBRARY_PATH "$AMENT_CURRENT_PREFIX/lib/@PROJECT_NAME@"
+
+# Add GenICam TL path for DaHeng Galaxy SDK
+ament_prepend_unique_value GENICAM_GENTL64_PATH "$AMENT_CURRENT_PREFIX/lib/@PROJECT_NAME@"

@@ -1,27 +1,49 @@
 test_node_cpp:
   ros__parameters:
+    # === 目标颜色 ===
     target_color: "BLUE"
-    debug_base: true
-    debug_identification: true
-    debug_preprocessing: false
-    debug_pose: true
+    # === 灯条匹配参数 ===
     max_angle_diff: 10.0
     min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
+    # === 数字分类器参数 ===
+    model_path: "model/number_cnn.onnx"
+    label_path: "model/label_cnn.txt"
+    number_threshold: 0.2
+    ignore_labels: ["negative"]
+    # === DEBUG ===
+    debug_base: true
+    debug_identification: false
+    debug_preprocessing: false
+    debug_number_classification: true
 
 armor_plate_identification_node:
   ros__parameters:
+    # === 目标颜色 ===
     target_color: "BLUE"
-    debug_base: true
-    debug_identification: true
-    debug_preprocessing: false
-    debug_pose: true
+    # === 相机类型 ===
+    camera_type: "mindvision"
+    # camera_type: "galaxy"
+    # === 相机参数 ===
+    exposure_time: 5000.0
+    gain: 8.0
+    # === 灯条匹配参数 ===
     max_angle_diff: 10.0
-    min_length_ratio: 0.6
+    min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
+    # === 数字分类器参数 ===
+    model_path: "model/number_cnn.onnx"
+    label_path: "model/label_cnn.txt"
+    number_threshold: 0.2
+    ignore_labels: ["negative"]
+    # === DEBUG ===
+    debug_base: true
+    debug_identification: false
+    debug_preprocessing: false
+    debug_number_classification: true
