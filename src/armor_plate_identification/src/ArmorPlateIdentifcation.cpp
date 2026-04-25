@@ -16,7 +16,6 @@
 #include <thread>
 #include <chrono>
 
-#include "tf2_ros/transform_broadcaster.hpp"
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -39,10 +38,9 @@ private:
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     // 处理用时（毫秒）
     float process_time_ms_ = 0.0f;
-    // 检测结果缓存（供数字识别使用）
+    // 检测结果缓存
     std::vector<Armor> armors_;
     // 解算结果
     std::vector<ArmorPlate> armor_plates_;
@@ -87,8 +85,6 @@ private:
         number_classifier_ = NumberClassifier(model_path, label_path, number_threshold, ignore_labels);
 
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
-        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-        // ===== 相机初始化 ===== //
         camera_type_ = this->declare_parameter<std::string>("camera_type", "galaxy");
         camera_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera_info", 10);
         if (camera_type_ == "galaxy") {
@@ -226,32 +222,12 @@ private:
     void Publish()
     {
         builtin_interfaces::msg::Time stamp = this->now();
-        
-        // 只发布数字识别有效的装甲板
-        std::vector<ArmorPlate> valid_armor_plates;
-        valid_armor_plates.reserve(armor_plates_.size());
-        int index = 0;
-        for (const auto& armor_plate : armor_plates_)
-        {
-            geometry_msgs::msg::TransformStamped transformStamped;
-            transformStamped.header.stamp = stamp;
-            transformStamped.header.frame_id = camera_frame_id_;
-            transformStamped.child_frame_id = "armor_plate_" + std::to_string(index++);
-            transformStamped.transform.translation.x = armor_plate.pose.position.x;
-            transformStamped.transform.translation.y = armor_plate.pose.position.y;
-            transformStamped.transform.translation.z = armor_plate.pose.position.z;
-            transformStamped.transform.rotation.x = armor_plate.pose.orientation.x;
-            transformStamped.transform.rotation.y = armor_plate.pose.orientation.y;
-            transformStamped.transform.rotation.z = armor_plate.pose.orientation.z;
-            transformStamped.transform.rotation.w = armor_plate.pose.orientation.w;
-            tf_broadcaster_->sendTransform(transformStamped);
-            valid_armor_plates.push_back(armor_plate);
-        }
-        
+
+        // 发布装甲板数据
         ArmorPlates armor_plates_msg;
         armor_plates_msg.header.stamp = stamp;
         armor_plates_msg.header.frame_id = camera_frame_id_;
-        armor_plates_msg.armor_plates = valid_armor_plates;
+        armor_plates_msg.armor_plates = armor_plates_;
         armor_plates_pub_->publish(armor_plates_msg);
         // 发布 camera_info
         camera_info_msg_.header.stamp = stamp;

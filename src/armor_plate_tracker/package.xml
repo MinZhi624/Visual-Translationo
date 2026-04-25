@@ -15,7 +15,8 @@
   <depend>cv_bridge</depend>
   <depend>libopencv-dev</depend>
   <depend>armor_plate_interfaces</depend>
-
+  <depend>tf2_ros</depend>
+  
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

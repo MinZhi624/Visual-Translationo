@@ -1,20 +1,25 @@
 #include "armor_plate_tracker/Tracker.hpp"
+
+#include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/transform_broadcaster.hpp"
+
+#include <sensor_msgs/msg/camera_info.hpp>
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/aim_command.hpp"
 #include "armor_plate_interfaces/msg/debug_tracker.hpp"
-
-#include <sensor_msgs/msg/camera_info.hpp>
-
-#include "rclcpp/rclcpp.hpp"
+#include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 
 #include <cv_bridge/cv_bridge.h>
-
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
+#include <mutex>
+
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
-
 using armor_plate_interfaces::msg::DebugTracker;
+using armor_plate_interfaces::msg::GimbalAngle;
 
 class ArmorPlateTracker : public rclcpp::Node
 {
@@ -26,10 +31,16 @@ private:
     double mutation_pitch_threshold_;
     // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
+    rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_ganle_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
+    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
+    // ===== 绝对角度 ===== //
+    std::mutex abs_angle_mutes_;
+    float yaw_abs_ = 0.0;
+    float pitch_abs = 0.0;
     // ===== DEBUG =====//
     bool debug_;
     rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
@@ -67,6 +78,15 @@ private:
         );
         timer_ = this->create_wall_timer(std::chrono::milliseconds(10000), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
+        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+        gimbal_ganle_sub_ = this->create_subscription<GimbalAngle>(
+            "gimbal_angle", 10,
+            [this](const GimbalAngle::SharedPtr msg){
+                std::lock_guard<std::mutex> lock(abs_angle_mutes_);
+                yaw_abs_ = msg->yaw_abs;
+                pitch_abs = msg->pitch_abs;
+            }
+        );
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
         // ===== 装甲板跟踪器 ===== //
@@ -96,7 +116,7 @@ private:
             numbers.push_back(msg->armor_plates[i].number);
         }
         tracker_.Update(positions, image_distances, current_time);
-        publish();
+        publish(msg);
         ///////// DEBUG ////////////////////////
         if (debug_) {
             DebugTracker debug_msg;
@@ -137,8 +157,21 @@ private:
         RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
     }
-    void publish()
+    void publish(const ArmorPlates::SharedPtr armor_plates)
     {
+        // 发布所有装甲板的目标位姿
+        int armor_plate_count = 0;
+        for (const auto& armor_plate : armor_plates->armor_plates) {
+            geometry_msgs::msg::TransformStamped transfrom_stamped;
+            transfrom_stamped.header.stamp = this->now();
+            transfrom_stamped.header.frame_id = "camera_link";
+            transfrom_stamped.child_frame_id = "armor_plate_" + std::to_string(++armor_plate_count);
+            transfrom_stamped.transform.translation.x = armor_plate.pose.position.x;
+            transfrom_stamped.transform.translation.y = armor_plate.pose.position.y;
+            transfrom_stamped.transform.translation.z = armor_plate.pose.position.z;
+            transfrom_stamped.transform.rotation = armor_plate.pose.orientation;
+            tf_broadcaster_->sendTransform(transfrom_stamped);
+        }
         if (tracker_.isLost()) {
             RCLCPP_WARN(this->get_logger(), "目标丢失");
             return;

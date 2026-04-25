@@ -16,12 +16,12 @@ find_package(Eigen3 REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(camera_info_manager REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 add_executable(armor_plate_tracker_node
   src/ArmorPlateTracker.cpp
   src/MyKalmanFilter.cpp
   src/Tracker.cpp
-  
 )
 
 target_include_directories(armor_plate_tracker_node PUBLIC
@@ -45,6 +45,7 @@ ament_target_dependencies(
   "armor_plate_interfaces"
   "image_transport"
   "camera_info_manager"
+  "tf2_ros"
 )
 
 target_link_libraries(armor_plate_tracker_node

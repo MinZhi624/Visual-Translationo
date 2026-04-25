@@ -6,7 +6,6 @@
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
-#include "tf2_ros/transform_broadcaster.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <cv_bridge/cv_bridge.h>
@@ -38,9 +37,8 @@ private:
     // 发布者
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    // 处理用时（毫秒）
-    float process_time_ms_ = 0.0f;
+    // 处理用时
+    float process_time_ms_ = 10.0f;
     // 时间和帧数
     rclcpp::TimerBase::SharedPtr timer_;
     // ROS 参数控制 debug 开关
@@ -103,7 +101,6 @@ private:
         // ===== 初始化发布器 ===== //
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
         debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
-        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         // ===== DEBUG ===== //
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
@@ -199,26 +196,9 @@ private:
     }
     void Publish()
     {
-        int index = 0;
         builtin_interfaces::msg::Time stamp = this->now();
-
-        for(const auto& armor_plate : armor_plates_)
-        {
-            // 发布姿态
-            geometry_msgs::msg::TransformStamped transform_stamped;
-            transform_stamped.header.stamp = stamp;
-            transform_stamped.header.frame_id = "camera_link";
-            transform_stamped.child_frame_id = "armor_plate_" + std::to_string(index++);
-            transform_stamped.transform.translation.x = armor_plate.pose.position.x;
-            transform_stamped.transform.translation.y = armor_plate.pose.position.y;
-            transform_stamped.transform.translation.z = armor_plate.pose.position.z;
-            transform_stamped.transform.rotation.x = armor_plate.pose.orientation.x;
-            transform_stamped.transform.rotation.y = armor_plate.pose.orientation.y;
-            transform_stamped.transform.rotation.z = armor_plate.pose.orientation.z;
-            transform_stamped.transform.rotation.w = armor_plate.pose.orientation.w;
-            tf_broadcaster_->sendTransform(transform_stamped);
-        }
-        // 发布灯条信息
+        
+        // 发布装甲板数据
         ArmorPlates armor_plates_msg;
         armor_plates_msg.header.stamp = stamp;
         armor_plates_msg.header.frame_id = "camera_link";

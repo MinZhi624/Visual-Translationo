@@ -9,10 +9,10 @@ Tracker::Tracker()
     , last_update_time_(0.0)
     , last_detection_time_(0.0)
     , initialized_(false)
-    , max_lost_time_(0.5)  // 默认最大丢失0.5秒
+    , max_lost_time_(0.1)
     , is_lost_(false)
-    , yaw_mutation_threshold_(3.0f)   // yaw突变阈值3度
-    , pitch_mutation_threshold_(2.0f) // pitch突变阈值2度
+    , yaw_mutation_threshold_(0.05f)   
+    , pitch_mutation_threshold_(0.015f) 
 {
 }
 
