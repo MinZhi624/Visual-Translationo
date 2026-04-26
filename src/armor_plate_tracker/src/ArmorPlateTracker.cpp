@@ -3,6 +3,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
 
+#include <armor_plate_interfaces/msg/detail/armor_plate__struct.hpp>
 #include <cstdint>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include "geometry_msgs/msg/transform_stamped.hpp"
@@ -30,7 +31,6 @@ private:
     Tracker tracker_;
     double max_lost_time_;
     double mutation_yaw_threshold_;
-    double mutation_pitch_threshold_;
     // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
     rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_ganle_sub_;
@@ -39,12 +39,12 @@ private:
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
-    uint8_t seq_ = 0;
     // ===== 绝对角度 ===== //
     std::mutex abs_angle_mutes_;
+    uint8_t seq_ = 0;
     uint8_t seq_echo_ = 0;
-    float yaw_abs_ = 0.0;
-    float pitch_abs_ = 0.0;
+    float yaw_abs_ = 0.0f;
+    float pitch_abs_ = 0.0f;
     // ===== DEBUG =====//
     bool debug_;
     rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
@@ -59,10 +59,10 @@ private:
 
     void init()
     {
+        (void)seq_;
         // ===== 参数获取 ===== //
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
-        mutation_pitch_threshold_ = this->declare_parameter<double>("mutation_pitch_threshold", 2.0);
         // 相机内参 fallback（视频默认值，0.5x 已缩放）
         camera_matrix_ = (cv::Mat_<double>(3, 3) <<
             1187.27124, 0., 349.42644,
@@ -96,7 +96,7 @@ private:
         debug_ = this->declare_parameter<bool>("debug", false);
         // ===== 装甲板跟踪器 ===== //
         tracker_.setMaxLostTime(max_lost_time_);
-        tracker_.setMutationThreshold(mutation_yaw_threshold_, mutation_pitch_threshold_);
+        tracker_.setMutationThreshold(mutation_yaw_threshold_);
         tracker_.Init();
         
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
@@ -108,19 +108,7 @@ private:
         double current_time = this->now().seconds();
         current_time_ = current_time;
         // 装甲板
-        size_t num = msg->armor_plates.size();
-        std::vector<Eigen::Vector3d> camera_positions;
-        std::vector<float> image_distances;
-        std::vector<std::string> numbers;
-        camera_positions.reserve(num);
-        image_distances.reserve(num);
-        numbers.reserve(num);
-        for (size_t i = 0; i < num; ++i) {
-            const auto& pos = msg->armor_plates[i].pose.position;
-            camera_positions.emplace_back(pos.x, pos.y, pos.z);
-            image_distances.push_back(msg->armor_plates[i].image_distance_to_center);
-            numbers.push_back(msg->armor_plates[i].number);
-        }
+        const auto& armor_plates = msg->armor_plates;
         // 绝对角
         float yaw_abs = 0.0;
         float pitch_abs = 0.0;
@@ -129,7 +117,7 @@ private:
             yaw_abs = yaw_abs_;
             pitch_abs = pitch_abs_;
         }
-        tracker_.Update(camera_positions, image_distances, current_time, yaw_abs, pitch_abs);
+        tracker_.Update(armor_plates, current_time, yaw_abs, pitch_abs);
         publish(msg);
         ///////// DEBUG ////////////////////////
         if (debug_) {
@@ -191,7 +179,6 @@ private:
             aim_command.delta_pitch = tracker_.getPitch();
             aim_command.delta_yaw = tracker_.getYaw();
             aim_command_pub_->publish(aim_command);
-            seq_++;
         }
     }
     ///////// DEBUG ///////////////////

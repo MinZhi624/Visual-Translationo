@@ -6,6 +6,7 @@ typedef struct __attribute__((packed))
     uint8_t sof1;
     uint8_t sof2;
     uint8_t seq;
+    uint8_t target_valid;
     int16_t delta_yaw_1e4rad;
     int16_t delta_pitch_1e4rad;
     uint16_t crc16;

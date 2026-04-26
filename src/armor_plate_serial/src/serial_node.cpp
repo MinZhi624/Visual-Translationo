@@ -6,7 +6,6 @@
 #include <armor_plate_interfaces/msg/detail/gimbal_angle__struct.hpp>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <rclcpp/rclcpp.hpp>
 #include <serial_driver/serial_driver.hpp>
 
@@ -23,7 +22,7 @@ private:
     // 发送数据
     float latest_yaw_ = 0.0f;
     float latest_pitch_ = 0.0f;
-    uint8_t lastest_seq_ = 0;
+    uint8_t latest_seq_ = 0;
     bool has_target_ = false;
     std::mutex data_mutex_;
     rclcpp::Subscription<AimCommand>::SharedPtr aim_command_sub_;
@@ -49,41 +48,42 @@ private:
         while (running_.load() && rclcpp::ok()) {
             float yaw = 0.0f;
             float pitch = 0.0f;
-            bool do_send = false;
+            uint8_t target_valid = 0;
             {
                 std::lock_guard<std::mutex> lock(data_mutex_);
-                if (has_target_ && latest_yaw_ != 0.0f && latest_pitch_ != 0.0f) {
-                    has_target_ = false;
+                if (has_target_ && latest_yaw_ != 0.0f && latest_pitch_!= 0.0f) {
+                    target_valid = 1;
                     yaw = latest_yaw_;
                     pitch = latest_pitch_;
-                    do_send = true;
+                    has_target_ = false;
                 }
             }
-            if (do_send) {
-                // 数据打包-- 实现数据读取与处理分离
-                VisionToEcFrame_t frame;
-                frame.sof1 = 0xA5;
-                frame.sof2 = 0x5A;
-                frame.seq = lastest_seq_++;
-                frame.delta_yaw_1e4rad = static_cast<int16_t>(yaw * 10000.0f);
-                frame.delta_pitch_1e4rad = static_cast<int16_t>(pitch * 10000.0f);
-                frame.crc16 = crc16_modbus(reinterpret_cast<uint8_t *>(&frame), 7);
-                // 数据发送
-                std::vector<uint8_t> data(
+
+            VisionToEcFrame_t frame;
+            frame.sof1 = 0xA5;
+            frame.sof2 = 0x5A;
+            frame.seq = latest_seq_++;
+            frame.target_valid = target_valid;
+            frame.delta_yaw_1e4rad = static_cast<int16_t>(yaw * 10000.0f);
+            frame.delta_pitch_1e4rad = static_cast<int16_t>(pitch * 10000.0f);
+            frame.crc16 = crc16_modbus(reinterpret_cast<uint8_t *>(&frame), 8);
+
+            std::vector<uint8_t> data(
                 reinterpret_cast<uint8_t *>(&frame),
                 reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
-                try {
-                    size_t sent = serial_driver_->port()->send(data);
-                    if (sent != data.size()) {
-                        RCLCPP_ERROR(
+            try {
+                size_t sent = serial_driver_->port()->send(data);
+                if (sent != data.size()) {
+                    RCLCPP_ERROR(
                         this->get_logger(), "发送不完整: 期望 %zu, 实际 %zu", data.size(), sent);
-                    } else {
-                        RCLCPP_INFO(this->get_logger(), "发送数据: yaw=%f, pitch=%f", yaw, pitch);
-                    }
-                } catch (const std::exception & e) {
-                    RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "发送数据: valid=%d, yaw=%f, pitch=%f",
+                                target_valid, yaw, pitch);
                 }
+            } catch (const std::exception & e) {
+                RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
             }
+
             rate.sleep();
         }
     }
@@ -138,11 +138,18 @@ private:
         float yaw_abs = static_cast<float>(yaw_raw) / 10000.0f;
         float pitch_abs = static_cast<float>(pitch_raw) / 10000.0f;
         RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
+        // 提取当前帧序号
+        // uint8_t seq_send = 0;
+        // {
+        //     std::lock_guard<std::mutex> lock(data_mutex_);
+        //     seq_send = latest_seq_;
+        // }
         // 发布数据
         GimbalAngle msg;
         msg.seq_echo = seq_echo;
         msg.pitch_abs = pitch_abs;
         msg.yaw_abs = yaw_abs;
+        // msg.seq_send = seq_send;
         gimbal_angle_pub_->publish(msg);
     }
     void recvLoop()

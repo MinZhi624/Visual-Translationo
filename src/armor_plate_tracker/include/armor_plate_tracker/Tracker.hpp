@@ -1,7 +1,16 @@
 #pragma once
 #include "armor_plate_tracker/MyKalmanFilter.hpp"
-#include <Eigen/Core>
+#include "armor_plate_interfaces/msg/armor_plate.hpp"
+
+#include <armor_plate_interfaces/msg/detail/armor_plate__struct.hpp>
+#include <armor_plate_interfaces/msg/detail/armor_plates__struct.hpp>
+#include <geometry_msgs/msg/detail/pose__struct.hpp>
 #include <opencv2/core.hpp>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
+using armor_plate_interfaces::msg::ArmorPlate;
+using armor_plate_interfaces::msg::ArmorPlates;
 
 struct TrackingOverlayData {
     bool has_result = false;
@@ -17,7 +26,7 @@ struct TrackingOverlayData {
 class Tracker
 {
 private:
-    // 原始模板滤波器（用于重置时复制）
+    // 原始模板滤波器（用于重置时复制） -- 世界坐标系
     MyKalmanFilter x_kf_origin_;
     MyKalmanFilter y_kf_origin_;
     MyKalmanFilter z_kf_origin_;
@@ -27,42 +36,28 @@ private:
     MyKalmanFilter y_kf_;
     MyKalmanFilter z_kf_;
     
-    // 当前滤波结果（位置）
-    float x_;
-    float y_;
-    float z_;
-    
-    // 当前滤波结果（角度，用于突变检测和输出）
+    // 当前滤波结果 -- 相机坐标系(增量角)
     float yaw_;
     float pitch_;
-    
-    // 当前测量值（原始值）
-    float measured_x_;
-    float measured_y_;
-    float measured_z_;
-    float measured_yaw_;
-    float measured_pitch_;
-    
     // 绝对角度
     float yaw_abs_;
     float pitch_abs_;
-
-    // 当前测量对应的原始位置（tvec，单位米）
-    Eigen::Vector3d tvec_;
-    
+    Eigen::Matrix3d R_w_c_; // R_{w<-c}
+    Eigen::Matrix3d R_c_w_; // R_{c<-w}
     // 时间相关
     double last_update_time_;   // 上次更新时间（秒）
     double last_detection_time_;// 上次检测到目标的时间（秒）
-    
     // 跟踪状态
     bool initialized_;          // 是否已初始化
     double max_lost_time_;      // 最大允许丢失时间（秒），默认0.5s
     bool is_lost_;              // 是否处于丢失状态
-    
     // 突变检测阈值（度）
     float yaw_mutation_threshold_;
-    float pitch_mutation_threshold_;
-    
+    float last_armor_pose_yaw_;
+    // 当前帧选中的原始测量值（相机系）
+    Eigen::Vector3d selected_position_;
+    float measured_yaw_;
+    float measured_pitch_;
     // 初始化滤波器（内部调用）
     void initFilter(MyKalmanFilter& kf);
     
@@ -70,25 +65,16 @@ private:
     void updateTransitionMatrix(MyKalmanFilter& kf, double dt);
     
     // 选择最佳匹配目标
-    bool selectBestMatch(const std::vector<Eigen::Vector3d>& positions,
-                         const std::vector<float>& image_distances,
-                         float& out_yaw, float& out_pitch,
-                         Eigen::Vector3d& out_position);
+    void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
     
     // 检查是否突变
-    bool isMutation(float measured_yaw, float measured_pitch);
+    bool isMutation(const float& armor_pose_yaw);
     
     // 重置滤波器
     void resetFilter();
     
     // 检查是否丢失太久
     bool isLostTooLong(double current_time) const;
-
-    // 从tvec计算yaw/pitch/distance（放在Tracker内部）
-    static float calculateYaw(const Eigen::Vector3d& tvec);
-    static float calculatePitch(const Eigen::Vector3d& tvec);
-    static float calculateDistance(const Eigen::Vector3d& tvec);
-
 public:
     // 默认构造函数
     Tracker();
@@ -100,39 +86,33 @@ public:
     void setMaxLostTime(double seconds);
     
     // 设置突变阈值
-    void setMutationThreshold(float yaw_thresh, float pitch_thresh);
+    void setMutationThreshold(float yaw_thresh);
     
     // 主更新函数
     // positions: 检测到的所有装甲板的pose.position（即tvec，单位米）
     // image_distances: 对应的image_distance_to_center
     // current_time: 当前时间戳（秒）
-    void Update(const std::vector<Eigen::Vector3d>& camera_positions,
-                const std::vector<float>& image_distances,
+    void Update(const std::vector<ArmorPlate>& armor_plates,
                 double current_time,
-                float yaw_abs,
-                float pitch_abs
-            );
+                float yaw_abs, float pitch_abs
+    );
     
     // 获取滤波后的值
-    float getX() const { return x_; }
-    float getY() const { return y_; }
-    float getZ() const { return z_; }
     float getYaw() const { return yaw_; }
     float getPitch() const { return pitch_; }
-    
-    // 获取原始测量值
+    // 获取原始测量值（选中目标，相机系）
     float getMeasuredYaw() const { return measured_yaw_; }
     float getMeasuredPitch() const { return measured_pitch_; }
-    
-    // 获取原始测量对应的tvec位置
-    Eigen::Vector3d getMeasuredPosition() const { return tvec_; }
-    
+    Eigen::Vector3d getMeasuredPosition() const { return selected_position_; }
     // 获取是否丢失目标
     bool isLost() const { return is_lost_; }
-    
-    // 获取丢失时间（秒）
-    double getLostTime(double current_time) const;
-    
     // 获取上次更新时间
     double getLastUpdateTime() const { return last_update_time_; }
 };
+
+// 工具函数
+float normalizeRadAngle(float rad);
+float calculatePoseYaw(const Eigen::Quaterniond &q);
+float calculateYaw(const Eigen::Vector3d& tvec);
+float calculatePitch(const Eigen::Vector3d& tvec);
+float calculateDistance(const Eigen::Vector3d& tvec);
