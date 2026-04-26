@@ -5,6 +5,8 @@
 
 #include <armor_plate_interfaces/msg/detail/gimbal_angle__struct.hpp>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <rclcpp/rclcpp.hpp>
 #include <serial_driver/serial_driver.hpp>
 
@@ -18,10 +20,11 @@ using armor_plate_interfaces::msg::GimbalAngle;
 class SerialDriver : public rclcpp::Node
 {
 private:
-    // 核心数据（受 mutex 保护）
-    float latest_yaw_{0.0f};
-    float latest_pitch_{0.0f};
-    bool has_target_{false};
+    // 发送数据
+    float latest_yaw_ = 0.0f;
+    float latest_pitch_ = 0.0f;
+    uint8_t lastest_seq_ = 0;
+    bool has_target_ = false;
     std::mutex data_mutex_;
     rclcpp::Subscription<AimCommand>::SharedPtr aim_command_sub_;
     // 串口
@@ -57,13 +60,14 @@ private:
                 }
             }
             if (do_send) {
-                // 数据打包（此时已有局部副本，不受回调影响）-- 实现数据读取与处理分离
+                // 数据打包-- 实现数据读取与处理分离
                 VisionToEcFrame_t frame;
                 frame.sof1 = 0xA5;
                 frame.sof2 = 0x5A;
+                frame.seq = lastest_seq_++;
                 frame.delta_yaw_1e4rad = static_cast<int16_t>(yaw * 10000.0f);
                 frame.delta_pitch_1e4rad = static_cast<int16_t>(pitch * 10000.0f);
-                frame.crc16 = crc16_modbus(reinterpret_cast<uint8_t *>(&frame), 6);
+                frame.crc16 = crc16_modbus(reinterpret_cast<uint8_t *>(&frame), 7);
                 // 数据发送
                 std::vector<uint8_t> data(
                 reinterpret_cast<uint8_t *>(&frame),
@@ -87,21 +91,23 @@ private:
     {
         switch(parse_state_) {
         case ParseState::WAIT_SOF1:
-            if (byte == 0xA5) {
+            if (byte == 0x5A) {
                 parse_state_ = ParseState::WAIT_SOF2;
             }
             break;
         case ParseState::WAIT_SOF2:
             if (byte == 0xA5) {
                 parse_state_ = ParseState::READ_PAYLOAD;
-                recv_payload_.clear();
+                recv_payload_.clear(); // 准备读取
+            } else if(byte == 0x5A) {
+                parse_state_ = ParseState::WAIT_SOF2;
             } else {
                 parse_state_ = ParseState::WAIT_SOF1;
             }
             break;
         case ParseState::READ_PAYLOAD:
             recv_payload_.push_back(byte);
-            if (recv_payload_.size() == 6) {
+            if (recv_payload_.size() == 11) {
                 // 填充数据
                 processFrame();
                 parse_state_ = ParseState::WAIT_SOF1;
@@ -112,28 +118,29 @@ private:
     }
     void processFrame()
     {
-        uint8_t crc_input[6] = {
-            0XA5, 0X5A,
-            recv_payload_[0], recv_payload_[1],
-            recv_payload_[2], recv_payload_[3],
+        uint8_t crc_input[11] = {
+            0X5A, 0XA5, recv_payload_[0],
+            recv_payload_[1], recv_payload_[2], recv_payload_[3], recv_payload_[4],
+            recv_payload_[5], recv_payload_[6], recv_payload_[7], recv_payload_[8]
         };
-        uint16_t calc_crc = crc16_modbus(crc_input, 6);
-        uint16_t recv_crc = static_cast<uint16_t>(recv_payload_[4] | 
-                            static_cast<uint16_t>(recv_payload_[5]) << 8);
+        uint16_t calc_crc = crc16_modbus(crc_input, 11);
+        uint16_t recv_crc = static_cast<uint16_t>(recv_payload_[9] | 
+                            static_cast<uint16_t>(recv_payload_[10]) << 8);
         if(calc_crc != recv_crc) {
             RCLCPP_WARN(this->get_logger(), "CRC校验失败");
             return;
         }
         // 提取数据
-        int16_t yaw_raw =   static_cast<int16_t>(recv_payload_[0] |
-                            static_cast<uint16_t>(recv_payload_[1] << 8));
-        int16_t pitch_rad = static_cast<int16_t>(recv_payload_[2] |
-                            static_cast<uint16_t>(recv_payload_[3] << 8));
+        uint8_t seq_echo = recv_payload_[0];
+        int32_t yaw_raw, pitch_raw;
+        std::memcpy(&yaw_raw, recv_payload_.data() + 1, sizeof(yaw_raw));
+        std::memcpy(&pitch_raw, recv_payload_.data() + 5, sizeof(pitch_raw));
         float yaw_abs = static_cast<float>(yaw_raw) / 10000.0f;
-        float pitch_abs = static_cast<float>(pitch_rad) / 10000.0f;
+        float pitch_abs = static_cast<float>(pitch_raw) / 10000.0f;
         RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
         // 发布数据
         GimbalAngle msg;
+        msg.seq_echo = seq_echo;
         msg.pitch_abs = pitch_abs;
         msg.yaw_abs = yaw_abs;
         gimbal_angle_pub_->publish(msg);

@@ -1,11 +1,12 @@
 #pragma once
 #include "armor_plate_tracker/MyKalmanFilter.hpp"
+#include <Eigen/Core>
 #include <opencv2/core.hpp>
 
 struct TrackingOverlayData {
     bool has_result = false;
     bool is_lost = false;
-    cv::Vec3d measured_position;
+    Eigen::Vector3d measured_position;
     float measured_yaw = 0.0f;
     float measured_pitch = 0.0f;
     float filter_yaw = 0.0f;
@@ -17,23 +18,37 @@ class Tracker
 {
 private:
     // 原始模板滤波器（用于重置时复制）
-    MyKalmanFilter yaw_kf_origin_;
-    MyKalmanFilter pitch_kf_origin_;
+    MyKalmanFilter x_kf_origin_;
+    MyKalmanFilter y_kf_origin_;
+    MyKalmanFilter z_kf_origin_;
     
     // 实际使用的滤波器
-    MyKalmanFilter yaw_kf_;
-    MyKalmanFilter pitch_kf_;
+    MyKalmanFilter x_kf_;
+    MyKalmanFilter y_kf_;
+    MyKalmanFilter z_kf_;
     
-    // 当前滤波结果
+    // 当前滤波结果（位置）
+    float x_;
+    float y_;
+    float z_;
+    
+    // 当前滤波结果（角度，用于突变检测和输出）
     float yaw_;
     float pitch_;
     
     // 当前测量值（原始值）
+    float measured_x_;
+    float measured_y_;
+    float measured_z_;
     float measured_yaw_;
     float measured_pitch_;
     
+    // 绝对角度
+    float yaw_abs_;
+    float pitch_abs_;
+
     // 当前测量对应的原始位置（tvec，单位米）
-    cv::Vec3d tvec_;
+    Eigen::Vector3d tvec_;
     
     // 时间相关
     double last_update_time_;   // 上次更新时间（秒）
@@ -55,10 +70,10 @@ private:
     void updateTransitionMatrix(MyKalmanFilter& kf, double dt);
     
     // 选择最佳匹配目标
-    bool selectBestMatch(const std::vector<cv::Vec3d>& positions,
+    bool selectBestMatch(const std::vector<Eigen::Vector3d>& positions,
                          const std::vector<float>& image_distances,
                          float& out_yaw, float& out_pitch,
-                         cv::Vec3d& out_position);
+                         Eigen::Vector3d& out_position);
     
     // 检查是否突变
     bool isMutation(float measured_yaw, float measured_pitch);
@@ -70,9 +85,9 @@ private:
     bool isLostTooLong(double current_time) const;
 
     // 从tvec计算yaw/pitch/distance（放在Tracker内部）
-    static float calculateYaw(const cv::Vec3d& tvec);
-    static float calculatePitch(const cv::Vec3d& tvec);
-    static float calculateDistance(const cv::Vec3d& tvec);
+    static float calculateYaw(const Eigen::Vector3d& tvec);
+    static float calculatePitch(const Eigen::Vector3d& tvec);
+    static float calculateDistance(const Eigen::Vector3d& tvec);
 
 public:
     // 默认构造函数
@@ -91,11 +106,17 @@ public:
     // positions: 检测到的所有装甲板的pose.position（即tvec，单位米）
     // image_distances: 对应的image_distance_to_center
     // current_time: 当前时间戳（秒）
-    void Update(const std::vector<cv::Vec3d>& positions,
+    void Update(const std::vector<Eigen::Vector3d>& camera_positions,
                 const std::vector<float>& image_distances,
-                double current_time);
+                double current_time,
+                float yaw_abs,
+                float pitch_abs
+            );
     
     // 获取滤波后的值
+    float getX() const { return x_; }
+    float getY() const { return y_; }
+    float getZ() const { return z_; }
     float getYaw() const { return yaw_; }
     float getPitch() const { return pitch_; }
     
@@ -104,7 +125,7 @@ public:
     float getMeasuredPitch() const { return measured_pitch_; }
     
     // 获取原始测量对应的tvec位置
-    cv::Vec3d getMeasuredPosition() const { return tvec_; }
+    Eigen::Vector3d getMeasuredPosition() const { return tvec_; }
     
     // 获取是否丢失目标
     bool isLost() const { return is_lost_; }

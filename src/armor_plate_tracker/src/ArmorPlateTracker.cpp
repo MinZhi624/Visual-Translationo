@@ -3,6 +3,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
 
+#include <cstdint>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
@@ -15,6 +16,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <mutex>
+#include <sys/types.h>
 
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
@@ -37,10 +39,12 @@ private:
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
+    uint8_t seq_ = 0;
     // ===== 绝对角度 ===== //
     std::mutex abs_angle_mutes_;
+    uint8_t seq_echo_ = 0;
     float yaw_abs_ = 0.0;
-    float pitch_abs = 0.0;
+    float pitch_abs_ = 0.0;
     // ===== DEBUG =====//
     bool debug_;
     rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
@@ -83,8 +87,9 @@ private:
             "gimbal_angle", 10,
             [this](const GimbalAngle::SharedPtr msg){
                 std::lock_guard<std::mutex> lock(abs_angle_mutes_);
+                seq_echo_ = msg->seq_echo;
                 yaw_abs_ = msg->yaw_abs;
-                pitch_abs = msg->pitch_abs;
+                pitch_abs_ = msg->pitch_abs;
             }
         );
         // ===== DEBUG ===== //
@@ -102,20 +107,29 @@ private:
         // 数据获取
         double current_time = this->now().seconds();
         current_time_ = current_time;
+        // 装甲板
         size_t num = msg->armor_plates.size();
-        std::vector<cv::Vec3d> positions;
+        std::vector<Eigen::Vector3d> camera_positions;
         std::vector<float> image_distances;
         std::vector<std::string> numbers;
-        positions.reserve(num);
+        camera_positions.reserve(num);
         image_distances.reserve(num);
         numbers.reserve(num);
         for (size_t i = 0; i < num; ++i) {
             const auto& pos = msg->armor_plates[i].pose.position;
-            positions.emplace_back(pos.x, pos.y, pos.z);
+            camera_positions.emplace_back(pos.x, pos.y, pos.z);
             image_distances.push_back(msg->armor_plates[i].image_distance_to_center);
             numbers.push_back(msg->armor_plates[i].number);
         }
-        tracker_.Update(positions, image_distances, current_time);
+        // 绝对角
+        float yaw_abs = 0.0;
+        float pitch_abs = 0.0;
+        {
+            std::lock_guard<std::mutex> lock_abs(abs_angle_mutes_);
+            yaw_abs = yaw_abs_;
+            pitch_abs = pitch_abs_;
+        }
+        tracker_.Update(camera_positions, image_distances, current_time, yaw_abs, pitch_abs);
         publish(msg);
         ///////// DEBUG ////////////////////////
         if (debug_) {
@@ -132,10 +146,7 @@ private:
         // 更新最新跟踪结果数据，不在此画图
         if (debug_) {
             auto measured_pos = tracker_.getMeasuredPosition();
-            float distance = static_cast<float>(std::sqrt(
-                measured_pos[0] * measured_pos[0] +
-                measured_pos[1] * measured_pos[1] +
-                measured_pos[2] * measured_pos[2]));
+            float distance = static_cast<float>(measured_pos.norm());
 
             std::lock_guard<std::mutex> lock(overlay_mutex_);
             overlay_data_.has_result = true;
@@ -180,6 +191,7 @@ private:
             aim_command.delta_pitch = tracker_.getPitch();
             aim_command.delta_yaw = tracker_.getYaw();
             aim_command_pub_->publish(aim_command);
+            seq_++;
         }
     }
     ///////// DEBUG ///////////////////
@@ -192,7 +204,7 @@ private:
         );
         debug_tracker_pub_ = this->create_publisher<DebugTracker>("debug_tracker", 10); 
     }
-    cv::Point2f reprojection(const cv::Vec3d& position)
+    cv::Point2f reprojection(const Eigen::Vector3d& position)
     {
         // 直接用 tvec 重投影到图像坐标
         double fx = camera_matrix_.at<double>(0, 0);
@@ -212,7 +224,7 @@ private:
         // 从 yaw/pitch/distance 重建 tvec 并重投影
         double yaw_rad = yaw;
         double pitch_rad = pitch;
-        cv::Vec3d p;
+        Eigen::Vector3d p;
         p[0] = -distance * std::sin(yaw_rad) * std::cos(pitch_rad);
         p[1] = -distance * std::sin(pitch_rad);
         p[2] = distance * std::cos(yaw_rad) * std::cos(pitch_rad);
@@ -254,7 +266,7 @@ private:
                         camera_matrix_.at<double>(0, 0), camera_matrix_.at<double>(1, 1),
                         camera_matrix_.at<double>(0, 2), camera_matrix_.at<double>(1, 2));
         } else {
-            RCLCPP_WARN(this->get_logger(), "CameraInfo P 矩阵长度不足 12，使用 fallback 内参 --- 视屏内参");
+            RCLCPP_WARN(this->get_logger(), "CameraInfo P 矩阵长度不足 12，使用视屏内参");
         }
         camera_info_received_ = true;
         camera_info_sub_.reset(); // 只读取一次
