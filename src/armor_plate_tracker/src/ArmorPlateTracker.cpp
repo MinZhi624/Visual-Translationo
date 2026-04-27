@@ -5,8 +5,10 @@
 
 #include <armor_plate_interfaces/msg/detail/armor_plate__struct.hpp>
 #include <cstdint>
+#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include "geometry_msgs/msg/transform_stamped.hpp"
+#include "visualization_msgs/msg/marker.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/aim_command.hpp"
 #include "armor_plate_interfaces/msg/debug_tracker.hpp"
@@ -17,7 +19,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <mutex>
-#include <sys/types.h>
+#include <deque>
 
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
@@ -37,14 +39,15 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr filter_pose_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr measured_pose_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
     // ===== 绝对角度 ===== //
-    std::mutex abs_angle_mutes_;
-    uint8_t seq_ = 0;
-    uint8_t seq_echo_ = 0;
-    float yaw_abs_ = 0.0f;
-    float pitch_abs_ = 0.0f;
+    std::deque<AngleRecord> angle_buffer_;
+    std::mutex angle_buffer_mutex_;
+
     // ===== DEBUG =====//
     bool debug_;
     rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
@@ -59,7 +62,6 @@ private:
 
     void init()
     {
-        (void)seq_;
         // ===== 参数获取 ===== //
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
@@ -86,12 +88,14 @@ private:
         gimbal_ganle_sub_ = this->create_subscription<GimbalAngle>(
             "gimbal_angle", 10,
             [this](const GimbalAngle::SharedPtr msg){
-                std::lock_guard<std::mutex> lock(abs_angle_mutes_);
-                seq_echo_ = msg->seq_echo;
-                yaw_abs_ = msg->yaw_abs;
-                pitch_abs_ = msg->pitch_abs;
+                std::lock_guard<std::mutex> lock(angle_buffer_mutex_);
+                angle_buffer_.push_back({msg->stamp, msg->yaw_abs, msg->pitch_abs});
+                if(angle_buffer_.size() > 50) angle_buffer_.pop_front();
             }
         );
+        filter_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("filter_pose", 10);
+        measured_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("measured_pose", 10);
+        marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("visualization_marker", 10);
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
         // ===== 装甲板跟踪器 ===== //
@@ -102,6 +106,46 @@ private:
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
         
     }
+    double findClosestAngle(const builtin_interfaces::msg::Time& image_stamp, float& output_yaw, float& output_pitch)
+    {
+        double image_time = image_stamp.sec + image_stamp.nanosec * 1e-9;
+        
+        // 先复制缓存，避免长时间阻塞回调线程
+        std::vector<AngleRecord> local_buffer;
+        {
+            std::lock_guard<std::mutex> lock(angle_buffer_mutex_);
+            if (angle_buffer_.empty()) {
+                output_yaw = 0.0f;
+                output_pitch = 0.0f;
+                RCLCPP_WARN(this->get_logger(), "角度缓存为空，无法对齐，使用 0");
+                return 0.0;
+            }
+            local_buffer.assign(angle_buffer_.begin(), angle_buffer_.end());
+        }
+        
+        // 在锁外做计算和遍历
+        auto closest_it = local_buffer.begin();
+        double min_diff = std::abs(
+            (closest_it->time.sec + closest_it->time.nanosec * 1e-9) - image_time);
+        
+        for (auto it = local_buffer.begin() + 1; it != local_buffer.end(); ++it) {
+            double record_time = it->time.sec + it->time.nanosec * 1e-9;
+            double diff = std::abs(record_time - image_time);
+            if (diff < min_diff) {
+                min_diff = diff;
+                closest_it = it;
+            }
+        }
+        
+        output_yaw = closest_it->yaw_abs;
+        output_pitch = closest_it->pitch_abs;
+        
+        if (min_diff > 0.05) {
+            RCLCPP_WARN(this->get_logger(), 
+                "角度-图像时间差 %.1f ms，对齐可能不准", min_diff * 1000.0);
+        }
+        return closest_it->time.sec + closest_it->time.nanosec * 1e-9 - image_time;
+    }
     void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
     {
         // 数据获取
@@ -109,14 +153,13 @@ private:
         current_time_ = current_time;
         // 装甲板
         const auto& armor_plates = msg->armor_plates;
-        // 绝对角
+        // 绝对角（按图像时间戳对齐）
         float yaw_abs = 0.0;
         float pitch_abs = 0.0;
-        {
-            std::lock_guard<std::mutex> lock_abs(abs_angle_mutes_);
-            yaw_abs = yaw_abs_;
-            pitch_abs = pitch_abs_;
-        }
+        
+        double align_diff = findClosestAngle(msg->header.stamp, yaw_abs, pitch_abs);
+        RCLCPP_INFO(this->get_logger(), "时间对齐差值: %.4f ms", align_diff * 1000.0);
+        
         tracker_.Update(armor_plates, current_time, yaw_abs, pitch_abs);
         publish(msg);
         ///////// DEBUG ////////////////////////
@@ -156,9 +199,31 @@ private:
         RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
     }
+    visualization_msgs::msg::Marker createSphereMarker(
+        const geometry_msgs::msg::PoseStamped& pose_stamped,
+        int id, float scale, float r, float g, float b, float a)
+    {
+        visualization_msgs::msg::Marker marker;
+        marker.header = pose_stamped.header;
+        marker.ns = "tracker_sphere";
+        marker.id = id;
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.pose = pose_stamped.pose;
+        marker.scale.x = scale;
+        marker.scale.y = scale;
+        marker.scale.z = scale;
+        marker.color.r = r;
+        marker.color.g = g;
+        marker.color.b = b;
+        marker.color.a = a;
+        marker.lifetime = rclcpp::Duration::from_seconds(1.0);
+        return marker;
+    }
+
     void publish(const ArmorPlates::SharedPtr armor_plates)
     {
-        // 发布所有装甲板的目标位姿
+        // 发布所有装甲板的目标位姿 相机坐标系
         int armor_plate_count = 0;
         for (const auto& armor_plate : armor_plates->armor_plates) {
             geometry_msgs::msg::TransformStamped transfrom_stamped;
@@ -171,6 +236,19 @@ private:
             transfrom_stamped.transform.rotation = armor_plate.pose.orientation;
             tf_broadcaster_->sendTransform(transfrom_stamped);
         }
+        // 发布目标位姿 世界坐标系
+        PoseStamped filter_position_world = tracker_.getFilterPositionWorld();
+        PoseStamped measured_position_world = tracker_.getMeasuredPositionWorld();
+        auto now = this->now();
+        filter_position_world.header.stamp = now;
+        measured_position_world.header.stamp = now;
+        filter_pose_pub_->publish(filter_position_world);
+        measured_pose_pub_->publish(measured_position_world);
+        
+        // 发布球体 Marker 到 RViz（尺寸差异化，避免重叠时看不出是两个球）
+        marker_pub_->publish(createSphereMarker(filter_position_world, 0, 0.15f, 0.0f, 1.0f, 0.0f, 1.0f));
+        marker_pub_->publish(createSphereMarker(measured_position_world, 1, 0.20f, 1.0f, 0.0f, 0.0f, 0.5f));
+        
         if (tracker_.isLost()) {
             RCLCPP_WARN(this->get_logger(), "目标丢失");
             return;

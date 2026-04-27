@@ -14,6 +14,15 @@ using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
 using geometry_msgs::msg::PoseStamped;
 
+
+struct AngleRecord {
+    builtin_interfaces::msg::Time time;
+    // 单位是弧度
+    float yaw_abs;
+    float pitch_abs;
+};
+
+
 struct TrackingOverlayData {
     bool has_result = false;
     bool is_lost = false;
@@ -46,6 +55,7 @@ private:
     float pitch_abs_;
     Eigen::Matrix3d R_w_c_; // R_{w<-c}
     Eigen::Matrix3d R_c_w_; // R_{c<-w}
+    Eigen::Quaterniond q_w_c_;
     // 时间相关
     double last_update_time_;   // 上次更新时间（秒）
     double last_detection_time_;// 上次检测到目标的时间（秒）
@@ -116,9 +126,13 @@ public:
     // 获取上次更新时间
     double getLastUpdateTime() const { return last_update_time_; }
 
+    // 获得世界坐标系点
+    PoseStamped getMeasuredPositionWorld() const { return measured_position_world; }
+    PoseStamped getFilterPositionWorld() const { return filter_position_world; }
 };
 
 // 工具函数
+PoseStamped poseFromEigen(const Eigen::Vector3d& tvec, const Eigen::Quaterniond& q);
 float normalizeRadAngle(float rad);
 float calculatePoseYaw(const Eigen::Quaterniond &q);
 float calculateYaw(const Eigen::Vector3d& tvec);

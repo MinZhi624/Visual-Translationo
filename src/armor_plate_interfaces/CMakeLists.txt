@@ -12,6 +12,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 
 # ========================================
 # 生成 ROS 2 接口
@@ -23,7 +24,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AimCommand.msg"
   "msg/DebugTracker.msg"
   "msg/GimbalAngle.msg"
-  DEPENDENCIES geometry_msgs std_msgs  
+  DEPENDENCIES geometry_msgs std_msgs builtin_interfaces
 )
 
 # ========================================

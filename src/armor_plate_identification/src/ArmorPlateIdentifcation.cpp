@@ -38,6 +38,7 @@ private:
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
+    builtin_interfaces::msg::Time read_stamp_;
     // 处理用时（毫秒）
     float process_time_ms_ = 0.0f;
     // 检测结果缓存
@@ -221,16 +222,14 @@ private:
     
     void Publish()
     {
-        builtin_interfaces::msg::Time stamp = this->now();
-
         // 发布装甲板数据
         ArmorPlates armor_plates_msg;
-        armor_plates_msg.header.stamp = stamp;
+        armor_plates_msg.header.stamp = read_stamp_;
         armor_plates_msg.header.frame_id = camera_frame_id_;
         armor_plates_msg.armor_plates = armor_plates_;
         armor_plates_pub_->publish(armor_plates_msg);
         // 发布 camera_info
-        camera_info_msg_.header.stamp = stamp;
+        camera_info_msg_.header.stamp = read_stamp_;
         camera_info_msg_.header.frame_id = camera_frame_id_;
         camera_info_pub_->publish(camera_info_msg_);
         ////////////////// DEBUG ////////////////////////
@@ -239,7 +238,7 @@ private:
             cv::Mat resized;
             cv::resize(undistorted, resized, cv::Size(), 0.5, 0.5);
             auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
-            cv_img.header.stamp = stamp;
+            cv_img.header.stamp = read_stamp_;
             cv_img.header.frame_id = camera_frame_id_;
             debug_image_pub_->publish(*cv_img.toImageMsg());
         }
@@ -299,6 +298,7 @@ public:
         int fail_count = 0;
         while (rclcpp::ok()) {
             cv::Mat frame = camera_driver_.Read();
+            read_stamp_ = this->now();
             if (frame.empty()) {
                 fail_count++;
                 if (fail_count > 5) {

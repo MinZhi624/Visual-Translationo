@@ -1,5 +1,7 @@
 #include "armor_plate_tracker/Tracker.hpp"
+#include "Eigen/src/Geometry/Quaternion.h"
 #include <algorithm>
+#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 
 // 默认构造函数
 Tracker::Tracker()
@@ -58,13 +60,13 @@ void Tracker::initFilter(MyKalmanFilter& kf)
     // 过程噪声协方差 Q (3x3)
     Eigen::MatrixXf Q(3, 3);
     Q << 0.001f, 0.0f, 0.0f,
-         0.0f, 0.01f, 0.0f,
-         0.0f, 0.0f, 0.01f;
+         0.0f, 0.001f, 0.0f,
+         0.0f, 0.0f, 0.001f;
     kf.setProcessNoiseCov(Q);
     
     // 测量噪声协方差 R (1x1)
     Eigen::MatrixXf R(1, 1);
-    R << 0.005f;
+    R << 0.001f;
     kf.setMeasurementNoiseCov(R);
     
     // 初始化状态（设为0）
@@ -166,6 +168,10 @@ void Tracker::resetFilter()
     initialized_ = false;
     is_lost_ = false;
     last_armor_pose_yaw_ = 0.0f;
+    measured_pitch_ = 0.0f;
+    measured_yaw_ = 0.0f;
+    yaw_ = 0.0f;
+    pitch_ = 0.0f;
 }
 
 // 检查是否丢失太久
@@ -192,10 +198,14 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     // 坐标系转换计算
     double psi = yaw_abs;
     double theta = pitch_abs;
+    // Rw<-c = Rx(pitch_abs)Ry(-yaw_abs)
     R_w_c_ << cos(psi),            0,            -sin(psi),
             -sin(theta)*sin(psi), cos(theta),   -sin(theta)*cos(psi),
             cos(theta)*sin(psi),  sin(theta),   cos(theta)*cos(psi);
     R_c_w_ = R_w_c_.transpose();
+    Eigen::Quaterniond q_yaw = Eigen::Quaterniond(std::cos(psi/2), 0, -std::sin(psi/2), 0);
+    Eigen::Quaterniond q_pitch = Eigen::Quaterniond(std::cos(theta/2), std::sin(theta/2), 0, 0);
+    q_w_c_ = q_pitch * q_yaw;
     // 更新状态转移矩阵中的dt
     updateTransitionMatrix(x_kf_, dt);
     updateTransitionMatrix(y_kf_, dt);
@@ -284,9 +294,14 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     float wx_f = x_kf_.getStatePost()(0, 0);
     float wy_f = y_kf_.getStatePost()(0, 0);
     float wz_f = z_kf_.getStatePost()(0, 0);
-    Eigen::Vector3d pc_f = R_c_w_ * Eigen::Vector3d(wx_f, wy_f, wz_f);
+    Eigen::Vector3d pw_f = Eigen::Vector3d(wx_f, wy_f, wz_f);
+    Eigen::Vector3d pc_f = R_c_w_ * pw_f;
     yaw_ = calculateYaw(pc_f);
     pitch_ = calculatePitch(pc_f);
+    // 保存世界系滤波结果
+    Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q; 
+    measured_position_world = poseFromEigen(pw_m, qw_m);
+    filter_position_world = poseFromEigen(pw_f, qw_m);
     // 更新检测到目标的时间和状态
     last_detection_time_ = current_time;
     last_armor_pose_yaw_ = armor_pose_yaw;
@@ -317,4 +332,17 @@ float normalizeRadAngle(float rad)
     while(rad > M_PI) rad -= 2.0 * M_PI;
     while(rad < -M_PI) rad += 2.0 * M_PI;
     return rad;
+}
+PoseStamped poseFromEigen(const Eigen::Vector3d& tvec, const Eigen::Quaterniond& q)
+{
+    PoseStamped pose_stamped;
+    pose_stamped.header.frame_id = "world";
+    pose_stamped.pose.position.x = tvec.x();
+    pose_stamped.pose.position.y = tvec.y();
+    pose_stamped.pose.position.z = tvec.z();
+    pose_stamped.pose.orientation.w = q.w();
+    pose_stamped.pose.orientation.x = q.x();
+    pose_stamped.pose.orientation.y = q.y();
+    pose_stamped.pose.orientation.z = q.z();
+    return pose_stamped;
 }

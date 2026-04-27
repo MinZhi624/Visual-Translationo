@@ -13,7 +13,6 @@ find_package(serial_driver REQUIRED)
 
 add_executable(serial_node
   src/serial_node.cpp
-  src/crc.cpp
 )
 
 ament_target_dependencies(serial_node

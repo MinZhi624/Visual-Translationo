@@ -1,8 +1,8 @@
 #include "armor_plate_interfaces/msg/aim_command.hpp"
 #include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 #include "armor_plate_serial/packet.hpp"
-#include "armor_plate_serial/crc.hpp"
 
+#include <armor_plate_interfaces/msg/detail/aim_command__struct.hpp>
 #include <armor_plate_interfaces/msg/detail/gimbal_angle__struct.hpp>
 #include <chrono>
 #include <cstdint>
@@ -18,6 +18,29 @@
 using armor_plate_interfaces::msg::AimCommand;
 using armor_plate_interfaces::msg::GimbalAngle;
 
+
+uint16_t crc16_modbus_bit(const uint8_t * data, size_t len)
+{
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; ++i)
+    {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit)
+        {
+            if (crc & 0x0001u)
+            {
+                crc = (crc >> 1) ^ 0xA001u;
+            }
+            else
+            {
+                crc >>= 1;
+            }
+        }
+    }
+    return crc;
+}
+
+
 class SerialDriver : public rclcpp::Node
 {
 private:
@@ -25,17 +48,14 @@ private:
     float latest_yaw_ = 0.0f;
     float latest_pitch_ = 0.0f;
     uint8_t latest_seq_ = 0;
-    bool has_target_ = false;
     std::mutex data_mutex_;
     rclcpp::Subscription<AimCommand>::SharedPtr aim_command_sub_;
     // 串口
     std::unique_ptr<IoContext> owned_ctx_;
     std::unique_ptr<drivers::serial_driver::SerialPortConfig> device_config_;
     std::unique_ptr<drivers::serial_driver::SerialDriver> serial_driver_;
-    // 发送相关
-    std::thread send_thread_;
-    std::atomic<bool> running_{true};
     // 接受相关
+    std::atomic<bool> running_{true};
     std::thread recv_thread_;
     enum class ParseState { WAIT_SOF1, WAIT_SOF2, READ_PAYLOAD };
     ParseState parse_state_ = ParseState::WAIT_SOF1;
@@ -47,63 +67,8 @@ private:
     uint64_t debug_total_frames_ = 0;
     uint64_t debug_crc_failures_ = 0;
     uint64_t debug_header_syncs_ = 0;
-    /////// DEBUG ///////
-
-    bool sendAll(const std::vector<uint8_t>& data)
-    {
-        size_t total = 0;
-        while (total < data.size()) {
-            std::vector<uint8_t> remain(data.begin() + total, data.end());
-            size_t sent = serial_driver_->port()->send(remain);
-            if (sent == 0) {
-                return false;
-            }
-            total += sent;
-        }
-        return true;
-    }
-    void sendLoop()
-    {
-        rclcpp::Rate rate(100);  // 100 Hz
-        while (running_.load() && rclcpp::ok()) {
-            float yaw = 0.0f;
-            float pitch = 0.0f;
-            uint8_t target_valid = 0;
-            {
-                std::lock_guard<std::mutex> lock(data_mutex_);
-                if (has_target_ && latest_yaw_ != 0.0f && latest_pitch_!= 0.0f) {
-                    target_valid = 1;
-                    yaw = latest_yaw_;
-                    pitch = latest_pitch_;
-                    has_target_ = false;
-                }
-            }
-
-            VisionToEcFrame_t frame;
-            frame.sof1 = 0xA5;
-            frame.sof2 = 0x5A;
-            frame.seq = latest_seq_++;
-            frame.target_valid = target_valid;
-            frame.delta_yaw_1e4rad = static_cast<int16_t>(yaw * 10000.0f);
-            frame.delta_pitch_1e4rad = static_cast<int16_t>(pitch * 10000.0f);
-            frame.crc16 = crc16_modbus(reinterpret_cast<uint8_t *>(&frame), 8);
-
-            std::vector<uint8_t> data(
-                reinterpret_cast<uint8_t *>(&frame),
-                reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
-            try {
-                if(!sendAll(data)) {
-                    RCLCPP_ERROR(this->get_logger(), "发送失败");
-                } else {
-                    // RCLCPP_INFO(this->get_logger(), "发送数据： vaild = %d, yaw = %f, pitch = %f",target_valid, yaw, pitch);   
-                }
-            } catch (const std::exception & e) {
-                RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
-            }
-
-            rate.sleep();
-        }
-    }
+    
+    // 接受
     void parseByte(uint8_t byte)
     {
         switch(parse_state_) {
@@ -142,7 +107,7 @@ private:
             recv_payload_[1], recv_payload_[2], recv_payload_[3], recv_payload_[4],
             recv_payload_[5], recv_payload_[6], recv_payload_[7], recv_payload_[8]
         };
-        uint16_t calc_crc = crc16_modbus(crc_input, 11);
+        uint16_t calc_crc = crc16_modbus_bit(crc_input, 11);
         uint16_t recv_crc = static_cast<uint16_t>(recv_payload_[9] | 
                             static_cast<uint16_t>(recv_payload_[10]) << 8);
         /////// DEBUG ///////
@@ -172,26 +137,18 @@ private:
             return;
         }
         // 提取数据
-        uint8_t seq_echo = recv_payload_[0];
         int32_t yaw_raw, pitch_raw;
         std::memcpy(&yaw_raw, recv_payload_.data() + 1, sizeof(yaw_raw));
         std::memcpy(&pitch_raw, recv_payload_.data() + 5, sizeof(pitch_raw));
         float yaw_abs = static_cast<float>(yaw_raw) / 10000.0f;
         float pitch_abs = static_cast<float>(pitch_raw) / 10000.0f;
-        // RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
-        // 提取当前帧序号
-        // uint8_t seq_send = 0;
-        // {
-        //     std::lock_guard<std::mutex> lock(data_mutex_);
-        //     seq_send = latest_seq_;
-        // }
-        // 发布数据
         GimbalAngle msg;
-        msg.seq_echo = seq_echo;
+        msg.stamp = this->now();
         msg.pitch_abs = pitch_abs;
         msg.yaw_abs = yaw_abs;
-        // msg.seq_send = seq_send;
         gimbal_angle_pub_->publish(msg);
+        
+        // RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
     }
     void recvLoop()
     {
@@ -207,6 +164,46 @@ private:
             }
             // 避免过度占用CPU资源
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    // 发送
+    bool sendAll(const std::vector<uint8_t>& data)
+    {
+        size_t total = 0;
+        while (total < data.size()) {
+            std::vector<uint8_t> remain(data.begin() + total, data.end());
+            size_t sent = serial_driver_->port()->send(remain);
+            if (sent == 0) {
+                return false;
+            }
+            total += sent;
+        }
+        return true;
+    }
+    void sendData(const AimCommand::SharedPtr msg)
+    {
+        VisionToEcFrame_t frame;
+        latest_yaw_ = msg->delta_yaw;
+        latest_pitch_ = msg->delta_pitch;
+        if(latest_pitch_ == 0.0f && latest_yaw_ == 0.0f) return;
+        frame.sof1 = 0xA5;
+        frame.sof2 = 0x5A;
+        frame.seq = latest_seq_++;
+        frame.target_valid = 1;
+        frame.delta_yaw_1e4rad = static_cast<int16_t>(latest_yaw_ * 10000.0f);
+        frame.delta_pitch_1e4rad = static_cast<int16_t>(latest_pitch_ * 10000.0f);
+        frame.crc16 = crc16_modbus_bit(reinterpret_cast<uint8_t *>(&frame), 8);
+        std::vector<uint8_t> data(
+            reinterpret_cast<uint8_t *>(&frame),
+            reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
+        try {
+            if(!sendAll(data)) {
+                RCLCPP_ERROR(this->get_logger(), "发送失败");
+            } else {
+                // RCLCPP_INFO(this->get_logger(), "发送数据： vaild = %d, yaw = %f, pitch = %f",target_valid, yaw, pitch);   
+            }
+        } catch (const std::exception & e) {
+            RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
         }
     } 
     void init()
@@ -228,16 +225,9 @@ private:
         RCLCPP_INFO(this->get_logger(), "Serial打开成功: %s @ %d", device_name.c_str(), baud_rate);
         // ===== 接受信息 =====
         aim_command_sub_ = this->create_subscription<AimCommand>(
-        "aim_command", 10,
-        [this](const AimCommand::SharedPtr msg) {
-            std::lock_guard<std::mutex> lock(data_mutex_);
-            latest_yaw_ = msg->delta_yaw;
-            latest_pitch_ = msg->delta_pitch;
-            has_target_ = true;
-        }
+            "aim_command", 10,
+            std::bind(&SerialDriver::sendData, this, std::placeholders::_1)
         );
-        // ===== 启动发送线程 =====
-        send_thread_ = std::thread(&SerialDriver::sendLoop, this);
         // ===== 启动接收线程 =====
         gimbal_angle_pub_ = this->gimbal_angle_pub_ = this->create_publisher<GimbalAngle>("gimbal_angle", 10);
         recv_thread_ = std::thread(&SerialDriver::recvLoop, this);
@@ -256,9 +246,6 @@ public:
         // 依赖关系 send_thread_ -> serial_driver_ -> owned_ctx_
         if (recv_thread_.joinable()) {
             recv_thread_.join();
-        }
-        if (send_thread_.joinable()) {
-            send_thread_.join();
         }
         if (serial_driver_ && serial_driver_->port()->is_open()) {
             serial_driver_->port()->close();
