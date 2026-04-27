@@ -1,6 +1,5 @@
 #include "armor_plate_tracker/Tracker.hpp"
 #include <algorithm>
-#include <Eigen/Core>
 
 // 默认构造函数
 Tracker::Tracker()
@@ -12,7 +11,7 @@ Tracker::Tracker()
     , initialized_(false)
     , max_lost_time_(0.1)
     , is_lost_(false)
-    , yaw_mutation_threshold_(0.05f)   
+    , yaw_mutation_threshold_(0.05f) 
 {
 }
 
@@ -230,7 +229,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     );
     
     // 保存当前帧选中的原始测量值
-    selected_position_ = target_position;
+    measured_position_camera_ = target_position;
     measured_yaw_ = calculateYaw(target_position);
     measured_pitch_ = calculatePitch(target_position);
     

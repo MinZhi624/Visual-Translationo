@@ -1,16 +1,18 @@
 #pragma once
 #include "armor_plate_tracker/MyKalmanFilter.hpp"
-#include "armor_plate_interfaces/msg/armor_plate.hpp"
 
-#include <armor_plate_interfaces/msg/detail/armor_plate__struct.hpp>
-#include <armor_plate_interfaces/msg/detail/armor_plates__struct.hpp>
-#include <geometry_msgs/msg/detail/pose__struct.hpp>
+#include "armor_plate_interfaces/msg/armor_plates.hpp"
+#include "armor_plate_interfaces/msg/armor_plate.hpp"
+#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
 #include <opencv2/core.hpp>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
+using geometry_msgs::msg::PoseStamped;
 
 struct TrackingOverlayData {
     bool has_result = false;
@@ -55,9 +57,13 @@ private:
     float yaw_mutation_threshold_;
     float last_armor_pose_yaw_;
     // 当前帧选中的原始测量值（相机系）
-    Eigen::Vector3d selected_position_;
+    Eigen::Vector3d measured_position_camera_;
     float measured_yaw_;
     float measured_pitch_;
+    // 获得世界坐标系下的点
+    PoseStamped measured_position_world;
+    PoseStamped filter_position_world;
+
     // 初始化滤波器（内部调用）
     void initFilter(MyKalmanFilter& kf);
     
@@ -103,11 +109,13 @@ public:
     // 获取原始测量值（选中目标，相机系）
     float getMeasuredYaw() const { return measured_yaw_; }
     float getMeasuredPitch() const { return measured_pitch_; }
-    Eigen::Vector3d getMeasuredPosition() const { return selected_position_; }
+    Eigen::Vector3d getMeasuredPosition() const { return measured_position_camera_; }
+
     // 获取是否丢失目标
     bool isLost() const { return is_lost_; }
     // 获取上次更新时间
     double getLastUpdateTime() const { return last_update_time_; }
+
 };
 
 // 工具函数

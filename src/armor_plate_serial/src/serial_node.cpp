@@ -12,6 +12,8 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <sstream>
+#include <iomanip>
 
 using armor_plate_interfaces::msg::AimCommand;
 using armor_plate_interfaces::msg::GimbalAngle;
@@ -41,7 +43,25 @@ private:
     rclcpp::Publisher<GimbalAngle>::SharedPtr gimbal_angle_pub_;
     // 缓存
     std::vector<uint8_t> recv_temp_buf_;
+    /////// DEBUG ///////
+    uint64_t debug_total_frames_ = 0;
+    uint64_t debug_crc_failures_ = 0;
+    uint64_t debug_header_syncs_ = 0;
+    /////// DEBUG ///////
 
+    bool sendAll(const std::vector<uint8_t>& data)
+    {
+        size_t total = 0;
+        while (total < data.size()) {
+            std::vector<uint8_t> remain(data.begin() + total, data.end());
+            size_t sent = serial_driver_->port()->send(remain);
+            if (sent == 0) {
+                return false;
+            }
+            total += sent;
+        }
+        return true;
+    }
     void sendLoop()
     {
         rclcpp::Rate rate(100);  // 100 Hz
@@ -72,13 +92,10 @@ private:
                 reinterpret_cast<uint8_t *>(&frame),
                 reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
             try {
-                size_t sent = serial_driver_->port()->send(data);
-                if (sent != data.size()) {
-                    RCLCPP_ERROR(
-                        this->get_logger(), "发送不完整: 期望 %zu, 实际 %zu", data.size(), sent);
+                if(!sendAll(data)) {
+                    RCLCPP_ERROR(this->get_logger(), "发送失败");
                 } else {
-                    RCLCPP_INFO(this->get_logger(), "发送数据: valid=%d, yaw=%f, pitch=%f",
-                                target_valid, yaw, pitch);
+                    // RCLCPP_INFO(this->get_logger(), "发送数据： vaild = %d, yaw = %f, pitch = %f",target_valid, yaw, pitch);   
                 }
             } catch (const std::exception & e) {
                 RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
@@ -99,6 +116,8 @@ private:
             if (byte == 0xA5) {
                 parse_state_ = ParseState::READ_PAYLOAD;
                 recv_payload_.clear(); // 准备读取
+                /////// DEBUG ///////
+                debug_header_syncs_++;
             } else if(byte == 0x5A) {
                 parse_state_ = ParseState::WAIT_SOF2;
             } else {
@@ -126,8 +145,30 @@ private:
         uint16_t calc_crc = crc16_modbus(crc_input, 11);
         uint16_t recv_crc = static_cast<uint16_t>(recv_payload_[9] | 
                             static_cast<uint16_t>(recv_payload_[10]) << 8);
+        /////// DEBUG ///////
+        debug_total_frames_++;
         if(calc_crc != recv_crc) {
-            RCLCPP_WARN(this->get_logger(), "CRC校验失败");
+            debug_crc_failures_++;
+            std::ostringstream oss;
+            oss << std::hex << std::uppercase << std::setfill('0');
+            oss << "RX raw:";
+            oss << " 5A A5";
+            for (size_t i = 0; i < recv_payload_.size(); ++i) {
+                oss << " " << std::setw(2) << static_cast<int>(recv_payload_[i]);
+            }
+            oss << " | calc=0x" << std::setw(4) << calc_crc
+                << " recv=0x" << std::setw(4) << recv_crc;
+            double fail_rate = (debug_total_frames_ > 0)
+                                   ? (100.0 * static_cast<double>(debug_crc_failures_) / static_cast<double>(debug_total_frames_))
+                                   : 0.0;
+            RCLCPP_WARN(
+                this->get_logger(),
+                "%s | [STATS] total=%llu, fail=%llu, sync=%llu, fail_rate=%.2f%%",
+                oss.str().c_str(),
+                static_cast<unsigned long long>(debug_total_frames_),
+                static_cast<unsigned long long>(debug_crc_failures_),
+                static_cast<unsigned long long>(debug_header_syncs_),
+                fail_rate);
             return;
         }
         // 提取数据
@@ -137,7 +178,7 @@ private:
         std::memcpy(&pitch_raw, recv_payload_.data() + 5, sizeof(pitch_raw));
         float yaw_abs = static_cast<float>(yaw_raw) / 10000.0f;
         float pitch_abs = static_cast<float>(pitch_raw) / 10000.0f;
-        RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
+        // RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
         // 提取当前帧序号
         // uint8_t seq_send = 0;
         // {
@@ -168,7 +209,6 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     } 
-
     void init()
     {
         // ===== 串口初始化 =====
