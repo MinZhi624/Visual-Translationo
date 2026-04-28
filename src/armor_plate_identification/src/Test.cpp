@@ -1,4 +1,5 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
+#include "armor_plate_identification/Armor.hpp"
 #include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/TestFunc.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
@@ -6,18 +7,21 @@
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <cv_bridge/cv_bridge.h>
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <deque>
 #include <thread>
 #include <chrono>
+#include <mutex>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
+using armor_plate_interfaces::msg::TrackerDebug;
 
 class Test : public rclcpp::Node
 {
@@ -36,9 +40,11 @@ private:
     NumberClassifier number_classifier_;
     // 发布者
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
     // 处理用时
     float process_time_ms_ = 10.0f;
+    // 视频帧计数与时间
+    int frame_count_ = 0;
+    double fps_ = 50.0;
     // 时间和帧数
     rclcpp::TimerBase::SharedPtr timer_;
     // ROS 参数控制 debug 开关
@@ -47,6 +53,10 @@ private:
     bool debug_preprocessing_;
     bool debug_number_classification_;
     DebugParamController debug_controller_;
+    // TrackerDebug 回调查找
+    rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
+    std::mutex tracker_debug_mutex_;
+    std::deque<ImageSave> images_buffs_;
     void init(const std::string& video_path)
     {
         // ===== 相机初始化 ==== //
@@ -60,8 +70,10 @@ private:
         double fps = c_.get(cv::CAP_PROP_FPS);
         if (fps <= 0) {
             RCLCPP_WARN(this->get_logger(), "无法获取视频FPS，使用默认值: 50.0");
+            fps_ = 50.0;
         } else {
             RCLCPP_INFO(this->get_logger(), "视频FPS: %.2f", fps);
+            fps_ = fps;
         }
         // ==== 匹配参数初始化（ROS参数化） ==== //
         lights_.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
@@ -70,7 +82,8 @@ private:
         lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
         lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
         lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
-        lights_.TARGET_COLOR = this->declare_parameter<std::string>("target_color", "BLUE");
+        target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
+        lights_.TARGET_COLOR = target_color_;
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
         // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
@@ -100,12 +113,16 @@ private:
         number_classifier_ = NumberClassifier(model_path, label_path, number_threshold, ignore_labels);
         // ===== 初始化发布器 ===== //
         armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
-        debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("debug_image", 10);
         // ===== DEBUG ===== //
         debug_base_ = this->declare_parameter<bool>("debug_base", false);
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
         debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
+        // 订阅 Tracker 回传的调试数据
+        tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
+            "tracker_debug", 10,
+            std::bind(&Test::TrackerDebugCallBack, this, std::placeholders::_1)
+        );
 
         if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
         if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
@@ -196,7 +213,10 @@ private:
     }
     void Publish()
     {
-        builtin_interfaces::msg::Time stamp = this->now();
+        double time_sec = static_cast<double>(frame_count_) / fps_;
+        builtin_interfaces::msg::Time stamp;
+        stamp.sec = static_cast<int32_t>(time_sec);
+        stamp.nanosec = static_cast<uint32_t>((time_sec - stamp.sec) * 1e9);
         
         // 发布装甲板数据
         ArmorPlates armor_plates_msg;
@@ -205,24 +225,15 @@ private:
         armor_plates_msg.armor_plates = armor_plates_;  // 直接拷贝赋值
         armor_plates_pub_->publish(armor_plates_msg);
 
-        ////////////////////// DEUBG ////////////////////////
-        // 发布调试图像（降采样 0.5x，与主节点对齐）
-        if (debug_image_pub_->get_subscription_count() > 0 || debug_image_pub_->get_intra_process_subscription_count() > 0) {
-            cv::Mat resized;
-            cv::resize(img_show_, resized, cv::Size(), 0.5, 0.5);
-            auto cv_img = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", resized);
-            cv_img.header.stamp = stamp;
-            cv_img.header.frame_id = "camera_link";
-            debug_image_pub_->publish(*cv_img.toImageMsg());
-        }
     }
     void controlParams()
     {
         int key = cv::waitKey(1);
         if (key == -1) return;
 
-        // ESC：退出
-        if (key == 27) {
+        // ESC / q / Q：退出
+        if (key == 27 || key == 'q' || key == 'Q') {
+            cv::destroyAllWindows();
             rclcpp::shutdown();
             return;
         }
@@ -247,15 +258,71 @@ private:
         // 绘制处理用时
         debug_controller_.drawProcessTime(img_show_, process_time_ms_);
         // 显示图像
-        cv::imshow("img_show_", img_show_);
+        cv::Mat show_img;
+        cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
+        cv::imshow("Identifacation", show_img);
     }
     void Save()
     {
         ////////// DEBUG ///////////
         if(debug_number_classification_) {
             lights_.saveNumberRoi();
-        }        
+        }
+        {
+            std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
+            double time_sec = static_cast<double>(frame_count_) / fps_;
+            builtin_interfaces::msg::Time stamp;
+            stamp.sec = static_cast<int32_t>(time_sec);
+            stamp.nanosec = static_cast<uint32_t>((time_sec - stamp.sec) * 1e9);
+            images_buffs_.push_back({stamp, img_show_.clone()});
+            if (images_buffs_.size() > 10) images_buffs_.pop_front();
+        }
     }
+    ////// DEBUG ///////
+    void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
+    {
+        std::deque<ImageSave> images_buffs;
+        {
+            std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
+            if (images_buffs_.empty()) return;
+            images_buffs = images_buffs_;
+        }
+        // 寻找时间头最接近的帧（容差 1ms）
+        auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg](const ImageSave& image_save) {
+            const auto& t1 = image_save.img_stamp;
+            const auto& t2 = msg->header.stamp;
+            int64_t diff_ns = std::abs(
+                (int64_t)t1.sec * 1000000000LL + (int64_t)t1.nanosec -
+                (int64_t)t2.sec * 1000000000LL - (int64_t)t2.nanosec);
+            return diff_ns < 1000000; // 1ms 容差
+        });
+        if (it == images_buffs.end()) return;
+
+        cv::Mat debug_img = it->img.clone();
+        cv::Point3f target_cam(msg->target_point.x, msg->target_point.y, msg->target_point.z);
+        cv::Point3f filtered_cam(msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z);
+
+        cv::Point2f target_px = pose_solver_.project(target_cam);
+        cv::Point2f filtered_px = pose_solver_.project(filtered_cam);
+
+        auto drawCross = [](cv::Mat& img, const cv::Point2f& center, const cv::Scalar& color, int radius = 12) {
+            cv::circle(img, center, radius, color, 2, cv::LINE_AA);
+            cv::line(img, center + cv::Point2f(-radius, 0), center + cv::Point2f(radius, 0), color, 2, cv::LINE_AA);
+            cv::line(img, center + cv::Point2f(0, -radius), center + cv::Point2f(0, radius), color, 2, cv::LINE_AA);
+        };
+
+        if (target_px.x >= 0) {
+            drawCross(debug_img, target_px, cv::Scalar(0, 0, 255), 12);
+        }
+        if (filtered_px.x >= 0) {
+            drawCross(debug_img, filtered_px, cv::Scalar(0, 255, 0), 12);
+        }
+        cv::Mat show_img;
+        cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
+        cv::imshow("Tracker Debug", show_img);
+        cv::waitKey(1);
+    }
+
 public:
     void run()
     {
@@ -274,16 +341,17 @@ public:
             SolvePose();
             NumberClassify();
             Publish();
+            Save();
 
             auto t_end = std::chrono::steady_clock::now();
             process_time_ms_ = static_cast<float>(std::chrono::duration<double, std::milli>(t_end - t_start).count());
             
             imageShow();
             controlParams();
-            Save();
             if (debug_base_) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
             }
+            frame_count_++;
         }
         RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
     }
@@ -301,7 +369,7 @@ int main(int argc, char **argv)
     auto node = std::make_shared<Test>(argv[1]);
     std::thread spin_thread([&](){rclcpp::spin(node);});
     node->run();
-    rclcpp::shutdown();
     if(spin_thread.joinable()) spin_thread.join();
+    rclcpp::shutdown();
     return 0;
 }

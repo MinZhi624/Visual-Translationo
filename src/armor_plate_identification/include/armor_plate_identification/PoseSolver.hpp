@@ -40,6 +40,11 @@ public:
 	/// @return 图像坐标系二维点
 	cv::Point2f reprojection(cv::Point3f point3D);
 
+	/// @brief 将相机坐标系三维点投影到像素坐标（针孔模型）
+	/// @param point_cam 相机坐标系三维点
+	/// @return 像素坐标（Z<=0时返回(-1,-1)）
+	cv::Point2f project(cv::Point3f point_cam) const;
+
 	/// @brief 对输入图像进行去畸变
 	/// @param src 原始图像
 	/// @return 去畸变后的图像（若内参未初始化则返回原图拷贝）

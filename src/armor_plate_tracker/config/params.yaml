@@ -1,16 +1,5 @@
 armor_plate_tracker_node:
   ros__parameters:
     max_lost_time: 0.1 # 和电控保持一致
-    mutation_yaw_threshold: 0.05
-    mutation_pitch_threshold: 0.015
+    mutation_yaw_threshold: 0.087266463 # 5°
     debug: true
-    # 视屏
-    # camera_matrix: [2374.54248, 0.0, 698.85288, 0.0, 2377.53648, 520.8649, 0.0, 0.0, 1.0]
-    
-    # 迈德
-    # camera_matrix: [1340.02942, 0.0, 638.46073, 0.0, 1338.22668, 521.35402, 0.0, 0.0, 1.0]
-
-    # 大恒（云台）
-    # camera_matrix: [1340.02942, 0.0, 638.46073,
-    #                  0.     , 1338.22668,  521.35402,
-    #                  0.     ,    0.     ,    1.]

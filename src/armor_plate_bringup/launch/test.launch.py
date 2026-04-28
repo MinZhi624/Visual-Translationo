@@ -1,6 +1,7 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from ament_index_python import get_package_share_directory
 import os
@@ -33,6 +34,18 @@ def generate_launch_description():
         get_package_share_directory('armor_plate_serial'),
         'config',
         'params.yaml'
+    )
+
+    rviz_config_file = os.path.join(
+        get_package_share_directory('armor_plate_bringup'),
+        'rviz2',
+        'rivz2.rviz'
+    )
+
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='Whether to start RViz2'
     )
 
     # 定义节点
@@ -71,9 +84,19 @@ def generate_launch_description():
         parameters=[serial_node_params_file]
     )
 
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', rviz_config_file],
+        condition=IfCondition(LaunchConfiguration('use_rviz'))
+    )
+
     return LaunchDescription([
         # 定义参数
         video_path_arg,
+        use_rviz_arg,
         # 启动节点
-        test_node, tracker_node, visualization_node, serial_node
+        test_node, tracker_node, visualization_node, serial_node, rviz_node
     ])

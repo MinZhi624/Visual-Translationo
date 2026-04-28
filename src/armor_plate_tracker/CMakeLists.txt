@@ -17,6 +17,7 @@ find_package(armor_plate_interfaces REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 add_executable(armor_plate_tracker_node
   src/ArmorPlateTracker.cpp
@@ -46,6 +47,7 @@ ament_target_dependencies(
   "image_transport"
   "camera_info_manager"
   "tf2_ros"
+  "visualization_msgs"
 )
 
 target_link_libraries(armor_plate_tracker_node

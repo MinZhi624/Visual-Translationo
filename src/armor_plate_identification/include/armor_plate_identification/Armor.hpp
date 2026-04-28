@@ -1,5 +1,6 @@
 #pragma once
 #include <opencv2/core.hpp>
+#include <builtin_interfaces/msg/time.hpp>
 
 /// @brief 灯条类
 class Lights
@@ -29,4 +30,9 @@ public:
 	std::string number_;
 	float confidence_ = 0.0f;
 	Armor() = default;
+};
+
+struct ImageSave{
+	builtin_interfaces::msg::Time img_stamp;
+	cv::Mat img;
 };
