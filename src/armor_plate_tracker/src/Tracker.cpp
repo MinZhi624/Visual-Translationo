@@ -2,6 +2,7 @@
 #include "Eigen/src/Geometry/Quaternion.h"
 #include <algorithm>
 #include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 
 // 默认构造函数
 Tracker::Tracker()
@@ -16,7 +17,6 @@ Tracker::Tracker()
     , yaw_mutation_threshold_(0.05f) 
 {
 }
-
 // 初始化滤波器参数
 void Tracker::Init()
 {
@@ -302,6 +302,8 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q; 
     measured_position_world = poseFromEigen(pw_m, qw_m);
     filter_position_world = poseFromEigen(pw_f, qw_m);
+    measured_position_camera = target_position;
+    filter_position_camera = pc_f;
     // 更新检测到目标的时间和状态
     last_detection_time_ = current_time;
     last_armor_pose_yaw_ = armor_pose_yaw;

@@ -61,6 +61,21 @@ float PoseSolver::calculateImageDistanceToCenter(cv::Point2f target_center_point
 	cv::Point2f image_center_point(cx, cy);
 	return cv::norm(image_center_point - target_center_point);
 }
+cv::Point2f PoseSolver::project(cv::Point3f point_cam) const
+{
+    if (point_cam.z <= 1e-6f) {
+        return cv::Point2f(-1.0f, -1.0f);
+    }
+    double fx = camera_matrix_.at<double>(0, 0);
+    double fy = camera_matrix_.at<double>(1, 1);
+    double cx = camera_matrix_.at<double>(0, 2);
+    double cy = camera_matrix_.at<double>(1, 2);
+    double inv_z = 1.0 / point_cam.z;
+    double u = fx * point_cam.x * inv_z + cx;
+    double v = fy * point_cam.y * inv_z + cy;
+    return cv::Point2f(static_cast<float>(u), static_cast<float>(v));
+}
+
 cv::Mat PoseSolver::undistortImage(const cv::Mat& src) const
 {
     cv::Mat dst;

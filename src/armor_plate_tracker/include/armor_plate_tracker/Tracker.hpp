@@ -73,7 +73,9 @@ private:
     // 获得世界坐标系下的点
     PoseStamped measured_position_world;
     PoseStamped filter_position_world;
-
+    // 获得相机坐标系下的点
+    Eigen::Vector3d measured_position_camera;
+    Eigen::Vector3d filter_position_camera;
     // 初始化滤波器（内部调用）
     void initFilter(MyKalmanFilter& kf);
     
@@ -104,10 +106,7 @@ public:
     // 设置突变阈值
     void setMutationThreshold(float yaw_thresh);
     
-    // 主更新函数
-    // positions: 检测到的所有装甲板的pose.position（即tvec，单位米）
-    // image_distances: 对应的image_distance_to_center
-    // current_time: 当前时间戳（秒）
+    
     void Update(const std::vector<ArmorPlate>& armor_plates,
                 double current_time,
                 float yaw_abs, float pitch_abs
@@ -126,9 +125,12 @@ public:
     // 获取上次更新时间
     double getLastUpdateTime() const { return last_update_time_; }
 
-    // 获得世界坐标系点
+    // 获得世界坐标系下的点 (PoseStamped)
     PoseStamped getMeasuredPositionWorld() const { return measured_position_world; }
     PoseStamped getFilterPositionWorld() const { return filter_position_world; }
+    // 获得相机坐标系下的点 (Eigen::Vector3d)
+    Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera; }
+    Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera; }
 };
 
 // 工具函数

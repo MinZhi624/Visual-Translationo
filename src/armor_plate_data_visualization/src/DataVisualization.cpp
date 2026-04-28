@@ -5,7 +5,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "rclcpp/rclcpp.hpp"
-#include "armor_plate_interfaces/msg/debug_tracker.hpp"
+#include "armor_plate_interfaces/msg/tracker_data.hpp"
 
 class DataVisualizaiton : public rclcpp::Node
 {
@@ -19,14 +19,14 @@ public:
         yaw_plot_ = ScatterPlot(yaw_roi);
         pitch_plot_ = ScatterPlot(pitch_roi);
 
-        debug_sub_ = this->create_subscription<armor_plate_interfaces::msg::DebugTracker>(
-            "debug_tracker",
+        tracker_debug_sub_ = this->create_subscription<armor_plate_interfaces::msg::TrackerData>(
+            "tracker_data",
             50,
             std::bind(&DataVisualizaiton::msgCallBack, this, std::placeholders::_1));
     }
 
 private:
-    rclcpp::Subscription<armor_plate_interfaces::msg::DebugTracker>::SharedPtr debug_sub_;
+    rclcpp::Subscription<armor_plate_interfaces::msg::TrackerData>::SharedPtr tracker_debug_sub_;
     ScatterPlotData observed_yaw_;
     ScatterPlotData observed_pitch_;
     ScatterPlotData filtered_yaw_;
@@ -35,7 +35,7 @@ private:
     ScatterPlot yaw_plot_;
     ScatterPlot pitch_plot_;
 
-    void msgCallBack(const armor_plate_interfaces::msg::DebugTracker & msg)
+    void msgCallBack(const armor_plate_interfaces::msg::TrackerData & msg)
     {
         // 处理数据
         observed_yaw_.saveDatum(msg.measurement_yaw);

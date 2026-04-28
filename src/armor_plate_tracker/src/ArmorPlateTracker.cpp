@@ -1,30 +1,25 @@
 #include "armor_plate_tracker/Tracker.hpp"
+#include "armor_plate_interfaces/msg/armor_plates.hpp"
+#include "armor_plate_interfaces/msg/armor_plate.hpp"
+#include "armor_plate_interfaces/msg/aim_command.hpp"
+#include "armor_plate_interfaces/msg/gimbal_angle.hpp"
+#include "armor_plate_interfaces/msg/tracker_data.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
-
-#include <armor_plate_interfaces/msg/detail/armor_plate__struct.hpp>
-#include <cstdint>
-#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
-#include <sensor_msgs/msg/camera_info.hpp>
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
-#include "armor_plate_interfaces/msg/armor_plates.hpp"
-#include "armor_plate_interfaces/msg/aim_command.hpp"
-#include "armor_plate_interfaces/msg/debug_tracker.hpp"
-#include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 
-#include <cv_bridge/cv_bridge.h>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
-
+#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 #include <mutex>
 #include <deque>
 
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
-using armor_plate_interfaces::msg::DebugTracker;
 using armor_plate_interfaces::msg::GimbalAngle;
+using armor_plate_interfaces::msg::TrackerData;
+using armor_plate_interfaces::msg::TrackerDebug;
 
 class ArmorPlateTracker : public rclcpp::Node
 {
@@ -34,48 +29,32 @@ private:
     double max_lost_time_;
     double mutation_yaw_threshold_;
     // ===== ROS 相关  ===== //
+    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
     rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_ganle_sub_;
-    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
+    rclcpp::Publisher<TrackerData>::SharedPtr tracker_data_pub_;
+    // 数据可视化
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr filter_pose_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr measured_pose_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
+    builtin_interfaces::msg::Time image_stamp_;
     // ===== 绝对角度 ===== //
     std::deque<AngleRecord> angle_buffer_;
     std::mutex angle_buffer_mutex_;
 
     // ===== DEBUG =====//
     bool debug_;
-    rclcpp::Publisher<DebugTracker>::SharedPtr debug_tracker_pub_;
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr debug_image_sub_;
-    rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
-    // 相机内参
-    cv::Mat camera_matrix_;
-    bool camera_info_received_ = false;
-    // 最新跟踪结果（用于图像叠加）
-    TrackingOverlayData overlay_data_;
-    std::mutex overlay_mutex_;
+    rclcpp::Publisher<TrackerDebug>::SharedPtr tracker_debug_pub_;
 
     void init()
     {
         // ===== 参数获取 ===== //
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
-        // 相机内参 fallback（视频默认值，0.5x 已缩放）
-        camera_matrix_ = (cv::Mat_<double>(3, 3) <<
-            1187.27124, 0., 349.42644,
-            0., 1188.76824, 260.43245,
-            0., 0., 1.);
-        // ===== 订阅 CameraInfo 动态读取 P 矩阵 ===== //
-        camera_info_sub_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
-            "camera_info",
-            rclcpp::SensorDataQoS(),
-            std::bind(&ArmorPlateTracker::CameraInfoCallBack, this, std::placeholders::_1)
-        );
         // ===== ROS 相关 ===== //
         armor_plates_sub_ = this->create_subscription<ArmorPlates>(
             "armor_plates", 
@@ -93,37 +72,39 @@ private:
                 if(angle_buffer_.size() > 50) angle_buffer_.pop_front();
             }
         );
+        tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
         filter_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("filter_pose", 10);
         measured_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("measured_pose", 10);
         marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("visualization_marker", 10);
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
+        if(debug_) {
+            tracker_debug_pub_ = this->create_publisher<TrackerDebug>("tracker_debug", 10);
+        }
         // ===== 装甲板跟踪器 ===== //
         tracker_.setMaxLostTime(max_lost_time_);
         tracker_.setMutationThreshold(mutation_yaw_threshold_);
         tracker_.Init();
         
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
-        
     }
     double findClosestAngle(const builtin_interfaces::msg::Time& image_stamp, float& output_yaw, float& output_pitch)
     {
         double image_time = image_stamp.sec + image_stamp.nanosec * 1e-9;
         
-        // 先复制缓存，避免长时间阻塞回调线程
+        // 获取角度缓存
         std::vector<AngleRecord> local_buffer;
         {
             std::lock_guard<std::mutex> lock(angle_buffer_mutex_);
             if (angle_buffer_.empty()) {
                 output_yaw = 0.0f;
                 output_pitch = 0.0f;
-                RCLCPP_WARN(this->get_logger(), "角度缓存为空，无法对齐，使用 0");
+                // RCLCPP_WARN(this->get_logger(), "角度缓存为空，无法对齐，使用 0");
                 return 0.0;
             }
             local_buffer.assign(angle_buffer_.begin(), angle_buffer_.end());
         }
         
-        // 在锁外做计算和遍历
         auto closest_it = local_buffer.begin();
         double min_diff = std::abs(
             (closest_it->time.sec + closest_it->time.nanosec * 1e-9) - image_time);
@@ -149,46 +130,14 @@ private:
     void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
     {
         // 数据获取
-        double current_time = this->now().seconds();
-        current_time_ = current_time;
-        // 装甲板
+        image_stamp_ = msg->header.stamp;
+        current_time_ = image_stamp_.sec + image_stamp_.nanosec * 1e-9;
         const auto& armor_plates = msg->armor_plates;
-        // 绝对角（按图像时间戳对齐）
         float yaw_abs = 0.0;
         float pitch_abs = 0.0;
-        
-        double align_diff = findClosestAngle(msg->header.stamp, yaw_abs, pitch_abs);
-        RCLCPP_INFO(this->get_logger(), "时间对齐差值: %.4f ms", align_diff * 1000.0);
-        
-        tracker_.Update(armor_plates, current_time, yaw_abs, pitch_abs);
+        findClosestAngle(msg->header.stamp, yaw_abs, pitch_abs);
+        tracker_.Update(armor_plates, current_time_, yaw_abs, pitch_abs);
         publish(msg);
-        ///////// DEBUG ////////////////////////
-        if (debug_) {
-            DebugTracker debug_msg;
-            debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
-            debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
-            debug_msg.filter_yaw = tracker_.getYaw();
-            debug_msg.filter_pitch = tracker_.getPitch();
-            if (debug_tracker_pub_ && debug_tracker_pub_) {
-                debug_tracker_pub_->publish(debug_msg);
-            }
-        }
-
-        // 更新最新跟踪结果数据，不在此画图
-        if (debug_) {
-            auto measured_pos = tracker_.getMeasuredPosition();
-            float distance = static_cast<float>(measured_pos.norm());
-
-            std::lock_guard<std::mutex> lock(overlay_mutex_);
-            overlay_data_.has_result = true;
-            overlay_data_.is_lost = tracker_.isLost();
-            overlay_data_.measured_position = measured_pos;
-            overlay_data_.measured_yaw = tracker_.getMeasuredYaw();
-            overlay_data_.measured_pitch = tracker_.getMeasuredPitch();
-            overlay_data_.filter_yaw = tracker_.getYaw();
-            overlay_data_.filter_pitch = tracker_.getPitch();
-            overlay_data_.distance = distance;
-        }
     }
     void info()
     {
@@ -223,12 +172,21 @@ private:
 
     void publish(const ArmorPlates::SharedPtr armor_plates)
     {
-        // 发布所有装甲板的目标位姿 相机坐标系
+        // 发布滤波装甲板数据
+        TrackerData debug_msg;
+        debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
+        debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
+        debug_msg.filter_yaw = tracker_.getYaw();
+        debug_msg.filter_pitch = tracker_.getPitch();
+        if (tracker_data_pub_) {
+            tracker_data_pub_->publish(debug_msg);
+        }
+        // TF 发布到相机坐标系
         int armor_plate_count = 0;
         for (const auto& armor_plate : armor_plates->armor_plates) {
             geometry_msgs::msg::TransformStamped transfrom_stamped;
             transfrom_stamped.header.stamp = this->now();
-            transfrom_stamped.header.frame_id = "camera_link";
+            transfrom_stamped.header.frame_id = armor_plates->header.frame_id;
             transfrom_stamped.child_frame_id = "armor_plate_" + std::to_string(++armor_plate_count);
             transfrom_stamped.transform.translation.x = armor_plate.pose.position.x;
             transfrom_stamped.transform.translation.y = armor_plate.pose.position.y;
@@ -244,11 +202,39 @@ private:
         measured_position_world.header.stamp = now;
         filter_pose_pub_->publish(filter_position_world);
         measured_pose_pub_->publish(measured_position_world);
-        
-        // 发布球体 Marker 到 RViz（尺寸差异化，避免重叠时看不出是两个球）
+        // 发布球体 Marker 到 RViz
         marker_pub_->publish(createSphereMarker(filter_position_world, 0, 0.15f, 0.0f, 1.0f, 0.0f, 1.0f));
         marker_pub_->publish(createSphereMarker(measured_position_world, 1, 0.20f, 1.0f, 0.0f, 0.0f, 0.5f));
-        
+        ////////// DEBUG //////////
+        if (debug_) {
+            TrackerDebug debug_msg;
+            debug_msg.header.stamp = image_stamp_;
+            auto eigen2geometry = [](const Eigen::Vector3d& vec) {
+                geometry_msgs::msg::Vector3 vec_msg;
+                vec_msg.x = vec.x();
+                vec_msg.y = vec.y();
+                vec_msg.z = vec.z();
+                return vec_msg;
+            };
+            if (!tracker_.isLost()) {
+                Eigen::Vector3d measured_cam = tracker_.getMeasuredPositionCamera();
+                debug_msg.target_point = eigen2geometry(measured_cam);
+                Eigen::Vector3d filtered_cam = tracker_.getFilterPositionCamera();
+                debug_msg.filtered_point = eigen2geometry(filtered_cam);
+            } else {
+                // 丢失时放在相机正前方（光轴上，投影到图像中心）
+                geometry_msgs::msg::Vector3 center_point;
+                center_point.x = 0.0;
+                center_point.y = 0.0;
+                center_point.z = 1.0;
+                debug_msg.target_point = center_point;
+                debug_msg.filtered_point = center_point;
+            }
+
+            tracker_debug_pub_->publish(debug_msg);
+        }
+
+        // 发送增量角
         if (tracker_.isLost()) {
             RCLCPP_WARN(this->get_logger(), "目标丢失");
             return;
@@ -259,131 +245,12 @@ private:
             aim_command_pub_->publish(aim_command);
         }
     }
-    ///////// DEBUG ///////////////////
-    void Debug()
-    {
-        debug_image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "debug_image",
-            10,
-            std::bind(&ArmorPlateTracker::DebugImageCallBack, this, std::placeholders::_1)
-        );
-        debug_tracker_pub_ = this->create_publisher<DebugTracker>("debug_tracker", 10); 
-    }
-    cv::Point2f reprojection(const Eigen::Vector3d& position)
-    {
-        // 直接用 tvec 重投影到图像坐标
-        double fx = camera_matrix_.at<double>(0, 0);
-        double fy = camera_matrix_.at<double>(1, 1);
-        double cx = camera_matrix_.at<double>(0, 2);
-        double cy = camera_matrix_.at<double>(1, 2);
-        double X = position[0];
-        double Y = position[1];
-        double Z = position[2];
-        if (std::abs(Z) < 1e-6) return cv::Point2f(-1, -1);
-        double u = fx * X / Z + cx;
-        double v = fy * Y / Z + cy;
-        return cv::Point2f(static_cast<float>(u), static_cast<float>(v));
-    }
-    cv::Point2f reprojectionFromYawPitch(float yaw, float pitch, float distance)
-    {
-        // 从 yaw/pitch/distance 重建 tvec 并重投影
-        double yaw_rad = yaw;
-        double pitch_rad = pitch;
-        Eigen::Vector3d p;
-        p[0] = -distance * std::sin(yaw_rad) * std::cos(pitch_rad);
-        p[1] = -distance * std::sin(pitch_rad);
-        p[2] = distance * std::cos(yaw_rad) * std::cos(pitch_rad);
-        return reprojection(p);
-    }
-    void drawPoint(cv::Mat& img, const cv::Point2f& pt, const cv::Scalar& color, const std::string& label)
-    {
-        if (pt.x < 0 || pt.y < 0) return;
-        cv::circle(img, pt, 8, color, 2);
-        cv::circle(img, pt, 3, color, -1);
-        int cross_len = 12;
-        cv::line(img, cv::Point(pt.x - cross_len, pt.y), cv::Point(pt.x + cross_len, pt.y), color, 2);
-        cv::line(img, cv::Point(pt.x, pt.y - cross_len), cv::Point(pt.x, pt.y + cross_len), color, 2);
-        if (!label.empty()) {
-            cv::putText(img, label, cv::Point(pt.x + 15, pt.y - 10), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
-        }
-    }
-    void CameraInfoCallBack(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
-    {
-        if (camera_info_received_) return;
-        if (msg->p.size() >= 12) {
-            // P矩阵前3X4包含了内参信息，直接提取并缩放
-            camera_matrix_ = cv::Mat::zeros(3, 3, CV_64F);
-            cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
-            for (int i = 0; i < 12; ++i) {
-                projection_matrix.at<double>(i / 4, i % 4) = msg->p[i];
-            }
-            for (int i = 0; i < 3; i++) {
-                for (int j = 0; j < 3; j++) {
-                    camera_matrix_.at<double>(i, j) = projection_matrix.at<double>(i, j);
-                }
-            }
-            // debug_image 已被 Identification resize 到 0.5x，内参也对应缩放
-            camera_matrix_.at<double>(0, 0) = 0.5 * projection_matrix.at<double>(0, 0); // fx
-            camera_matrix_.at<double>(1, 1) = 0.5 * projection_matrix.at<double>(1, 1); // fy
-            camera_matrix_.at<double>(0, 2) = 0.5 * projection_matrix.at<double>(0, 2); // cx
-            camera_matrix_.at<double>(1, 2) = 0.5 * projection_matrix.at<double>(1, 2); // cy
-            RCLCPP_INFO(this->get_logger(), "CameraInfo 已接收，P矩阵前3x3已加载 (fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f)",
-                        camera_matrix_.at<double>(0, 0), camera_matrix_.at<double>(1, 1),
-                        camera_matrix_.at<double>(0, 2), camera_matrix_.at<double>(1, 2));
-        } else {
-            RCLCPP_WARN(this->get_logger(), "CameraInfo P 矩阵长度不足 12，使用视屏内参");
-        }
-        camera_info_received_ = true;
-        camera_info_sub_.reset(); // 只读取一次
-    }
-    void drawYawPitchText(cv::Mat& img, const cv::Point2f& pt, float yaw, float pitch, const cv::Scalar& color)
-    {
-        if (pt.x < 0 || pt.y < 0) return;
-        char buf[64];
-        snprintf(buf, sizeof(buf), "yaw:%.4f pitch:%.4f", yaw, pitch);
-        cv::putText(img, buf, cv::Point(pt.x + 15, pt.y + 15), cv::FONT_HERSHEY_PLAIN, 1.2, color, 2);
-    }
-    void DebugImageCallBack(const sensor_msgs::msg::Image::SharedPtr msg)
-    {
-        try {
-            auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
-            cv::Mat overlay = cv_ptr->image;
-
-            // 在这里画图：每来一帧图像，画一次最新的跟踪结果
-            std::lock_guard<std::mutex> lock(overlay_mutex_);
-            if (overlay_data_.has_result) {
-                cv::Point2f measured_pt = reprojection(overlay_data_.measured_position);
-                drawPoint(overlay, measured_pt, cv::Scalar(0, 0, 255), "measured");
-                drawYawPitchText(overlay, measured_pt, overlay_data_.measured_yaw, overlay_data_.measured_pitch, cv::Scalar(255, 0, 255));
-
-                if (!overlay_data_.is_lost) {
-                    cv::Point2f filtered_pt = reprojectionFromYawPitch(
-                        overlay_data_.filter_yaw, overlay_data_.filter_pitch, overlay_data_.distance);
-                    drawPoint(overlay, filtered_pt, cv::Scalar(0, 255, 0), "filtered");
-                    drawYawPitchText(overlay, filtered_pt, overlay_data_.filter_yaw, overlay_data_.filter_pitch, cv::Scalar(0, 255, 0));
-                } else {
-                    cv::Point2f predicted_pt = reprojectionFromYawPitch(
-                        overlay_data_.filter_yaw, overlay_data_.filter_pitch, overlay_data_.distance);
-                    drawPoint(overlay, predicted_pt, cv::Scalar(0, 255, 255), "predicted");
-                    drawYawPitchText(overlay, predicted_pt, overlay_data_.filter_yaw, overlay_data_.filter_pitch, cv::Scalar(0, 255, 0));
-                }
-            }
-
-            cv::imshow("Tracker Debug", overlay);
-            cv::waitKey(1);
-        } catch (const cv_bridge::Exception& e) {
-            RCLCPP_ERROR(this->get_logger(), "cv_bridge 转换失败: %s", e.what());
-        }
-    }
 
 public:
     ArmorPlateTracker() : Node("armor_plate_tracker_node_cpp")
     {
         RCLCPP_INFO(this->get_logger(), "Armor Plate Tracker节点创建成功！");
         init();
-        if (debug_) {
-            Debug();
-        }
     }
 };
 
