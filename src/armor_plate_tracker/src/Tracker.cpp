@@ -3,6 +3,13 @@
 #include <algorithm>
 #include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <iostream>
+// opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
+const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
+    0.0 ,  0.0,  1.0,
+    -1.0,  0.0,  0.0,
+    0.0 , -1.0,  0.0).finished();
+const Eigen::Quaterniond q_w_cv(R_w_cv);
 
 // 默认构造函数
 Tracker::Tracker()
@@ -198,14 +205,14 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     // 坐标系转换计算
     double psi = yaw_abs;
     double theta = pitch_abs;
-    // Rw<-c = Rx(pitch_abs)Ry(-yaw_abs)
-    R_w_c_ << cos(psi),            0,            -sin(psi),
+    // Rw<-c = Rx(pitch_abs)Ry(-yaw_abs) 解耦矩阵
+    Eigen::Matrix3d R_cv_c;
+    R_cv_c << cos(psi),            0,            -sin(psi),
             -sin(theta)*sin(psi), cos(theta),   -sin(theta)*cos(psi),
             cos(theta)*sin(psi),  sin(theta),   cos(theta)*cos(psi);
+    R_w_c_ = R_w_cv * R_cv_c;
     R_c_w_ = R_w_c_.transpose();
-    Eigen::Quaterniond q_yaw = Eigen::Quaterniond(std::cos(psi/2), 0, -std::sin(psi/2), 0);
-    Eigen::Quaterniond q_pitch = Eigen::Quaterniond(std::cos(theta/2), std::sin(theta/2), 0, 0);
-    q_w_c_ = q_pitch * q_yaw;
+    q_w_c_ = Eigen::Quaterniond(R_w_c_);
     // 更新状态转移矩阵中的dt
     updateTransitionMatrix(x_kf_, dt);
     updateTransitionMatrix(y_kf_, dt);
@@ -309,13 +316,12 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     last_armor_pose_yaw_ = armor_pose_yaw;
     is_lost_ = false;
 }
-
 float calculatePoseYaw(const Eigen::Quaterniond &q)
 {
     double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
     double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
     return static_cast<float>(std::atan2(siny_cosp, cosy_cosp));
-}
+} 
 float calculateYaw(const Eigen::Vector3d& tvec)
 {
     return -static_cast<float>(std::atan2(tvec.x(), tvec.z()));

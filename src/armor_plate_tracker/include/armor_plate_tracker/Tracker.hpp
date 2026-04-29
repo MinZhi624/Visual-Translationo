@@ -16,7 +16,7 @@ using geometry_msgs::msg::PoseStamped;
 
 
 struct AngleRecord {
-    builtin_interfaces::msg::Time time;
+    builtin_interfaces::msg::Time stamp;
     // 单位是弧度
     float yaw_abs;
     float pitch_abs;
@@ -33,6 +33,8 @@ struct TrackingOverlayData {
     float filter_pitch = 0.0f;
     float distance = 0.0f;
 };
+// opencv坐标系转换为一个云台的坐标系, x向前，y向左，z向上
+extern const Eigen::Matrix3d R_w_cv;
 
 class Tracker
 {

@@ -11,7 +11,6 @@
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 
-#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 #include <mutex>
 #include <deque>
 
@@ -61,7 +60,7 @@ private:
             10,
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(10000), std::bind(&ArmorPlateTracker::info, this));
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         gimbal_ganle_sub_ = this->create_subscription<GimbalAngle>(
@@ -107,10 +106,10 @@ private:
         
         auto closest_it = local_buffer.begin();
         double min_diff = std::abs(
-            (closest_it->time.sec + closest_it->time.nanosec * 1e-9) - image_time);
+            (closest_it->stamp.sec + closest_it->stamp.nanosec * 1e-9) - image_time);
         
         for (auto it = local_buffer.begin() + 1; it != local_buffer.end(); ++it) {
-            double record_time = it->time.sec + it->time.nanosec * 1e-9;
+            double record_time = it->stamp.sec + it->stamp.nanosec * 1e-9;
             double diff = std::abs(record_time - image_time);
             if (diff < min_diff) {
                 min_diff = diff;
@@ -125,7 +124,7 @@ private:
             RCLCPP_WARN(this->get_logger(), 
                 "角度-图像时间差 %.1f ms，对齐可能不准", min_diff * 1000.0);
         }
-        return closest_it->time.sec + closest_it->time.nanosec * 1e-9 - image_time;
+        return closest_it->stamp.sec + closest_it->stamp.nanosec * 1e-9 - image_time;
     }
     void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
     {
@@ -145,8 +144,17 @@ private:
         float measurement_pitch = tracker_.getMeasuredPitch();
         float filter_yaw = tracker_.getYaw();
         float filter_pitch = tracker_.getPitch();
+        PoseStamped measured_position_world = tracker_.getMeasuredPositionWorld();
+        Eigen::Quaterniond measured_q(
+            measured_position_world.pose.orientation.w,
+            measured_position_world.pose.orientation.x,
+            measured_position_world.pose.orientation.y,
+            measured_position_world.pose.orientation.z
+        );
+        float pose_yaw = calculatePoseYaw(measured_q);
         RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
+        RCLCPP_INFO(this->get_logger(), "装甲板姿态: yaw = %.4f", pose_yaw);
     }
     visualization_msgs::msg::Marker createSphereMarker(
         const geometry_msgs::msg::PoseStamped& pose_stamped,
@@ -202,6 +210,16 @@ private:
         measured_position_world.header.stamp = now;
         filter_pose_pub_->publish(filter_position_world);
         measured_pose_pub_->publish(measured_position_world);
+        // TF发布到世界坐标系
+        geometry_msgs::msg::TransformStamped filter_transform_stamped;
+        filter_transform_stamped.header.stamp = now;
+        filter_transform_stamped.header.frame_id = "world";
+        filter_transform_stamped.child_frame_id = "measured_pose";
+        filter_transform_stamped.transform.translation.x = filter_position_world.pose.position.x;
+        filter_transform_stamped.transform.translation.y = filter_position_world.pose.position.y;
+        filter_transform_stamped.transform.translation.z = filter_position_world.pose.position.z;
+        filter_transform_stamped.transform.rotation = filter_position_world.pose.orientation;
+        tf_broadcaster_->sendTransform(filter_transform_stamped);
         // 发布球体 Marker 到 RViz
         marker_pub_->publish(createSphereMarker(filter_position_world, 0, 0.15f, 0.0f, 1.0f, 0.0f, 1.0f));
         marker_pub_->publish(createSphereMarker(measured_position_world, 1, 0.20f, 1.0f, 0.0f, 0.0f, 0.5f));
