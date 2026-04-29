@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_tracker/MyKalmanFilter.hpp"
+#include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
@@ -39,15 +39,8 @@ extern const Eigen::Matrix3d R_w_cv;
 class Tracker
 {
 private:
-    // 原始模板滤波器（用于重置时复制） -- 世界坐标系
-    MyKalmanFilter x_kf_origin_;
-    MyKalmanFilter y_kf_origin_;
-    MyKalmanFilter z_kf_origin_;
-    
-    // 实际使用的滤波器
-    MyKalmanFilter x_kf_;
-    MyKalmanFilter y_kf_;
-    MyKalmanFilter z_kf_;
+    // EKF 滤波器
+    MyExtendedKalmanFilter ekf_;
     
     // 当前滤波结果 -- 相机坐标系(增量角)
     float yaw_;
@@ -78,11 +71,7 @@ private:
     // 获得相机坐标系下的点
     Eigen::Vector3d measured_position_camera;
     Eigen::Vector3d filter_position_camera;
-    // 初始化滤波器（内部调用）
-    void initFilter(MyKalmanFilter& kf);
-    
-    // 根据dt更新状态转移矩阵
-    void updateTransitionMatrix(MyKalmanFilter& kf, double dt);
+
     
     // 选择最佳匹配目标
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
