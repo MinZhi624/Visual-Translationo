@@ -66,8 +66,9 @@ private:
         cv::putText(plot_img_, "Pitch (white=original, purple=filtered)",
                     cv::Point(PLOT_MARGIN + 10, 430),
                     cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
-
-        cv::imshow("plot", plot_img_);
+        cv::Mat plot_resize;
+        cv::resize(plot_img_, plot_resize, cv::Size(), 0.5, 0.5);
+        cv::imshow("plot", plot_resize);
         cv::waitKey(1);
     }
 };

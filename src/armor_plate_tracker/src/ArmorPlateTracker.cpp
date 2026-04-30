@@ -60,7 +60,7 @@ private:
             10,
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ArmorPlateTracker::info, this));
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         gimbal_ganle_sub_ = this->create_subscription<GimbalAngle>(
@@ -83,7 +83,7 @@ private:
         // ===== 装甲板跟踪器 ===== //
         tracker_.setMaxLostTime(max_lost_time_);
         tracker_.setMutationThreshold(mutation_yaw_threshold_);
-        tracker_.Init();
+        tracker_.init();
         
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
     }
@@ -144,17 +144,8 @@ private:
         float measurement_pitch = tracker_.getMeasuredPitch();
         float filter_yaw = tracker_.getYaw();
         float filter_pitch = tracker_.getPitch();
-        PoseStamped measured_position_world = tracker_.getMeasuredPositionWorld();
-        Eigen::Quaterniond measured_q(
-            measured_position_world.pose.orientation.w,
-            measured_position_world.pose.orientation.x,
-            measured_position_world.pose.orientation.y,
-            measured_position_world.pose.orientation.z
-        );
-        float pose_yaw = calculatePoseYaw(measured_q);
         RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
             measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
-        RCLCPP_INFO(this->get_logger(), "装甲板姿态: yaw = %.4f", pose_yaw);
     }
     visualization_msgs::msg::Marker createSphereMarker(
         const geometry_msgs::msg::PoseStamped& pose_stamped,

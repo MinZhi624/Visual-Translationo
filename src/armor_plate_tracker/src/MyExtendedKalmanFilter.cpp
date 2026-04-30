@@ -14,11 +14,11 @@ MyExtendedKalmanFilter::MyExtendedKalmanFilter()
 
     process_noise_cov_ = Eigen::Matrix<double, 9, 9>::Zero();
     process_noise_cov_.diagonal() <<
-        0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 1e-6, 0.001, 0.01;
+        0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0005, 0.001, 0.01;
     
     observation_noise_cov_ = Eigen::Matrix<double, 4, 4>::Zero();
     observation_noise_cov_.diagonal() <<
-        0.01, 0.01, 0.04, 0.01;
+        0.004, 0.004, 0.001, 0.01;
 
     kalman_gain_ = Eigen::Matrix<double, 9, 4>::Zero();
     origin_observation_ = Eigen::Vector<double, 4>::Zero();
@@ -157,7 +157,7 @@ void MyExtendedKalmanFilter::checkValue()
     if (state_post_[6] < 0.12) state_post_[6] = 0.12;
     if (state_post_[6] > 0.4)  state_post_[6] = 0.4;
     
-    // yaw 归一化到 [-π, π]，防止角度无限累积
+    // yaw 归一化到 [-π, π]
     while (state_post_[7] > M_PI) state_post_[7] -= 2.0 * M_PI;
     while (state_post_[7] < -M_PI) state_post_[7] += 2.0 * M_PI;
 }

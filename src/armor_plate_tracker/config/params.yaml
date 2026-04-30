@@ -1,5 +1,5 @@
 armor_plate_tracker_node:
   ros__parameters:
-    max_lost_time: 0.1 # 和电控保持一致
+    max_lost_time: 0.5 # 和电控保持一致
     mutation_yaw_threshold: 0.087266463 # 5°
     debug: true

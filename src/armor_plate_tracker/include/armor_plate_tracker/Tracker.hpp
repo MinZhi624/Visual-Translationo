@@ -62,15 +62,14 @@ private:
     float yaw_mutation_threshold_;
     float last_armor_pose_yaw_;
     // 当前帧选中的原始测量值（相机系）
-    Eigen::Vector3d measured_position_camera_;
     float measured_yaw_;
     float measured_pitch_;
     // 获得世界坐标系下的点
-    PoseStamped measured_position_world;
-    PoseStamped filter_position_world;
+    PoseStamped measured_position_world_;
+    PoseStamped filter_position_world_;
     // 获得相机坐标系下的点
-    Eigen::Vector3d measured_position_camera;
-    Eigen::Vector3d filter_position_camera;
+    Eigen::Vector3d measured_position_camera_;
+    Eigen::Vector3d filter_position_camera_;
 
     
     // 选择最佳匹配目标
@@ -79,9 +78,6 @@ private:
     // 检查是否突变
     bool isMutation(const float& armor_pose_yaw);
     
-    // 重置滤波器
-    void resetFilter();
-    
     // 检查是否丢失太久
     bool isLostTooLong(double current_time) const;
 public:
@@ -89,7 +85,7 @@ public:
     Tracker();
     
     // 初始化
-    void Init();
+    void init();
     
     // 设置最大丢失时间（秒）
     void setMaxLostTime(double seconds);
@@ -117,11 +113,11 @@ public:
     double getLastUpdateTime() const { return last_update_time_; }
 
     // 获得世界坐标系下的点 (PoseStamped)
-    PoseStamped getMeasuredPositionWorld() const { return measured_position_world; }
-    PoseStamped getFilterPositionWorld() const { return filter_position_world; }
+    PoseStamped getMeasuredPositionWorld() const { return measured_position_world_; }
+    PoseStamped getFilterPositionWorld() const { return filter_position_world_; }
     // 获得相机坐标系下的点 (Eigen::Vector3d)
-    Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera; }
-    Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera; }
+    Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera_; }
+    Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera_; }
 };
 
 // 工具函数
