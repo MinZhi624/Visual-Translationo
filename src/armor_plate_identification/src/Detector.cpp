@@ -252,22 +252,25 @@ cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
 }
 void Detector::saveNumberRoi()
 {
+    static int outputPictureCounts = 0;
     for(const auto& armor : armors_) {
-        if (++outputPictureCounts_ < 300 && is_star_save_) {
+        if (outputPictureCounts < 20 && is_star_save_) {
         // 确保输出目录存在
-        if (!cv::utils::fs::createDirectories(outputPath_)) {
-            RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
-                "Failed to create directory: %s", outputPath_.c_str());
+            if (!cv::utils::fs::createDirectories(outputPath_)) {
+                RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
+                    "Failed to create directory: %s", outputPath_.c_str());
+            }
+            std::string file_name = outputPath_ + "/roi_" + std::to_string(++outputPictureCounts_) + ".png";
+            if (!cv::imwrite(file_name, armor.number_roi_.clone())) {
+                RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
+                    "Failed to write image: %s", file_name.c_str());
+            }
+            RCLCPP_INFO(rclcpp::get_logger("Detector"), "保存成功");
         }
-        std::string file_name = outputPath_ + "/roi_" + std::to_string(outputPictureCounts_) + ".png";
-        if (!cv::imwrite(file_name, armor.number_roi_.clone())) {
-            RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
-                "Failed to write image: %s", file_name.c_str());
-        }
-        RCLCPP_INFO(rclcpp::get_logger("Detector"), "保存成功");
-        } else if(outputPictureCounts_ >= 300 && is_star_save_) {
-            outputPictureCounts_ = 0;
+        if (outputPictureCounts >= 20 && is_star_save_) {
+            outputPictureCounts = 0;
             is_star_save_ = false;
+            RCLCPP_INFO(rclcpp::get_logger("Detector"), "阶段性保存结束");
         }
     }
 }

@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_tracker/MyKalmanFilter.hpp"
+#include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
@@ -16,7 +16,7 @@ using geometry_msgs::msg::PoseStamped;
 
 
 struct AngleRecord {
-    builtin_interfaces::msg::Time time;
+    builtin_interfaces::msg::Time stamp;
     // 单位是弧度
     float yaw_abs;
     float pitch_abs;
@@ -33,19 +33,14 @@ struct TrackingOverlayData {
     float filter_pitch = 0.0f;
     float distance = 0.0f;
 };
+// opencv坐标系转换为一个云台的坐标系, x向前，y向左，z向上
+extern const Eigen::Matrix3d R_w_cv;
 
 class Tracker
 {
 private:
-    // 原始模板滤波器（用于重置时复制） -- 世界坐标系
-    MyKalmanFilter x_kf_origin_;
-    MyKalmanFilter y_kf_origin_;
-    MyKalmanFilter z_kf_origin_;
-    
-    // 实际使用的滤波器
-    MyKalmanFilter x_kf_;
-    MyKalmanFilter y_kf_;
-    MyKalmanFilter z_kf_;
+    // EKF 滤波器
+    MyExtendedKalmanFilter ekf_;
     
     // 当前滤波结果 -- 相机坐标系(增量角)
     float yaw_;
@@ -67,29 +62,21 @@ private:
     float yaw_mutation_threshold_;
     float last_armor_pose_yaw_;
     // 当前帧选中的原始测量值（相机系）
-    Eigen::Vector3d measured_position_camera_;
     float measured_yaw_;
     float measured_pitch_;
     // 获得世界坐标系下的点
-    PoseStamped measured_position_world;
-    PoseStamped filter_position_world;
+    PoseStamped measured_position_world_;
+    PoseStamped filter_position_world_;
     // 获得相机坐标系下的点
-    Eigen::Vector3d measured_position_camera;
-    Eigen::Vector3d filter_position_camera;
-    // 初始化滤波器（内部调用）
-    void initFilter(MyKalmanFilter& kf);
-    
-    // 根据dt更新状态转移矩阵
-    void updateTransitionMatrix(MyKalmanFilter& kf, double dt);
+    Eigen::Vector3d measured_position_camera_;
+    Eigen::Vector3d filter_position_camera_;
+
     
     // 选择最佳匹配目标
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
     
     // 检查是否突变
     bool isMutation(const float& armor_pose_yaw);
-    
-    // 重置滤波器
-    void resetFilter();
     
     // 检查是否丢失太久
     bool isLostTooLong(double current_time) const;
@@ -98,7 +85,7 @@ public:
     Tracker();
     
     // 初始化
-    void Init();
+    void init();
     
     // 设置最大丢失时间（秒）
     void setMaxLostTime(double seconds);
@@ -126,11 +113,11 @@ public:
     double getLastUpdateTime() const { return last_update_time_; }
 
     // 获得世界坐标系下的点 (PoseStamped)
-    PoseStamped getMeasuredPositionWorld() const { return measured_position_world; }
-    PoseStamped getFilterPositionWorld() const { return filter_position_world; }
+    PoseStamped getMeasuredPositionWorld() const { return measured_position_world_; }
+    PoseStamped getFilterPositionWorld() const { return filter_position_world_; }
     // 获得相机坐标系下的点 (Eigen::Vector3d)
-    Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera; }
-    Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera; }
+    Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera_; }
+    Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera_; }
 };
 
 // 工具函数
