@@ -22,6 +22,8 @@ find_package(visualization_msgs REQUIRED)
 add_executable(armor_plate_tracker_node
   src/ArmorPlateTracker.cpp
   src/MyExtendedKalmanFilter.cpp
+  src/YawKalmanFilter.cpp
+  src/CenterKalmanFilter.cpp
   src/Tracker.cpp
   src/DebugTracker.cpp
 )

@@ -14,7 +14,7 @@ MyExtendedKalmanFilter::MyExtendedKalmanFilter()
 
     process_noise_cov_ = Eigen::Matrix<double, 9, 9>::Zero();
     process_noise_cov_.diagonal() <<
-        0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0005, 0.001, 0.01;
+        0.01, 0.01, 0.01, 0.001, 0.001, 0.001, 0.001, 0.005, 0.01;
     
     observation_noise_cov_ = Eigen::Matrix<double, 4, 4>::Zero();
     observation_noise_cov_.diagonal() <<

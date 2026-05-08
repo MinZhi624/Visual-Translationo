@@ -1,12 +1,12 @@
 #pragma once
-#include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
+#include "armor_plate_tracker/CenterKalmanFilter.hpp"
+#include "armor_plate_tracker/YawKalmanFilter.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 
-#include <opencv2/core.hpp>
-#include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <deque>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -18,26 +18,28 @@ struct AngleRecord {
     float pitch_abs;
 };
 
-
-struct TrackingOverlayData {
-    bool has_result = false;
-    bool is_lost = false;
-    Eigen::Vector3d measured_position;
-    float measured_yaw = 0.0f;
-    float measured_pitch = 0.0f;
-    float filter_yaw = 0.0f;
-    float filter_pitch = 0.0f;
-    float distance = 0.0f;
+// 带时间戳的装甲板观测
+struct ArmorPlateStamped {
+    double timestamp;
+    Eigen::Vector3d position_world;  // 世界坐标系位置
+    double yaw_world;                // 世界坐标系 yaw
 };
+
 // opencv坐标系转换为一个云台的坐标系, x向前，y向左，z向上
 extern const Eigen::Matrix3d R_w_cv;
 
 class Tracker
 {
 private:
-    // EKF 滤波器
-    MyExtendedKalmanFilter ekf_;
-    
+    // Yaw 前置滤波器
+    YawKalmanFilter yaw_kf_;
+    // Center 中心滤波器
+    CenterKalmanFilter center_kf_;
+    // 最小二乘法
+    size_t window_size_;
+    std::deque<ArmorPlateStamped> target_history_;
+    Eigen::Vector<double, 5> ls_solution_;
+
     // 当前滤波结果 -- 相机坐标系(增量角)
     float yaw_;
     float pitch_;
@@ -71,38 +73,29 @@ private:
     Eigen::Vector3d filter_position_camera_;
     Eigen::Quaterniond measured_orientation_world_;
     Eigen::Quaterniond filter_orientation_world_;
-    
+    // 最小二乘法
+    bool solveLeastSquares(); 
     // 选择最佳匹配目标
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
-    
     // 检查是否突变
     bool isYawMutation(const float& armor_pose_yaw);
-    
     // 检查是否丢失太久
     bool isLostTooLong(double current_time) const;
-
     // 更新测量值相关成员变量
     void updateMeasurement(const ArmorPlate& armor_plate, double current_time);
-
-    // 更新滤波值相关成员变量（位置+角度）
+    // 更新滤波值相关成员变量
     void updateFilteredValue(const Eigen::Vector3d& pc_f, const Eigen::Vector3d& pw_f);
 public:
     // 默认构造函数
     Tracker();
-    
     // 重置滤波器（无目标时调用）
     void reset();
-    
     // 初始化 EKF（检测到第一个目标时调用）
     void init(const ArmorPlate& armor_plate, double current_time);
-    
     // 设置最大丢失时间（秒）
     void setMaxLostTime(double seconds) { max_lost_time_ = seconds; }
-    
     // 设置突变阈值
     void setMutationThreshold(float yaw_thresh) { yaw_mutation_threshold_ = yaw_thresh; }
-    
-    
     void Update(const std::vector<ArmorPlate>& armor_plates,
                 double current_time,
                 float yaw_abs, float pitch_abs
