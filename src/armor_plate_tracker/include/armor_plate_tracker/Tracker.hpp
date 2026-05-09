@@ -1,6 +1,7 @@
 #pragma once
 #include "armor_plate_tracker/CenterKalmanFilter.hpp"
 #include "armor_plate_tracker/YawKalmanFilter.hpp"
+#include "armor_plate_tracker/CenterFilter.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
@@ -18,13 +19,6 @@ struct AngleRecord {
     float pitch_abs;
 };
 
-// 带时间戳的装甲板观测
-struct ArmorPlateStamped {
-    double timestamp;
-    Eigen::Vector3d position_world;  // 世界坐标系位置
-    double yaw_world;                // 世界坐标系 yaw
-};
-
 // opencv坐标系转换为一个云台的坐标系, x向前，y向左，z向上
 extern const Eigen::Matrix3d R_w_cv;
 
@@ -35,10 +29,8 @@ private:
     YawKalmanFilter yaw_kf_;
     // Center 中心滤波器
     CenterKalmanFilter center_kf_;
-    // 最小二乘法
-    size_t window_size_;
-    std::deque<ArmorPlateStamped> target_history_;
-    Eigen::Vector<double, 5> ls_solution_;
+    // 最小二乘旋转中心估计
+    CenterFilter center_filter_;
 
     // 当前滤波结果 -- 相机坐标系(增量角)
     float yaw_;
@@ -73,8 +65,6 @@ private:
     Eigen::Vector3d filter_position_camera_;
     Eigen::Quaterniond measured_orientation_world_;
     Eigen::Quaterniond filter_orientation_world_;
-    // 最小二乘法
-    bool solveLeastSquares(); 
     // 选择最佳匹配目标
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
     // 检查是否突变

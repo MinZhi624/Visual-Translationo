@@ -22,7 +22,7 @@ CenterKalmanFilter::CenterKalmanFilter()
 
     // R: 观测噪声
     observation_noise_cov_.setZero();
-    observation_noise_cov_.diagonal() << 0.004, 0.004;
+    observation_noise_cov_.diagonal() << 0.01, 0.01;
 
     kalman_gain_.setZero();
     origin_observation_.setZero();

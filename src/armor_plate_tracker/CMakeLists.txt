@@ -25,6 +25,7 @@ add_executable(armor_plate_tracker_node
   src/YawKalmanFilter.cpp
   src/CenterKalmanFilter.cpp
   src/Tracker.cpp
+  src/CenterFilter.cpp
   src/DebugTracker.cpp
 )
 

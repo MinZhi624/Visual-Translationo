@@ -1,6 +1,7 @@
 #include "armor_plate_tracker/Tracker.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <Eigen/Dense>
+#include <chrono>
 
 // opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
 const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
@@ -10,17 +11,15 @@ const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
 
 // 默认构造函数
 Tracker::Tracker()
-    : window_size_(10)
-    , yaw_(0.0f), pitch_(0.0f)
+    : yaw_(0.0f), pitch_(0.0f)
     , last_update_time_(0.0)
     , last_detection_time_(0.0)
     , initialized_(false)
     , max_lost_time_(0.1)
     , is_lost_(true)
-    , yaw_mutation_threshold_(0.5f)  
+    , yaw_mutation_threshold_(0.5f)
     , last_armor_number_("")
 {
-    ls_solution_.setZero();
 }
 void Tracker::updateMeasurement(const ArmorPlate& armor_plate, double current_time)
 {
@@ -72,8 +71,7 @@ void Tracker::reset()
     center_kf_.initialize(center_zero, center_P);
 
     // 清空历史数据
-    target_history_.clear();
-    ls_solution_.setZero();
+    center_filter_.reset();
 
     initialized_ = false;
     last_update_time_ = 0.0;
@@ -84,53 +82,6 @@ void Tracker::reset()
     measured_yaw_ = 0.0f;
     measured_pitch_ = 0.0f;
     last_armor_number_ = "";
-}
-bool Tracker::solveLeastSquares()
-{
-    size_t N = target_history_.size();
-    // 至少需要 8 帧数据
-    if (N < 4) {
-        return false;
-    }
-
-    // 构建矩阵 A (2N x 3) 和向量 b (2N x 1)
-    // 未知数：[x_c, y_c, r]
-    Eigen::MatrixXd A(2 * N, 3);
-    Eigen::VectorXd b(2 * N);
-
-    for (size_t i = 0; i < N; ++i) {
-        const auto& record = target_history_[i];
-        double yaw = record.yaw_world;
-
-        // x_obs = x_c + r * sin(yaw)
-        A(2 * i, 0) = 1.0;
-        A(2 * i, 1) = 0.0;
-        A(2 * i, 2) = std::sin(yaw);
-
-        // y_obs = y_c - r * cos(yaw)
-        A(2 * i + 1, 0) = 0.0;
-        A(2 * i + 1, 1) = 1.0;
-        A(2 * i + 1, 2) = -std::cos(yaw);
-
-        // 填充 b 向量
-        b(2 * i)     = record.position_world.x();
-        b(2 * i + 1) = record.position_world.y();
-    }
-
-    // SVD 最小二乘求解
-    Eigen::Vector3d x = A.bdcSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(b);
-
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-        "LS Raw: x_c:%.4f y_c:%.4f r_raw:%.4f", x[0], x[1], x[2]);
-
-    // r 约束到 [0.12, 0.4]
-    if (x[2] < 0.12) x[2] = 0.12;
-    if (x[2] > 0.4)  x[2] = 0.4;
-
-    // 存储到 ls_solution_（兼容旧格式，速度设为 0）
-    ls_solution_ = Eigen::Vector<double, 5>(x[0], 0.0, x[1], 0.0, x[2]);
-
-    return true;
 }
 void Tracker::init(const ArmorPlate& armor_plate, double current_time)
 {
@@ -202,7 +153,7 @@ void Tracker::selectBestMatch(const std::vector<ArmorPlate>& armor_plates, Armor
     // 使用旋转中心 + yaw 预测装甲板位置
     Eigen::Vector4d center_state = center_kf_.getStatePost();
     double yaw_pred = yaw_kf_.getStatePost()[0];
-    double r = ls_solution_[4];
+    double r = center_filter_.getR();
     Eigen::Vector3d pred_pos(
         center_state[0] + r * std::sin(yaw_pred),
         center_state[1] - r * std::cos(yaw_pred),
@@ -250,6 +201,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
                      double current_time,
                      float yaw_abs, float pitch_abs)
 {
+    auto t_start = std::chrono::steady_clock::now();
     // 计算dt（与上次更新的时间差）
     double dt = 0.01;  // 默认10ms
     if (last_update_time_ > 0.0) {
@@ -279,17 +231,55 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
         if (isLostTooLong(current_time)) reset(); // 丢失时间过长，重置
         return;
     }
-    // 有检测结果，选择最佳匹配
+
+    // 未初始化：选 image_distance_to_center 最小的板，设 number
+    if (!initialized_) {
+        ArmorPlate best_plate = armor_plates[0];
+        for (size_t i = 1; i < armor_plates.size(); i++) {
+            if (armor_plates[i].image_distance_to_center < best_plate.image_distance_to_center) {
+                best_plate = armor_plates[i];
+            }
+        }
+        last_armor_number_ = best_plate.number;
+        init(best_plate, current_time);
+        return;
+    }
+
+    // 按 number 筛选同车板
+    std::vector<ArmorPlate> same_car;
+    for (const auto& plate : armor_plates) {
+        if (plate.number == last_armor_number_) {
+            same_car.push_back(plate);
+        }
+    }
+
+    // 没有同 number 的板 → number 变了 → 突变，重新选车
+    if (same_car.empty()) {
+        center_filter_.reset();
+        reset();
+        // 选 image_distance_to_center 最小的板作为新车
+        ArmorPlate best_plate = armor_plates[0];
+        for (size_t i = 1; i < armor_plates.size(); i++) {
+            if (armor_plates[i].image_distance_to_center < best_plate.image_distance_to_center) {
+                best_plate = armor_plates[i];
+            }
+        }
+        last_armor_number_ = best_plate.number;
+        init(best_plate, current_time);
+        return;
+    }
+
+    // 从同车板中选最佳目标（用于 YawKF + updateMeasurement）
     ArmorPlate target_plate;
-    selectBestMatch(armor_plates, target_plate);
-    
+    selectBestMatch(same_car, target_plate);
+
     // 提取选中的目标位置（相机系）
     Eigen::Vector3d target_position(
         target_plate.pose.position.x,
         target_plate.pose.position.y,
         target_plate.pose.position.z
     );
-    
+
     // 提取装甲板姿态四元数（相机系）
     Eigen::Quaterniond target_plate_q(
         target_plate.pose.orientation.w,
@@ -299,7 +289,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     );
     // 提前计算世界坐标系下的装甲板姿态四元数
     Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q;
-    
+
     // 计算装甲板姿态 yaw（世界坐标系）
     float armor_pose_yaw_world = calculatePoseYaw(qw_m);
     // Yaw 前置滤波
@@ -307,57 +297,66 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     yaw_kf_.predict();
     double yaw_filtered = yaw_kf_.correct(static_cast<double>(armor_pose_yaw_world));
 
-    // 判断突变，清空历史队列
-    if (isYawMutation(yaw_filtered)) {
-        target_history_.clear();
-        reset();
-    }
-    // 如果是第一次初始化，设置初始状态（世界坐标系）
-    if (!initialized_) {
-        init(target_plate, current_time);
-        return;
-    }
+    // 判断突变，清空历史队列（旧方法：靠 yaw 跳变判断是否同一辆车，已被 number 筛选替代）
+    // if (isYawMutation(yaw_filtered)) {
+    //     center_filter_.reset();
+    //     reset();
+    // }
 
     // 保存当前帧选中的原始测量值
     updateMeasurement(target_plate, current_time);
 
-    // 世界坐标系下的观测
-    Eigen::Vector3d pw_m = R_w_c_ * target_position;
+    // 同车所有板都转世界坐标，存入 CenterFilter
+    std::vector<ArmorPlateStamped> frame_plates;
+    for (const auto& plate : same_car) {
+        Eigen::Vector3d p_c(plate.pose.position.x, plate.pose.position.y, plate.pose.position.z);
+        Eigen::Vector3d p_w = R_w_c_ * p_c;
+        Eigen::Quaterniond q_c(plate.pose.orientation.w, plate.pose.orientation.x,
+                               plate.pose.orientation.y, plate.pose.orientation.z);
+        Eigen::Quaterniond q_w = q_w_c_ * q_c;
+        double yaw = static_cast<double>(calculatePoseYaw(q_w));
 
-    // 添加到历史队列
-    ArmorPlateStamped record;
-    record.timestamp = current_time;
-    record.position_world = pw_m;
-    record.yaw_world = static_cast<double>(yaw_filtered);
-    target_history_.push_back(record);
-
-    // 维护窗口大小
-    if (target_history_.size() > window_size_) {
-        target_history_.pop_front();
+        ArmorPlateStamped record;
+        record.timestamp = current_time;
+        record.position_world = p_w;
+        record.yaw_world = yaw;
+        frame_plates.push_back(record);
     }
+    center_filter_.addFrame(frame_plates, current_time);
 
     // 最小二乘法求解旋转中心
-    bool ls_ok = solveLeastSquares();
+    bool ls_ok = center_filter_.solve();
+
+    // CenterKF 预测
+    center_kf_.updateStateTransitionMatrix(dt);
+    center_kf_.predict();
+
+    // 世界坐标系下的目标位置（用于 backCalculateCenter fallback）
+    Eigen::Vector3d pw_m = R_w_c_ * target_position;
 
     double r_used = 0.26; // 默认 r
+    Eigen::Vector2d center_measurement;
     if (ls_ok) {
-        // 直接用最小二乘结果
-        center_point_world_ = Eigen::Vector3d(ls_solution_[0], ls_solution_[2], pw_m.z());
-        center_velocity_ = Eigen::Vector3d(0.0, 0.0, 0.0);
-        r_used = ls_solution_[4];
-
-        filter_orientation_world_ = getQuaternionFromYaw(yaw_filtered);
+        center_measurement = center_filter_.getCenter();
+        r_used = center_filter_.getR();
+        // 用 LS 估计的速度
+        Eigen::Vector2d vel = center_filter_.getVelocity();
+        center_velocity_ = Eigen::Vector3d(vel[0], vel[1], 0.0);
     } else {
-        // 数据不足，用默认 r 反算旋转中心
-        double r_default = 0.26;
-        double x_c_est = pw_m.x() - r_default * std::sin(yaw_filtered);
-        double y_c_est = pw_m.y() + r_default * std::cos(yaw_filtered);
-
-        center_point_world_ = Eigen::Vector3d(0, 0, pw_m.z());
-        center_velocity_ = Eigen::Vector3d(0.0, 0.0, 0.0);
-
-        filter_orientation_world_ = getQuaternionFromYaw(yaw_filtered);
+        // 数据不足，用上一帧的 r 反算旋转中心
+        center_measurement = CenterFilter::backCalculateCenter(pw_m, yaw_filtered, center_filter_.getR());
     }
+
+    // CenterKF 校正
+    Eigen::Vector2d center_filtered = center_kf_.correct(center_measurement);
+    Eigen::Vector4d center_state = center_kf_.getStatePost();
+    center_point_world_ = Eigen::Vector3d(center_filtered[0], center_filtered[1], pw_m.z());
+    if (!ls_ok) {
+        // LS 失败时用 CenterKF 的速度
+        center_velocity_ = Eigen::Vector3d(center_state[2], center_state[3], 0.0);
+    }
+
+    filter_orientation_world_ = getQuaternionFromYaw(yaw_filtered);
 
     // 用旋转中心 + yaw + r 计算滤波后的装甲板位置
     Eigen::Vector3d filter_pos_world(
@@ -380,6 +379,11 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
         "Yaw误差: measured:%.4f filtered:%.4f diff:%.4f",
         armor_pose_yaw_world, yaw_filtered,
         armor_pose_yaw_world - yaw_filtered);
+
+    auto t_end = std::chrono::steady_clock::now();
+    double elapsed_us = std::chrono::duration<double, std::micro>(t_end - t_start).count();
+    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
+        "Tracker耗时: %.1f us", elapsed_us);
 }
 ////////// 工具类 /////////
 float calculatePoseYaw(const Eigen::Quaterniond &q)
