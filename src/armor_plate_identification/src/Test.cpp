@@ -18,6 +18,8 @@
 #include <thread>
 #include <chrono>
 #include <mutex>
+#include <fstream>
+#include <filesystem>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -52,11 +54,15 @@ private:
     bool debug_identification_;
     bool debug_preprocessing_;
     bool debug_number_classification_;
+    bool debug_frame_;
+    int debug_frame_count_;
     DebugParamController debug_controller_;
     // TrackerDebug 回调查找
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
     std::deque<ImageSave> images_buffs_;
+    // TrackerDebug 数据保存
+    std::ofstream tracker_log_file_;
     void init(const std::string& video_path)
     {
         // ===== 相机初始化 ==== //
@@ -118,6 +124,8 @@ private:
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
         debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
+        debug_frame_ = this->declare_parameter<bool>("debug_frame", false);
+        debug_frame_count_ = this->declare_parameter<int>("debug_frame_count", 100);
         int delay_time = this->declare_parameter<int>("delay_time", 20);
         debug_controller_.setPlayDelayMs(delay_time);
         // 订阅 Tracker 回传的调试数据
@@ -131,6 +139,7 @@ private:
         if (debug_identification_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
         if (debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
         if (debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");
+        if (debug_frame_) RCLCPP_INFO(this->get_logger(), "帧调试模式开启，将在第 %d 帧结束", debug_frame_count_);
     }
     void info()
     {
@@ -284,6 +293,34 @@ private:
         }
     }
     ////// DEBUG ///////
+    void saveTrackerDebug(const TrackerDebug::SharedPtr msg)
+    {
+        // 首次调用时根据 method 创建对应目录并打开文件
+        if (!tracker_log_file_.is_open()) {
+            std::string method = msg->method;
+            if (method.empty()) method = "unknown";
+            std::string log_dir = "/home/minzhi/ws05_fourth_assessment/Debug/Tracker/" + method + "/temp";
+            std::filesystem::create_directories(log_dir);
+            std::string log_path = log_dir + "/tracker_log.txt";
+            tracker_log_file_.open(log_path, std::ios::out | std::ios::trunc);
+            if (tracker_log_file_.is_open()) {
+                tracker_log_file_ << "sec nanosec "
+                    << "target_world_x target_world_y target_world_z "
+                    << "filtered_world_x filtered_world_y filtered_world_z "
+                    << "raw_yaw filter_yaw "
+                    << "center_x center_y center_r center_vx center_vy "
+                    << "method solve_ok time_cost" << std::endl;
+                RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "日志保存到: %s", log_path.c_str());
+            }
+        }
+        tracker_log_file_ << msg->header.stamp.sec << " " << msg->header.stamp.nanosec << " "
+            << msg->target_point_world.x << " " << msg->target_point_world.y << " " << msg->target_point_world.z << " "
+            << msg->filtered_point_world.x << " " << msg->filtered_point_world.y << " " << msg->filtered_point_world.z << " "
+            << msg->raw_yaw << " " << msg->filter_yaw << " "
+            << msg->center_x << " " << msg->center_y << " " << msg->center_r << " "
+            << msg->center_v_x << " " << msg->center_v_y << " "
+            << msg->method << " " << msg->solve_ok << " " << msg->time_cost << std::endl;
+    }
     void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     {
         std::deque<ImageSave> images_buffs;
@@ -326,6 +363,24 @@ private:
         cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
         cv::imshow("Tracker Debug", show_img);
         cv::waitKey(1);
+
+        // 输出 TrackerDebug 数据
+        RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
+            "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+            "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+            "yaw:%.4f->%.4f "
+            "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
+            "%s solve:%d %.1fms",
+            msg->target_point.x, msg->target_point.y, msg->target_point.z,
+            msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z,
+            msg->target_point_world.x, msg->target_point_world.y, msg->target_point_world.z,
+            msg->filtered_point_world.x, msg->filtered_point_world.y, msg->filtered_point_world.z,
+            msg->raw_yaw, msg->filter_yaw,
+            msg->center_x, msg->center_y, msg->center_r,
+            msg->center_v_x, msg->center_v_y,
+            msg->method.c_str(), msg->solve_ok, msg->time_cost);
+
+        saveTrackerDebug(msg);
     }
 
 public:
@@ -336,6 +391,7 @@ public:
         {
             c_ >> frame;
             if (frame.empty()) {
+                if (tracker_log_file_.is_open()) tracker_log_file_.close();
                 RCLCPP_INFO(this->get_logger(), "视频播放结束");
                 return;
             }
@@ -357,7 +413,15 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(debug_controller_.getPlayDelayMs()));
             }
             frame_count_++;
+
+            // 帧调试：播放到指定帧数时结束
+            if (debug_frame_ && frame_count_ >= debug_frame_count_) {
+                if (tracker_log_file_.is_open()) tracker_log_file_.close();
+                RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_frame_count_);
+                return;
+            }
         }
+        if (tracker_log_file_.is_open()) tracker_log_file_.close();
         RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
     }
     

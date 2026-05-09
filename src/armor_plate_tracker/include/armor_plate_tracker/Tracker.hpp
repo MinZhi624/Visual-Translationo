@@ -3,6 +3,7 @@
 
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 #include <opencv2/core.hpp>
 #include <Eigen/Core>
@@ -66,11 +67,15 @@ private:
     Eigen::Vector3d filter_position_world_;
     Eigen::Vector3d center_point_world_;
     Eigen::Vector3d center_velocity_;
+    float center_r_ = 0.0f;
     // 获得相机坐标系下的点
     Eigen::Vector3d measured_position_camera_;
     Eigen::Vector3d filter_position_camera_;
     Eigen::Quaterniond measured_orientation_world_;
     Eigen::Quaterniond filter_orientation_world_;
+    // 调试信息
+    float time_cost_ = 0.0f;
+    bool solve_ok_ = false;
     
     // 选择最佳匹配目标
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
@@ -130,9 +135,12 @@ public:
     Eigen::Quaterniond getFilterOrientationWorld() const { return filter_orientation_world_; }
     Eigen::Vector3d getCenterPointWorld() const { return center_point_world_; }
     Eigen::Vector3d getCenterVelocity() const { return center_velocity_; }
-    // 获得相机坐标系下的点 
+    // 获得相机坐标系下的点
     Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera_; }
     Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera_; }
+
+    // 发布调试数据
+    armor_plate_interfaces::msg::TrackerDebug CreatedebugMsg(const builtin_interfaces::msg::Time& stamp) const;
 };
 
 // 工具函数

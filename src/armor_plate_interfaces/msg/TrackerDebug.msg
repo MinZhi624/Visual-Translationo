@@ -1,5 +1,21 @@
 # 用于回传给Identification用来绘图
 std_msgs/Header header
-# 目标点还有滤波后点的数据
+# 目标点还有滤波后点的数据 camera
 geometry_msgs/Vector3 target_point
 geometry_msgs/Vector3 filtered_point
+# 目标点世界坐标系
+geometry_msgs/Vector3 target_point_world
+geometry_msgs/Vector3 filtered_point_world
+float32 raw_yaw
+float32 filter_yaw
+# 中心点的数据
+float32 center_x
+float32 center_y
+float32 center_r
+float32 center_v_x
+float32 center_v_y
+# 目标耗时ms
+float32 time_cost
+# 方法
+string method
+bool solve_ok
