@@ -2,6 +2,7 @@
 #include "Eigen/src/Core/Matrix.h"
 #include "Eigen/src/Geometry/Quaternion.h"
 #include "rclcpp/rclcpp.hpp"
+#include <chrono>
 
 // opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
 const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
@@ -154,6 +155,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
                      double current_time,
                      float yaw_abs, float pitch_abs)
 {
+    auto t_star = std::chrono::steady_clock::now();
     // 计算dt（与上次更新的时间差）
     double dt = 0.01;  // 默认10ms
     if (last_update_time_ > 0.0) {
@@ -238,7 +240,10 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     center_point_world_ = Eigen::Vector3d(state[0], state[1], state[2]);
     center_velocity_    = Eigen::Vector3d(state[3], state[4], 0);
     filter_orientation_world_ = getQuaternionFromYaw(state[7]);
+    auto t_end = std::chrono::steady_clock::now();
+    auto cost_time = std::chrono::duration<double,std::micro>(t_end - t_star).count();
     //// DEBUG //////
+    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "Tracker耗时 : %.1f us",cost_time);
     RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "EKF State: x:%.4f y:%.4f z:%.4f r:%.4f yaw:%.4f",
         state[0], state[1], state[2], state[6], state[7]);
     RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "EKF Measurement: x_a:%.4f y_a: %.4f z_a:%.4f yaw:%.4f",
