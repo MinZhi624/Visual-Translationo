@@ -19,7 +19,14 @@ test_node_cpp:
     debug_identification: false
     debug_preprocessing: false
     debug_number_classification: true
-    delay_time: 20
+    # 正常
+    # debug_frame: false
+    # debug_frame_count: 100
+    # delay_time: 20
+    # 记录数据
+    debug_frame: true
+    debug_frame_count: 150
+    delay_time: 5
 
 armor_plate_identification_node:
   ros__parameters:

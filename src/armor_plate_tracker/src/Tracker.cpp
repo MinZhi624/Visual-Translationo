@@ -1,8 +1,11 @@
 #include "armor_plate_tracker/Tracker.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "Eigen/src/Core/Matrix.h"
 #include "Eigen/src/Geometry/Quaternion.h"
 #include "rclcpp/rclcpp.hpp"
 #include <chrono>
+
+using armor_plate_interfaces::msg::TrackerDebug;
 
 // opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
 const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
@@ -38,6 +41,7 @@ void Tracker::reset()
     measured_yaw_ = 0.0f;
     measured_pitch_ = 0.0f;
     last_armor_number_ = "";
+    center_r_ = 0.0f;
 }
 
 void Tracker::init(const ArmorPlate& armor_plate, double current_time)
@@ -155,7 +159,9 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
                      double current_time,
                      float yaw_abs, float pitch_abs)
 {
-    auto t_star = std::chrono::steady_clock::now();
+    auto t_start = std::chrono::steady_clock::now();
+    solve_ok_ = false;
+
     // 计算dt（与上次更新的时间差）
     double dt = 0.01;  // 默认10ms
     if (last_update_time_ > 0.0) {
@@ -231,6 +237,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     Eigen::Vector<double, 9> state;
     ekf_.correct(measurement);
     state = ekf_.getStatePost();
+    solve_ok_ = true;
 
     Eigen::Vector3d pw_f = ekf_.getFilteredObservation().head<3>();
     Eigen::Vector3d pc_f = R_c_w_ * pw_f;
@@ -239,17 +246,11 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     // EKF 状态向量提取
     center_point_world_ = Eigen::Vector3d(state[0], state[1], state[2]);
     center_velocity_    = Eigen::Vector3d(state[3], state[4], 0);
+    center_r_           = static_cast<float>(state[6]);
     filter_orientation_world_ = getQuaternionFromYaw(state[7]);
+
     auto t_end = std::chrono::steady_clock::now();
-    auto cost_time = std::chrono::duration<double,std::micro>(t_end - t_star).count();
-    //// DEBUG //////
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "Tracker耗时 : %.1f us",cost_time);
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "EKF State: x:%.4f y:%.4f z:%.4f r:%.4f yaw:%.4f",
-        state[0], state[1], state[2], state[6], state[7]);
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "EKF Measurement: x_a:%.4f y_a: %.4f z_a:%.4f yaw:%.4f",
-        measurement[0], measurement[1], measurement[2], measurement[3]
-    );
-    //RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "LAST ARMOR: %s", last_armor_number_.c_str());
+    time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
 }
 float calculatePoseYaw(const Eigen::Quaterniond &q)
 {
@@ -319,4 +320,45 @@ void Tracker::updateFilteredValue(const Eigen::Vector3d& pc_f, const Eigen::Vect
     filter_position_world_  = pw_f;
     yaw_   = calculateYaw(pc_f);
     pitch_ = calculatePitch(pc_f);
+}
+
+TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time& stamp) const
+{
+    TrackerDebug msg;
+    msg.header.stamp = stamp;
+
+    auto toVec3 = [](const Eigen::Vector3d& v) {
+        geometry_msgs::msg::Vector3 vec;
+        vec.x = v.x(); vec.y = v.y(); vec.z = v.z();
+        return vec;
+    };
+
+    if (!is_lost_) {
+        msg.target_point = toVec3(measured_position_camera_);
+        msg.filtered_point = toVec3(filter_position_camera_);
+        msg.target_point_world = toVec3(measured_position_world_);
+        msg.filtered_point_world = toVec3(filter_position_world_);
+    } else {
+        geometry_msgs::msg::Vector3 center;
+        center.x = 0.0; center.y = 0.0; center.z = 1.0;
+        msg.target_point = center;
+        msg.filtered_point = center;
+        msg.target_point_world = center;
+        msg.filtered_point_world = center;
+    }
+
+    msg.raw_yaw = last_armor_pose_yaw_world_;
+    msg.filter_yaw = calculatePoseYaw(filter_orientation_world_);
+
+    msg.center_x = static_cast<float>(center_point_world_.x());
+    msg.center_y = static_cast<float>(center_point_world_.y());
+    msg.center_r = center_r_;
+    msg.center_v_x = static_cast<float>(center_velocity_.x());
+    msg.center_v_y = static_cast<float>(center_velocity_.y());
+
+    msg.time_cost = time_cost_;
+    msg.method = "ekf";
+    msg.solve_ok = solve_ok_;
+
+    return msg;
 }
