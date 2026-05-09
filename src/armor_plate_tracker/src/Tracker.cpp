@@ -1,7 +1,11 @@
 #include "armor_plate_tracker/Tracker.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "Eigen/src/Core/Matrix.h"
+#include "Eigen/src/Geometry/Quaternion.h"
 #include "rclcpp/rclcpp.hpp"
-#include <Eigen/Dense>
 #include <chrono>
+
+using armor_plate_interfaces::msg::TrackerDebug;
 
 // opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
 const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
@@ -82,6 +86,7 @@ void Tracker::reset()
     measured_yaw_ = 0.0f;
     measured_pitch_ = 0.0f;
     last_armor_number_ = "";
+    center_r_ = 0.0f;
 }
 void Tracker::init(const ArmorPlate& armor_plate, double current_time)
 {
@@ -202,6 +207,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
                      float yaw_abs, float pitch_abs)
 {
     auto t_start = std::chrono::steady_clock::now();
+    solve_ok_ = false;
     // 计算dt（与上次更新的时间差）
     double dt = 0.01;  // 默认10ms
     if (last_update_time_ > 0.0) {
@@ -355,6 +361,8 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
         // LS 失败时用 CenterKF 的速度
         center_velocity_ = Eigen::Vector3d(center_state[2], center_state[3], 0.0);
     }
+    center_r_ = static_cast<float>(r_used);
+    solve_ok_ = true;
 
     filter_orientation_world_ = getQuaternionFromYaw(yaw_filtered);
 
@@ -367,23 +375,8 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     Eigen::Vector3d filter_pos_camera = R_c_w_ * filter_pos_world;
     updateFilteredValue(filter_pos_camera, filter_pos_world);
 
-    //// DEBUG //////
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-        "LS Center: x:%.4f y:%.4f r:%.4f ls_ok:%d",
-        center_point_world_.x(), center_point_world_.y(), r_used, ls_ok);
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-        "Measured yaw: %.4f, Filtered yaw: %.4f",
-        armor_pose_yaw_world, yaw_filtered
-    );
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-        "Yaw误差: measured:%.4f filtered:%.4f diff:%.4f",
-        armor_pose_yaw_world, yaw_filtered,
-        armor_pose_yaw_world - yaw_filtered);
-
     auto t_end = std::chrono::steady_clock::now();
-    double elapsed_us = std::chrono::duration<double, std::micro>(t_end - t_start).count();
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-        "Tracker耗时: %.1f us", elapsed_us);
+    time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
 }
 ////////// 工具类 /////////
 float calculatePoseYaw(const Eigen::Quaterniond &q)
@@ -418,3 +411,43 @@ Eigen::Quaterniond getQuaternionFromYaw(float yaw)
     return Eigen::Quaterniond(yawAngle);
 }
 
+TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time& stamp) const
+{
+    TrackerDebug msg;
+    msg.header.stamp = stamp;
+
+    auto toVec3 = [](const Eigen::Vector3d& v) {
+        geometry_msgs::msg::Vector3 vec;
+        vec.x = v.x(); vec.y = v.y(); vec.z = v.z();
+        return vec;
+    };
+
+    if (!is_lost_) {
+        msg.target_point = toVec3(measured_position_camera_);
+        msg.filtered_point = toVec3(filter_position_camera_);
+        msg.target_point_world = toVec3(measured_position_world_);
+        msg.filtered_point_world = toVec3(filter_position_world_);
+    } else {
+        geometry_msgs::msg::Vector3 center;
+        center.x = 0.0; center.y = 0.0; center.z = 1.0;
+        msg.target_point = center;
+        msg.filtered_point = center;
+        msg.target_point_world = center;
+        msg.filtered_point_world = center;
+    }
+
+    msg.raw_yaw = last_armor_pose_yaw_world_;
+    msg.filter_yaw = calculatePoseYaw(filter_orientation_world_);
+
+    msg.center_x = static_cast<float>(center_point_world_.x());
+    msg.center_y = static_cast<float>(center_point_world_.y());
+    msg.center_r = center_r_;
+    msg.center_v_x = static_cast<float>(center_velocity_.x());
+    msg.center_v_y = static_cast<float>(center_velocity_.y());
+
+    msg.time_cost = time_cost_;
+    msg.method = "ls";
+    msg.solve_ok = solve_ok_;
+
+    return msg;
+}

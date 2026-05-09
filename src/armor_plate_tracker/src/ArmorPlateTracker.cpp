@@ -138,12 +138,7 @@ private:
     }
     void info()
     {
-        float measurement_yaw = tracker_.getMeasuredYaw();
-        float measurement_pitch = tracker_.getMeasuredPitch();
-        float filter_yaw = tracker_.getYaw();
-        float filter_pitch = tracker_.getPitch();
-        RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
-            measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
+        
     }
     void publishMarkerArray(const rclcpp::Time& now)
     {
@@ -232,30 +227,7 @@ private:
         publishMarkerArray(now);
         ////////// DEBUG //////////
         if (debug_) {
-            TrackerDebug debug_msg;
-            debug_msg.header.stamp = image_stamp_;
-            auto eigen2geometry = [](const Eigen::Vector3d& vec) {
-                geometry_msgs::msg::Vector3 vec_msg;
-                vec_msg.x = vec.x();
-                vec_msg.y = vec.y();
-                vec_msg.z = vec.z();
-                return vec_msg;
-            };
-            if (!tracker_.isLost()) {
-                Eigen::Vector3d measured_cam = tracker_.getMeasuredPositionCamera();
-                debug_msg.target_point = eigen2geometry(measured_cam);
-                Eigen::Vector3d filtered_cam = tracker_.getFilterPositionCamera();
-                debug_msg.filtered_point = eigen2geometry(filtered_cam);
-            } else {
-                // 丢失时放在相机正前方（光轴上，投影到图像中心）
-                geometry_msgs::msg::Vector3 center_point;
-                center_point.x = 0.0;
-                center_point.y = 0.0;
-                center_point.z = 1.0;
-                debug_msg.target_point = center_point;
-                debug_msg.filtered_point = center_point;
-            }
-
+            TrackerDebug debug_msg = tracker_.CreatedebugMsg(image_stamp_);
             tracker_debug_pub_->publish(debug_msg);
         }
     }
