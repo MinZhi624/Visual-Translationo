@@ -10,7 +10,6 @@ endif()
 # ======================
 set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
-  src/CameraDriver.cpp
   src/SolvePnP.cpp
   src/Recognize.cpp
   src/MyKalmanFilter.cpp
@@ -21,7 +20,6 @@ set(  ArmorPlateIdentifcation
 set( Test
   src/Test.cpp
   src/TestFunc.cpp
-  src/CameraDriver.cpp
   src/SolvePnP.cpp
   src/Recognize.cpp
   src/MyKalmanFilter.cpp
@@ -31,9 +29,9 @@ set( Test
 # ======================
 # 宏定义
 # ======================
-option(DEBUG_MODE "开始调试模式" OFF)
-option(DEBUG_INDENTIFICATION_MODE "识别调试模式" OFF)
-option(DEBUG_PREPROCESSING_MODE "预处理调试模式" OFF)
+option(DEBUG_MODE "开始调试模式" ON)
+option(DEBUG_INDENTIFICATION_MODE "识别调试模式" ON)
+option(DEBUG_PREPROCESSING_MODE "预处理调试模式" ON)
 
 if(DEBUG_MODE)
     add_compile_definitions(DEBUG_PREPROCESSING)
@@ -60,63 +58,45 @@ find_package(Eigen3 REQUIRED)
 # ======================
 # 相机 SDK 路径
 # ======================
-set(CAMERA_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/camera_sdk")
-set(CAMERA_SDK_INCLUDE_DIR "${CAMERA_SDK_ROOT}/include")
+# set(CAMERA_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/camera_sdk")
+# set(CAMERA_SDK_INCLUDE_DIR "${CAMERA_SDK_ROOT}/include")
 
 # ======================
 # 库文件
 # ======================
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x64/libMVSDK.so")
-else()
-  set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x86/libMVSDK.so")
-endif()
+# if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+# set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x64/libMVSDK.so")
+# else()
+#   set(CAMERA_SDK_LIBRARY "${CAMERA_SDK_ROOT}/lib/x86/libMVSDK.so")
+# endif()
 
-add_executable(ArmorPlateIdentifcation ${ArmorPlateIdentifcation})
 add_executable(Test ${Test})
 
 # ======================
 # include 路径
 # ======================
-target_include_directories(ArmorPlateIdentifcation PUBLIC
-$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-$<INSTALL_INTERFACE:include>
-)
 target_include_directories(Test PUBLIC
 $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 $<INSTALL_INTERFACE:include>
 )
 
-target_include_directories(ArmorPlateIdentifcation PUBLIC
-${OpenCV_INCLUDE_DIRS}
-${CAMERA_SDK_INCLUDE_DIR}
-${EIGEN3_INCLUDE_DIR}
-)
 target_include_directories(Test PUBLIC
 ${OpenCV_INCLUDE_DIRS}
-${CAMERA_SDK_INCLUDE_DIR}
+# ${CAMERA_SDK_INCLUDE_DIR}
 ${EIGEN3_INCLUDE_DIR}
 )
-target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+# target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 # ======================
 # 链接库
 # ======================
-target_link_libraries(ArmorPlateIdentifcation
-${OpenCV_LIBS}
-${CAMERA_SDK_LIBRARY}
-)
+
 target_link_libraries(Test
 ${OpenCV_LIBS}
-${CAMERA_SDK_LIBRARY}
+# ${CAMERA_SDK_LIBRARY}
 )
 # ======================
 # 依赖关系
 # ======================
-ament_target_dependencies(
-  ArmorPlateIdentifcation
-  "rclcpp"
-  "OpenCV"
-)
 ament_target_dependencies(
   Test
   "rclcpp"
@@ -127,7 +107,7 @@ ament_target_dependencies(
 # 安装
 # ======================
 install(TARGETS 
-  ArmorPlateIdentifcation Test
+  Test
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY 
