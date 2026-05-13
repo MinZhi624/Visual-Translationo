@@ -217,13 +217,9 @@ std::vector<Armor> Detector::matchLights(std::vector<Lights>& all_lights)
 void Detector::drawArmors(cv::Mat& img)
 {
     for (const auto& armor : armors_) {
-        for (int i = 0; i < 4; i++) {
-            // 画出点
-            cv::circle(img, armor.points_[i], 3, cv::Scalar(0, 255, 0), -1);
-            cv::putText(img, std::to_string(i), armor.points_[i], cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(255, 0, 255));
-            // 画出线条
-            cv::line(img, armor.points_[i], armor.points_[(i + 1) % 4], cv::Scalar(0, 255, 0), 2);
-        }
+        // 画交叉线（紫色）
+        cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
+        cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
     }
 }
 void Detector::drawAllLights(cv::Mat& img)

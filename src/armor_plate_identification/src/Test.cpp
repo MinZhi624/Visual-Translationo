@@ -18,7 +18,6 @@
 #include <thread>
 #include <chrono>
 #include <mutex>
-#include <fstream>
 #include <filesystem>
 
 using armor_plate_interfaces::msg::ArmorPlate;
@@ -57,12 +56,13 @@ private:
     bool debug_frame_;
     int debug_frame_count_;
     DebugParamController debug_controller_;
+    // 预处理阈值
+    int threshold_value_;
     // TrackerDebug 回调查找
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
     std::deque<ImageSave> images_buffs_;
-    // TrackerDebug 数据保存
-    std::ofstream tracker_log_file_;
+    std::string test_name_;  // 从视频文件名提取，用于 debug 目录
     void init(const std::string& video_path)
     {
         // ===== 相机初始化 ==== //
@@ -72,6 +72,10 @@ private:
             rclcpp::shutdown();
             return;
         }
+        // 从视频路径提取文件名作为测试名称（去掉扩展名）
+        std::filesystem::path vp(video_path);
+        test_name_ = vp.stem().string();
+        RCLCPP_INFO(this->get_logger(), "测试名称: %s", test_name_.c_str());
         // 获取视频FPS
         double fps = c_.get(cv::CAP_PROP_FPS);
         if (fps <= 0) {
@@ -90,6 +94,7 @@ private:
         lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
         lights_.TARGET_COLOR = target_color_;
+        threshold_value_ = this->declare_parameter<int>("threshold_value", 160);
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
         // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
@@ -156,9 +161,11 @@ private:
         cv::Mat gary_thre;
         cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
         cv::Mat img_thre;
-        cv::threshold(gary_thre, img_thre, 160, 255, cv::THRESH_BINARY);\
-        cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-        cv::dilate(img_thre, img_thre, kernal);
+        cv::threshold(gary_thre, img_thre, threshold_value_, 255, cv::THRESH_BINARY);
+        cv::Mat kernal_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+        cv::Mat kernal_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        cv::dilate(img_thre, img_thre, kernal_dilate);
+        cv::erode(img_thre, img_thre, kernal_erode);
         // 灯条匹配
         lights_.detectArmors(img_thre, image);
         lights_.drawArmors(img_show_);
@@ -274,7 +281,7 @@ private:
         // 显示图像
         cv::Mat show_img;
         cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
-        cv::imshow("Identifacation", show_img);
+        cv::imshow("Identifacation", img_show_);
     }
     void Save()
     {
@@ -291,35 +298,6 @@ private:
             images_buffs_.push_back({stamp, img_show_.clone()});
             if (images_buffs_.size() > 10) images_buffs_.pop_front();
         }
-    }
-    ////// DEBUG ///////
-    void saveTrackerDebug(const TrackerDebug::SharedPtr msg)
-    {
-        // 首次调用时根据 method 创建对应目录并打开文件
-        if (!tracker_log_file_.is_open()) {
-            std::string method = msg->method;
-            if (method.empty()) method = "unknown";
-            std::string log_dir = "/home/minzhi/ws05_fourth_assessment/Debug/Tracker/" + method + "/temp";
-            std::filesystem::create_directories(log_dir);
-            std::string log_path = log_dir + "/tracker_log.txt";
-            tracker_log_file_.open(log_path, std::ios::out | std::ios::trunc);
-            if (tracker_log_file_.is_open()) {
-                tracker_log_file_ << "sec nanosec "
-                    << "target_world_x target_world_y target_world_z "
-                    << "filtered_world_x filtered_world_y filtered_world_z "
-                    << "raw_yaw filter_yaw "
-                    << "center_x center_y center_r center_vx center_vy "
-                    << "method solve_ok time_cost" << std::endl;
-                RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "日志保存到: %s", log_path.c_str());
-            }
-        }
-        tracker_log_file_ << msg->header.stamp.sec << " " << msg->header.stamp.nanosec << " "
-            << msg->target_point_world.x << " " << msg->target_point_world.y << " " << msg->target_point_world.z << " "
-            << msg->filtered_point_world.x << " " << msg->filtered_point_world.y << " " << msg->filtered_point_world.z << " "
-            << msg->raw_yaw << " " << msg->filter_yaw << " "
-            << msg->center_x << " " << msg->center_y << " " << msg->center_r << " "
-            << msg->center_v_x << " " << msg->center_v_y << " "
-            << msg->method << " " << msg->solve_ok << " " << msg->time_cost << std::endl;
     }
     void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     {
@@ -380,7 +358,10 @@ private:
             msg->center_v_x, msg->center_v_y,
             msg->method.c_str(), msg->solve_ok, msg->time_cost);
 
-        saveTrackerDebug(msg);
+        std::string method = msg->method;
+        if (method.empty()) method = "unknown";
+        std::string log_dir = "/home/minzhi/ws05_fourth_assessment/Debug/Tracker/" + test_name_ + "/" + method + "/temp";
+        saveTrackerDebugToFile(log_dir, *msg);
     }
 
 public:
@@ -391,7 +372,7 @@ public:
         {
             c_ >> frame;
             if (frame.empty()) {
-                if (tracker_log_file_.is_open()) tracker_log_file_.close();
+                closeTrackerDebugFile();
                 RCLCPP_INFO(this->get_logger(), "视频播放结束");
                 return;
             }
@@ -416,12 +397,12 @@ public:
 
             // 帧调试：播放到指定帧数时结束
             if (debug_frame_ && frame_count_ >= debug_frame_count_) {
-                if (tracker_log_file_.is_open()) tracker_log_file_.close();
+                closeTrackerDebugFile();
                 RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_frame_count_);
                 return;
             }
         }
-        if (tracker_log_file_.is_open()) tracker_log_file_.close();
+        closeTrackerDebugFile();
         RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
     }
     

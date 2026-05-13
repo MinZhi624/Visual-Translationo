@@ -102,6 +102,8 @@ bool DebugParamController::handleKey(int key, Detector& lights, const rclcpp::Lo
             case 5: // MIN_X_DIFF_RATIO
                 lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
                 break;
+            default:
+                break;
         }
         return true;
     }
@@ -149,6 +151,7 @@ void DebugParamController::drawParams(cv::Mat& img, const Detector& lights)
             case 3: val = lights.MAX_DISTANCE_RATIO; break;
             case 4: val = lights.MIN_LENGTH_RATIO; break;
             case 5: val = lights.MIN_X_DIFF_RATIO; break;
+            default: break;
         }
         std::string text = param_names_[i] + ": " + std::to_string(val);
         text = text.substr(0, text.find('.') + 3);
@@ -170,4 +173,68 @@ void DebugParamController::drawDebugInfo(cv::Mat& img, bool show_speed_control)
                     cv::Point(x_, y_ + base_row * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
     }
+}
+
+#include <fstream>
+#include <filesystem>
+
+namespace {
+    std::ofstream& getTrackerLogFile() {
+        static std::ofstream file;
+        return file;
+    }
+    std::string& getCurrentLogDir() {
+        static std::string dir;
+        return dir;
+    }
+}
+
+void saveTrackerDebugToFile(const std::string& log_dir,
+                            const armor_plate_interfaces::msg::TrackerDebug& msg)
+{
+    auto& tracker_log_file = getTrackerLogFile();
+    auto& current_log_dir = getCurrentLogDir();
+
+    // 如果目录变化，关闭旧文件
+    if (current_log_dir != log_dir) {
+        if (tracker_log_file.is_open()) {
+            tracker_log_file.close();
+        }
+        current_log_dir = log_dir;
+    }
+
+    // 首次调用时创建目录并打开文件
+    if (!tracker_log_file.is_open()) {
+        std::filesystem::create_directories(log_dir);
+        std::string log_path = log_dir + "/tracker_log.txt";
+        tracker_log_file.open(log_path, std::ios::out | std::ios::trunc);
+        if (tracker_log_file.is_open()) {
+            tracker_log_file << "sec nanosec "
+                << "target_world_x target_world_y target_world_z "
+                << "filtered_world_x filtered_world_y filtered_world_z "
+                << "raw_yaw filter_yaw "
+                << "center_x center_y center_r center_vx center_vy "
+                << "method solve_ok time_cost" << std::endl;
+            RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "日志保存到: %s", log_path.c_str());
+        }
+    }
+
+    if (tracker_log_file.is_open()) {
+        tracker_log_file << msg.header.stamp.sec << " " << msg.header.stamp.nanosec << " "
+            << msg.target_point_world.x << " " << msg.target_point_world.y << " " << msg.target_point_world.z << " "
+            << msg.filtered_point_world.x << " " << msg.filtered_point_world.y << " " << msg.filtered_point_world.z << " "
+            << msg.raw_yaw << " " << msg.filter_yaw << " "
+            << msg.center_x << " " << msg.center_y << " " << msg.center_r << " "
+            << msg.center_v_x << " " << msg.center_v_y << " "
+            << msg.method << " " << msg.solve_ok << " " << msg.time_cost << std::endl;
+    }
+}
+
+void closeTrackerDebugFile()
+{
+    auto& tracker_log_file = getTrackerLogFile();
+    if (tracker_log_file.is_open()) {
+        tracker_log_file.close();
+    }
+    getCurrentLogDir().clear();
 }

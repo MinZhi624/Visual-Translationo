@@ -4,6 +4,13 @@
 #include <vector>
 #include "rclcpp/rclcpp.hpp"
 #include "armor_plate_identification/Detector.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
+
+void saveTrackerDebugToFile(const std::string& log_dir,
+                            const armor_plate_interfaces::msg::TrackerDebug& msg);
+
+///  @brief 关闭 TrackerDebug 日志文件
+void closeTrackerDebugFile();
 
 ///  @brief 将多个图像拼接显示在一个窗口中（2x2 布局）
 ///  @param window_name 窗口名称
@@ -18,11 +25,13 @@ class DebugParamController {
 public:
     DebugParamController();
 
-    ///  @brief 处理调试按键（1-6 选参数、T/G 调值、+/- 调播放速度）
-    ///  @param key cv::waitKey 返回的按键值
-    ///  @param lights 要调节的灯条匹配参数对象
-    ///  @param logger ROS2 日志器
-    ///  @return true 表示按键已被消费
+    /**
+     * @brief 处理调试按键（1-6 选参数、T/G 调值、+/- 调播放速度）
+     * @param key cv::waitKey 返回的按键值
+     * @param lights 要调节的灯条匹配参数对象
+     * @param logger ROS2 日志器
+     * @return true 表示按键已被消费
+     */
     bool handleKey(int key, Detector& lights, const rclcpp::Logger& logger);
 
     ///  @brief 在图像左上角第一行绘制处理用时

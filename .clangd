@@ -18,8 +18,7 @@ Index:
 Diagnostics:
   UnusedIncludes: None
   ClangTidy:
-    Add: ["bugprone-*", "performance-*", "portability-*"]
-    Remove: ["readability-*", "cppcoreguidelines-*", "modernize-*", "google-*", "bugprone-narrowing-conversions", "performance-unnecessary-value-param", "bugprone-easily-swappable-parameters", "bugprone-macro-parentheses"]
+    Add: []
 
 InlayHints:
   Enabled: false
