@@ -8,9 +8,9 @@ test_node_cpp:
     max_angle_diff: 10.0
     min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
-    max_y_diff_ratio: 1.0
+    max_y_diff_ratio: 0.7
     max_distance_ratio: 0.8
-    min_distance_ratio: 0.1
+    min_distance_ratio: 0.3
     # === 数字分类器参数 ===
     model_path: "model/number_cnn.onnx"
     label_path: "model/label_cnn.txt"
@@ -18,9 +18,9 @@ test_node_cpp:
     ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
-    debug_identification: false
+    debug_identification: true
     debug_preprocessing: true
-    debug_number_classification: true
+    debug_number_classification: false
     # 正常
     debug_frame: false
     debug_frame_count: 100

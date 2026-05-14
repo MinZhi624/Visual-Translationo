@@ -37,7 +37,8 @@ std::vector<std::vector<cv::Point>> Detector::findLightsContours(cv::Mat& img_th
 {
     std::vector<std::vector<cv::Point>> contours;
     std::vector<std::vector<cv::Point>> target_contours;
-    cv::findContours(img_thre, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(img_thre, contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_NONE);
     // 选出合法的轮廓 --1. 面积不能太小， --2. 长宽比不能太大
     for (const auto& contour : contours) {
         int area = cv::contourArea(contour);

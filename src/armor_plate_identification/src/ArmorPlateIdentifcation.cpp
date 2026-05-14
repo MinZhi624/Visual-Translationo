@@ -160,7 +160,7 @@ private:
         cv::Mat gary_thre;
         cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
         cv::Mat img_thre;
-        cv::threshold(gary_thre, img_thre, 160, 255, cv::THRESH_BINARY);
+        cv::threshold(gary_thre, img_thre, 150, 255, cv::THRESH_BINARY);
         cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
         cv::dilate(img_thre, img_thre, kernal);
         // 灯条匹配

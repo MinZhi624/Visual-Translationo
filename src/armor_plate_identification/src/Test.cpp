@@ -43,6 +43,10 @@ private:
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     // 处理用时
     float process_time_ms_ = 10.0f;
+    // 平均处理用时（每50帧更新一次）
+    float debug_arverage_process_time_ = 0.0f;
+    float process_time_sum_ = 0.0f;
+    int process_time_count_ = 0;
     // 视频帧计数与时间
     int frame_count_ = 0;
     double fps_ = 50.0;
@@ -95,7 +99,7 @@ private:
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
         lights_.TARGET_COLOR = target_color_;
         threshold_value_ = this->declare_parameter<int>("threshold_value", 160);
-        this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),  std::bind(&Test::info, this));
+        this->timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),  std::bind(&Test::info, this));
         // ===== 初始化PoseSolver ===== //
         // 装甲板坐标系点左上角是0,顺时针排列
         std::vector<cv::Point3f> world_points_;
@@ -132,8 +136,7 @@ private:
         debug_frame_ = this->declare_parameter<bool>("debug_frame", false);
         debug_frame_count_ = this->declare_parameter<int>("debug_frame_count", 100);
         int delay_time = this->declare_parameter<int>("delay_time", 20);
-        debug_controller_.setPlayDelayMs(delay_time);
-        // 订阅 Tracker 回传的调试数据
+        debug_controller_.setPlayDelayMs(delay_time); 
         tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
             "tracker_debug", 10,
             std::bind(&Test::TrackerDebugCallBack, this, std::placeholders::_1)
@@ -148,7 +151,7 @@ private:
     }
     void info()
     {
-        // 计时器 5s发布一次信息
+        // 计时器 1s发布一次信息
         if (debug_identification_) {
             RCLCPP_INFO(this->get_logger(), "MAX_ANGLE_DIFF: %f, MAX_Y_DIFF_RATIO: %f, MIN_DISTANCE_RATIO: %f, MAX_DISTANCE_RATIO: %f, MIN_LENGTH_RATIO: %f, MIN_X_DIFF_RATIO: %f",
             lights_.MAX_ANGLE_DIFF, lights_.MAX_Y_DIFF_RATIO, lights_.MIN_DISTANCE_RATIO, lights_.MAX_DISTANCE_RATIO, lights_.MIN_LENGTH_RATIO, lights_.MIN_X_DIFF_RATIO
@@ -162,8 +165,8 @@ private:
         cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
         cv::Mat img_thre;
         cv::threshold(gary_thre, img_thre, threshold_value_, 255, cv::THRESH_BINARY);
-        cv::Mat kernal_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-        cv::Mat kernal_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+        cv::Mat kernal_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 7));
+        cv::Mat kernal_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 7));
         cv::dilate(img_thre, img_thre, kernal_dilate);
         cv::erode(img_thre, img_thre, kernal_erode);
         // 灯条匹配
@@ -343,20 +346,20 @@ private:
         cv::waitKey(1);
 
         // 输出 TrackerDebug 数据
-        RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-            "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-            "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-            "yaw:%.4f->%.4f "
-            "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
-            "%s solve:%d %.1fms",
-            msg->target_point.x, msg->target_point.y, msg->target_point.z,
-            msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z,
-            msg->target_point_world.x, msg->target_point_world.y, msg->target_point_world.z,
-            msg->filtered_point_world.x, msg->filtered_point_world.y, msg->filtered_point_world.z,
-            msg->raw_yaw, msg->filter_yaw,
-            msg->center_x, msg->center_y, msg->center_r,
-            msg->center_v_x, msg->center_v_y,
-            msg->method.c_str(), msg->solve_ok, msg->time_cost);
+        // RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
+        //     "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+        //     "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+        //     "yaw:%.4f->%.4f "
+        //     "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
+        //     "%s solve:%d %.1fms",
+        //     msg->target_point.x, msg->target_point.y, msg->target_point.z,
+        //     msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z,
+        //     msg->target_point_world.x, msg->target_point_world.y, msg->target_point_world.z,
+        //     msg->filtered_point_world.x, msg->filtered_point_world.y, msg->filtered_point_world.z,
+        //     msg->raw_yaw, msg->filter_yaw,
+        //     msg->center_x, msg->center_y, msg->center_r,
+        //     msg->center_v_x, msg->center_v_y,
+        //     msg->method.c_str(), msg->solve_ok, msg->time_cost);
 
         std::string method = msg->method;
         if (method.empty()) method = "unknown";
@@ -388,6 +391,16 @@ public:
             auto t_end = std::chrono::steady_clock::now();
             process_time_ms_ = static_cast<float>(std::chrono::duration<double, std::milli>(t_end - t_start).count());
             
+            // 累加用于计算平均用时
+            process_time_sum_ += process_time_ms_;
+            process_time_count_++;
+            if (process_time_count_ >= 50) {
+                debug_arverage_process_time_ = process_time_sum_ / 50.0f;
+                RCLCPP_INFO(this->get_logger(), "【平均用时】最近50帧平均处理时间: %.3f ms", debug_arverage_process_time_);
+                process_time_sum_ = 0.0f;
+                process_time_count_ = 0;
+            }
+
             imageShow();
             controlParams();
             if (debug_base_) {
