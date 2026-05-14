@@ -2,23 +2,119 @@
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
-#include <rclcpp/rclcpp.hpp>
+#include "rclcpp/logging.hpp" 
 #include <opencv2/highgui.hpp>
 #include <opencv2/core/utils/filesystem.hpp>
+#include <algorithm>
 ////////////////////// Detector /////////////////////////
 void Detector::init()
 {
     find_lights_.clear();
     armors_.clear();
+    color_rejected_rects_.clear();
     num_lights_ = 0;
 }
+bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour)
+{
+    // 检查轮廓点的个数 
+    if (contour.size() < 6) return false;
+    int area = cv::contourArea(contour);
+    // 检查面积
+    if (area <= MIN_CONTOURS_AREA) return false;
+    // 检查长宽比
+    cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+    double long_length = std::max(min_rect.size.width, min_rect.size.height);
+    double short_length = std::min(min_rect.size.width, min_rect.size.height);
+    double ratio = short_length / long_length;
+    return ratio > MIN_CONTOURS_RATIO && ratio < MAX_CONTOURS_RATIO;
+}
 
-void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& image)
+cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
+{
+    // 1. BLUE 通道低阈值初筛
+    std::vector<cv::Mat> bgr;
+    cv::split(img_bgr, bgr);
+    cv::Mat color_ch = (TARGET_COLOR == "BLUE") ? bgr[0] : bgr[2];
+    cv::Mat blue_dim_thre;
+    cv::threshold(color_ch, blue_dim_thre, COLOR_THRESHOLD, 255, cv::THRESH_BINARY);
+
+    // 2. GRAY 阈值
+    cv::Mat gray;
+    cv::cvtColor(img_bgr, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat gray_thre;
+    cv::threshold(gray, gray_thre, GRAY_THRESHOLD, 255, cv::THRESH_BINARY);
+
+    // 3. 对每个 BLUE_dim 区域，检查 GRAY 碎片数，构建合并二值图
+    std::vector<std::vector<cv::Point>> blue_contours;
+    cv::findContours(blue_dim_thre, blue_contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    // 过滤面积太小或点数不足的 BLUE 区域
+    blue_contours.erase(
+        std::remove_if(blue_contours.begin(), blue_contours.end(),
+            [this](const auto& c) { return c.size() < 6 || cv::contourArea(c) < MIN_CONTOURS_AREA; }),
+        blue_contours.end());
+    cv::Mat img_thre = cv::Mat::zeros(img_bgr.size(), CV_8UC1);
+    std::vector<std::pair<cv::Rect, int>> fragment_info;
+
+    // 复用小 mask，避免循环内重复分配
+    cv::Mat roi_mask;
+
+    for (const auto& blue_contour : blue_contours) {
+        cv::Rect blue_bb = cv::boundingRect(blue_contour);
+        cv::Rect safe_bb = blue_bb & cv::Rect(0, 0, gray_thre.cols, gray_thre.rows);
+        if (safe_bb.area() < 10) continue;
+        cv::Mat gray_roi = gray_thre(safe_bb);
+
+        // 在 GRAY 子图中找轮廓
+        std::vector<std::vector<cv::Point>> gray_roi_contours;
+        cv::findContours(gray_roi, gray_roi_contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+        int valid_count = 0;
+        for (const auto& c : gray_roi_contours) {
+            if (cv::contourArea(c) > 5) valid_count++;
+        }
+
+        fragment_info.push_back({safe_bb, valid_count});
+
+        if (valid_count == 1) {
+            // GRAY 正常 → 直接拷贝 ROI 像素
+            gray_thre(safe_bb).copyTo(img_thre(safe_bb));
+        } else {
+            // GRAY 断裂(2+) 或丢失(0) → 用 BLUE_dim 的像素（小 mask 限定轮廓形状）
+            roi_mask = cv::Mat::zeros(safe_bb.size(), CV_8UC1);
+            // 轮廓点偏移到 ROI 坐标系
+            std::vector<cv::Point> local_contour;
+            local_contour.reserve(blue_contour.size());
+            for (const auto& pt : blue_contour) {
+                local_contour.push_back(pt - cv::Point(safe_bb.x, safe_bb.y));
+            }
+            cv::fillConvexPoly(roi_mask, local_contour, 255);
+            blue_dim_thre(safe_bb).copyTo(img_thre(safe_bb), roi_mask);
+        }
+    }
+
+    // 4. 形态学处理合并后的二值图
+    cv::Mat kernal_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
+    cv::Mat kernal_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
+    cv::dilate(img_thre, img_thre, kernal_dilate);
+    cv::erode(img_thre, img_thre, kernal_erode);
+
+    // 5. 填充调试图像数据
+    if (debug_out) {
+        debug_out->blue_dim_thre = blue_dim_thre.clone();
+        debug_out->gray_thre = gray_thre.clone();
+        debug_out->merged_thre = img_thre.clone();
+        debug_out->fragment_info = fragment_info;
+    }
+
+    return img_thre;
+}
+
+void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr)
 {
     // 初始化（重置）参数
     init();
     // 找到灯条然后拟合成直线
-    std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre, image);
+    std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre, img_bgr);
     find_lights_ = findLightLines(valued_contours);
     // 拿到灯条后匹配 按x轴排序,从左到右
     std::sort(find_lights_.begin(), find_lights_.end(), [](const Lights& a, const Lights& b) {
@@ -28,12 +124,12 @@ void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& image)
     armors_ = matchLights(find_lights_);
     // 得到装甲板的号码ROI
     for (auto& armor : armors_) {
-        armor.number_roi_ = getNumberROI(image, armor);
+        armor.number_roi_ = getNumberROI(img_bgr, armor);
     }
     // 更新装甲板数量
     num_lights_ = armors_.size();
 }
-std::vector<std::vector<cv::Point>> Detector::findLightsContours(cv::Mat& img_thre, const cv::Mat& image)
+std::vector<std::vector<cv::Point>> Detector::findLightsContours(cv::Mat& img_thre, const cv::Mat& img_bgr)
 {
     std::vector<std::vector<cv::Point>> contours;
     std::vector<std::vector<cv::Point>> target_contours;
@@ -41,18 +137,12 @@ std::vector<std::vector<cv::Point>> Detector::findLightsContours(cv::Mat& img_th
     cv::findContours(img_thre, contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_NONE);
     // 选出合法的轮廓 --1. 面积不能太小， --2. 长宽比不能太大
     for (const auto& contour : contours) {
-        int area = cv::contourArea(contour);
-        if (area > MIN_CONTOURS_AREA) {
-            cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
-            double long_length = std::max(min_rect.size.width, min_rect.size.height);
-            double short_length = std::min(min_rect.size.width, min_rect.size.height);
-            double ratio =short_length / long_length;
-            if (ratio < MAX_CONTOURS_RATIO && ratio > MIN_CONTOURS_RATIO) {
-                // 判断颜色是否符合要求
-                if (TargetColorDectect(image, min_rect, contour)) {
-                    target_contours.push_back(contour);
-                }
-            }
+        if (!checkLightGeometry(contour)) continue;
+        cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+        if (TargetColorDectect(img_bgr, min_rect, contour)) {
+            target_contours.push_back(contour);
+        } else {
+            color_rejected_rects_.push_back(min_rect);
         }
     }
     return target_contours;
@@ -104,11 +194,11 @@ std::vector<Lights> Detector::findLightLines(std::vector<std::vector<cv::Point>>
     return lights_list;
 }
 
-bool Detector::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
+bool Detector::TargetColorDectect(const cv::Mat& img_bgr,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
 {
     cv::Rect bbox = rect.boundingRect();
     // 裁剪到图像边界内，防止 ROI 越界崩溃
-    bbox &= cv::Rect(0, 0, image.cols, image.rows);
+    bbox &= cv::Rect(0, 0, img_bgr.cols, img_bgr.rows);
     if (bbox.empty()) return false;
 
     // 1. 生成轮廓 mask（只统计轮廓内部像素，且腐蚀后只看中心，避开光晕边缘）
@@ -122,14 +212,14 @@ bool Detector::TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& re
     cv::drawContours(mask, std::vector<std::vector<cv::Point>>{local_contour}, -1, 255, -1);
     cv::erode(mask, mask, cv::Mat());
     // 2. 提取 ROI 并分离 B/R 通道，用 mask 求平均
-    cv::Mat roi = image(bbox);
+    cv::Mat roi = img_bgr(bbox);
     std::vector<cv::Mat> bgr;
     cv::split(roi, bgr);
     double mean_b = cv::mean(bgr[0], mask)[0];
     double mean_r = cv::mean(bgr[2], mask)[0];
-    // 3. 比例判断，对光照变化更鲁棒 --> 避免杂光
-    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.2;
-    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.2;
+    // 3. 比例判断，对光照变化更鲁棒 --> 避免杂光(白)
+    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.1;
+    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.1;
     return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
 }
 
@@ -176,7 +266,16 @@ float Detector::computePairScore(const Lights& light_left, const Lights& light_r
     double dist_ratio = distance / men_length;
     float dist_score = 1.0f - std::min(std::abs((float)dist_ratio - 2.0f), 1.0f);
 
-    return angle_score + length_ratio + dist_score;
+    // 4. y差比：沿灯条方向的偏移越小越好
+    double global_x_diff = light_right.center_.x - light_left.center_.x;
+    double global_y_diff = light_right.center_.y - light_left.center_.y;
+    double sinx = std::sin(light_left.angle_);
+    double cosx = std::cos(light_left.angle_);
+    double local_y = std::abs(global_x_diff * cosx + global_y_diff * sinx);
+    float y_diff_ratio = static_cast<float>(local_y / men_length);
+    float y_score = 1.0f - std::min(y_diff_ratio / MAX_Y_DIFF_RATIO, 1.0f);
+
+    return angle_score + length_ratio + dist_score + y_score;
 }
 std::vector<Armor> Detector::matchLights(std::vector<Lights>& all_lights)
 {
@@ -232,14 +331,21 @@ void Detector::drawAllLights(cv::Mat& img)
     }
 }
 
-cv::Mat Detector::getNumberROI(const cv::Mat& image, const Armor& armor)
+void Detector::drawColorRejected(cv::Mat& img)
+{
+    for (const auto& rect : color_rejected_rects_) {
+        drawRotatedRect(img, rect, cv::Scalar(0, 255, 255), 2);  // 黄色
+    }
+}
+
+cv::Mat Detector::getNumberROI(const cv::Mat& img_bgr, const Armor& armor)
 {
     // 保证是有内容的装甲板
     if (armor.points_.size() != 4) return cv::Mat();
     // 透视转换
     auto rotation_matrix = cv::getPerspectiveTransform(armor.points_, NUMBER_TARGET_POINTS);
     cv::Mat number_roi;
-    cv::warpPerspective(image, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
+    cv::warpPerspective(img_bgr, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
     // 数字部分ROI
     number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
     number_origin_rois_.push_back(number_roi.clone());

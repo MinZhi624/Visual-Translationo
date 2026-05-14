@@ -3,11 +3,11 @@
 #include <opencv2/highgui.hpp>
 #include <algorithm>
 
-void showMultiImages(const std::string& window_name, 
-                     const std::vector<cv::Mat>& images,
+void showMultiImages(const std::string& window_name,
+                     const std::vector<cv::Mat>& imgs,
                      const std::vector<std::string>& labels)
 {
-    if (images.empty()) return;
+    if (imgs.empty()) return;
     
     // 固定输出窗口大小
     const int grid_cols = 2;  // 2列
@@ -21,16 +21,16 @@ void showMultiImages(const std::string& window_name,
                    cell_width * grid_cols, 
                    CV_8UC3, cv::Scalar(0, 0, 0));
     
-    for (size_t i = 0; i < images.size() && i < 4; ++i) {
+    for (size_t i = 0; i < imgs.size() && i < 4; ++i) {
         int row = i / grid_cols;
         int col = i % grid_cols;
         
         // 转换单通道为三通道
         cv::Mat img_display;
-        if (images[i].channels() == 1) {
-            cv::cvtColor(images[i], img_display, cv::COLOR_GRAY2BGR);
+        if (imgs[i].channels() == 1) {
+            cv::cvtColor(imgs[i], img_display, cv::COLOR_GRAY2BGR);
         } else {
-            img_display = images[i].clone();
+            img_display = imgs[i].clone();
         }
         
         // resize 到固定大小

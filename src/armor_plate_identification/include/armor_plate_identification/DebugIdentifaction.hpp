@@ -14,10 +14,10 @@ void closeTrackerDebugFile();
 
 ///  @brief 将多个图像拼接显示在一个窗口中（2x2 布局）
 ///  @param window_name 窗口名称
-///  @param images 图像向量，支持 3 或 4 张图
+///  @param imgs 图像向量，支持 3 或 4 张图
 ///  @param labels 标签文本（可选）
-void showMultiImages(const std::string& window_name, 
-                     const std::vector<cv::Mat>& images,
+void showMultiImages(const std::string& window_name,
+                     const std::vector<cv::Mat>& imgs,
                      const std::vector<std::string>& labels = {});
 
 ///  @brief 调试参数控制器，封装 DEBUG_INDENTIFICATION / DEBUG_BASE 公共逻辑

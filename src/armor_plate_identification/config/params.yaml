@@ -4,11 +4,12 @@ test_node_cpp:
     target_color: "BLUE"
     # === 预处理参数 ===
     threshold_value: 100
+    color_threshold: 100
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
-    min_length_ratio: 0.7
+    min_length_ratio: 0.8
     min_x_diff_ratio: 0.75
-    max_y_diff_ratio: 0.7
+    max_y_diff_ratio: 0.8
     max_distance_ratio: 0.8
     min_distance_ratio: 0.3
     # === 数字分类器参数 ===
@@ -18,17 +19,13 @@ test_node_cpp:
     ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
-    debug_identification: true
-    debug_preprocessing: true
+    debug_preprocessing: false
+    debug_identification: false
     debug_number_classification: false
     # 正常
     debug_frame: false
     debug_frame_count: 100
     delay_time: 20
-    # 记录数据
-    # debug_frame: true
-    # debug_frame_count: 150
-    # delay_time: 5
 
 armor_plate_identification_node:
   ros__parameters:

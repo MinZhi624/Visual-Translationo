@@ -3,11 +3,20 @@
 #include <opencv2/core/types.hpp>
 #include <vector>
 
+/// @brief 预处理调试图像数据
+struct PreprocessDebug {
+	cv::Mat blue_dim_thre;   // BLUE 通道二值图
+	cv::Mat gray_thre;       // GRAY 通道二值图
+	cv::Mat merged_thre;     // 合并后二值图
+	std::vector<std::pair<cv::Rect, int>> fragment_info;  // 每个 BLUE 区域的碎片数
+};
+
 class Detector
 {
 private:
 	std::vector<Lights> find_lights_;
 	std::vector<Armor> armors_;
+	std::vector<cv::RotatedRect> color_rejected_rects_;
 	// 数字图像提取数据
 	const int WARP_HEIGHT = 28;
 	const int WARP_WIDTH = 32;
@@ -27,9 +36,9 @@ private:
 	// ================ //
 	/// @brief 找到所有灯条的轮廓，进行的简单的筛选--面积还有长宽比
 	/// @param img_thre 预处理后二值化图像
-	/// @param image 原始图像
+	/// @param img_bgr 原始图像
 	/// @return 所有灯条的轮廓
-	std::vector<std::vector<cv::Point>> findLightsContours(cv::Mat& img_thre, const cv::Mat& image);
+	std::vector<std::vector<cv::Point>> findLightsContours(cv::Mat& img_thre, const cv::Mat& img_bgr);
 	
 	/// @brief 将灯条拟合成直线
 	/// @param contours 所有灯条的轮廓
@@ -54,17 +63,19 @@ private:
 	std::vector<Armor> matchLights(std::vector<Lights>& all_lights);
 
 	/// @brief 得到装甲板的号码ROI
-	/// @param image 原始图像
+	/// @param img_bgr 原始图像
 	/// @param armor 一个装甲板的信息
 	/// @return 号码ROI图像
-	cv::Mat getNumberROI(const cv::Mat& image, const Armor& armor);
+	cv::Mat getNumberROI(const cv::Mat& img_bgr, const Armor& armor);
 
 	/// @brief 判断一个灯条的颜色是否符合要求
-	/// @param image 原始图像
+	/// @param img_bgr 原始图像
 	/// @param rect 灯条的最小外接矩形
 	/// @param contour 灯条的轮廓
 	/// @return 是否符合要求
-	bool TargetColorDectect(const cv::Mat& image,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
+	bool TargetColorDectect(const cv::Mat& img_bgr,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
+	
+	bool checkLightGeometry(const std::vector<cv::Point>& contour);
 	// =======DEBUG========== //
 	std::vector<cv::Mat> number_origin_rois_;
 	int outputPictureCounts_ = 0;
@@ -85,17 +96,30 @@ public:
 	float MAX_DISTANCE_RATIO = 1.0f;
 	float MIN_DISTANCE_RATIO = 0.2f;
 	std::string TARGET_COLOR = "BLUE"; // "RED" 或 "BLUE"
+	// 预处理阈值
+	int GRAY_THRESHOLD = 100;
+	int COLOR_THRESHOLD = 100;
 
 	// =========== //
+
+	/// @brief 双通道预处理：BLUE_dim 定位 + GRAY 精确轮廓，合并为二值图
+	/// @param img_bgr 原始 BGR 图像
+	/// @param debug_out [可选] 输出调试图像数据，传 nullptr 则不填充
+	/// @return 合并后的二值图
+	cv::Mat preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out = nullptr);
 	
 	/// @brief 这个灯条匹配类的主函数。找到并匹配好灯条
 	/// @param img_thre 预处理后二值化图像
-	/// @param image 原始图像
-	void detectArmors(cv::Mat& img_thre, const cv::Mat& image);
+	/// @param img_bgr 原始图像
+	void detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr);
 	
 	/// @brief 画出所有匹配好的灯条对
 	/// @param img 要绘制的图像
 	void drawArmors(cv::Mat& img);
+
+	/// @brief 画出颜色验证未通过的轮廓（黄色框）
+	/// @param img 要绘制的图像
+	void drawColorRejected(cv::Mat& img);
 
 	/// @brief 得到所有匹配好的灯条按照顺时针的顺序排列
 	/// @return 所有匹配好的灯条按照顺时针的顺序排列的四个点

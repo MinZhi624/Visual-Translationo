@@ -55,7 +55,7 @@ private:
     // Tracker
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
-    std::deque<ImageSave> images_buffs_;
+    std::deque<ImageSave> img_buffs_;
     void init()
     {
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
@@ -154,17 +154,17 @@ private:
         }
     }
 
-    void Identification(cv::Mat& image)
+    void Identification(cv::Mat& img_bgr)
     {
         // 预处理
         cv::Mat gary_thre;
-        cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(img_bgr, gary_thre, cv::COLOR_BGR2GRAY);
         cv::Mat img_thre;
         cv::threshold(gary_thre, img_thre, 150, 255, cv::THRESH_BINARY);
         cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
         cv::dilate(img_thre, img_thre, kernal);
         // 灯条匹配
-        lights_.detectArmors(img_thre, image);
+        lights_.detectArmors(img_thre, img_bgr);
         lights_.drawArmors(img_show_);
         armors_ = lights_.getArmors();
         ////////////////////// DEUBG ////////////////////////
@@ -172,8 +172,8 @@ private:
             // 预处理四图拼接显示
             // 绘制目标区域
             cv::Mat img_target;
-            cv::bitwise_and(image, image, img_target, img_thre);
-            std::vector<cv::Mat> images = {image, gary_thre, img_thre, img_target};
+            cv::bitwise_and(img_bgr, img_bgr, img_target, img_thre);
+            std::vector<cv::Mat> images = {img_bgr, gary_thre, img_thre, img_target};
             std::vector<std::string> labels = {"Original", "Grayscale", "Threshold", "Target Region"};
             showMultiImages("PreProcessions-View", images, labels);
         }
@@ -277,8 +277,8 @@ private:
         }
         {
             std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-            images_buffs_.push_back({read_stamp_ ,img_show_.clone()});
-            if (images_buffs_.size() > 10) images_buffs_.pop_front();
+            img_buffs_.push_back({read_stamp_ ,img_show_.clone()});
+            if (img_buffs_.size() > 10) img_buffs_.pop_front();
         }
     }
 
@@ -288,8 +288,8 @@ private:
         std::deque<ImageSave> images_buffs;
         {
             std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-            if (images_buffs_.empty()) return;
-            images_buffs = images_buffs_;
+            if (img_buffs_.empty()) return;
+            images_buffs = img_buffs_;
         }
         // 寻找时间头最接近的帧（容差 1ms）
         auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg](const ImageSave& image_save) {
