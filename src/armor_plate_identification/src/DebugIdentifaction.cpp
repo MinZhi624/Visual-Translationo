@@ -1,6 +1,8 @@
 #include "armor_plate_identification/DebugIdentifaction.hpp"
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/core/utils/filesystem.hpp>
 #include <algorithm>
 
 void showMultiImages(const std::string& window_name,
@@ -237,4 +239,75 @@ void closeTrackerDebugFile()
         tracker_log_file.close();
     }
     getCurrentLogDir().clear();
+}
+
+/////////////////// infoTrackerDebugMsg //////////////////////////
+
+void infoTrackerDebugMsg(const rclcpp::Logger& logger,
+                         const armor_plate_interfaces::msg::TrackerDebug& msg)
+{
+    RCLCPP_INFO(logger,
+        "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+        "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+        "yaw:%.4f->%.4f "
+        "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
+        "%s solve:%d %.1fms",
+        msg.target_point.x, msg.target_point.y, msg.target_point.z,
+        msg.filtered_point.x, msg.filtered_point.y, msg.filtered_point.z,
+        msg.target_point_world.x, msg.target_point_world.y, msg.target_point_world.z,
+        msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z,
+        msg.raw_yaw, msg.filter_yaw,
+        msg.center_x, msg.center_y, msg.center_r,
+        msg.center_v_x, msg.center_v_y,
+        msg.method.c_str(), msg.solve_ok, msg.time_cost);
+}
+
+/////////////////// NumberRoiCollector //////////////////////////
+
+int NumberRoiCollector::global_counter_ = 0;
+
+void NumberRoiCollector::startCollect(int frames)
+{
+    remaining_ = frames;
+    collected_.clear();
+    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"), "开始收集 %d 帧 ROI", frames);
+}
+
+void NumberRoiCollector::feed(const std::vector<cv::Mat>& rois)
+{
+    if (remaining_ <= 0) return;
+    collected_.insert(collected_.end(), rois.begin(), rois.end());
+    remaining_--;
+    if (remaining_ == 0) {
+        RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"),
+            "收集完成，共 %lu 张 ROI", collected_.size());
+    }
+}
+
+void NumberRoiCollector::save(const std::string& dir)
+{
+    if (collected_.empty()) return;
+    if (!cv::utils::fs::createDirectories(dir)) {
+        RCLCPP_WARN(rclcpp::get_logger("NumberRoiCollector"),
+            "无法创建目录: %s", dir.c_str());
+        return;
+    }
+    for (const auto& roi : collected_) {
+        std::string path = dir + "/roi_" + std::to_string(++global_counter_) + ".png";
+        if (!cv::imwrite(path, roi)) {
+            RCLCPP_WARN(rclcpp::get_logger("NumberRoiCollector"),
+                "写入失败: %s", path.c_str());
+        }
+    }
+    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"),
+        "已保存 %lu 张 ROI 到 %s", collected_.size(), dir.c_str());
+    collected_.clear();
+}
+
+void NumberRoiCollector::show()
+{
+    if (collected_.empty()) return;
+    cv::Mat concat_img;
+    cv::hconcat(collected_, concat_img);
+    cv::imshow("Number ROIs", concat_img);
 }

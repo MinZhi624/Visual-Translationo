@@ -2,69 +2,50 @@
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
-#include "rclcpp/logging.hpp" 
-#include <opencv2/highgui.hpp>
-#include <opencv2/core/utils/filesystem.hpp>
 #include <algorithm>
 ////////////////////// Detector /////////////////////////
-void Detector::init()
+void Detector::reset()
 {
     find_lights_.clear();
     armors_.clear();
     color_rejected_rects_.clear();
     num_lights_ = 0;
 }
-bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour)
-{
-    // 检查轮廓点的个数 
-    if (contour.size() < 6) return false;
-    int area = cv::contourArea(contour);
-    // 检查面积
-    if (area <= MIN_CONTOURS_AREA) return false;
-    // 检查长宽比
-    cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
-    double long_length = std::max(min_rect.size.width, min_rect.size.height);
-    double short_length = std::min(min_rect.size.width, min_rect.size.height);
-    double ratio = short_length / long_length;
-    return ratio > MIN_CONTOURS_RATIO && ratio < MAX_CONTOURS_RATIO;
-}
 
 cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
 {
-    // 1. BLUE 通道低阈值初筛
+    // COLOR 阈值
     std::vector<cv::Mat> bgr;
     cv::split(img_bgr, bgr);
     cv::Mat color_ch = (TARGET_COLOR == "BLUE") ? bgr[0] : bgr[2];
-    cv::Mat blue_dim_thre;
-    cv::threshold(color_ch, blue_dim_thre, COLOR_THRESHOLD, 255, cv::THRESH_BINARY);
+    cv::Mat target_color_dim_thre;
+    cv::threshold(color_ch, target_color_dim_thre, COLOR_THRESHOLD, 255, cv::THRESH_BINARY);
 
-    // 2. GRAY 阈值
+    // GRAY 阈值
     cv::Mat gray;
     cv::cvtColor(img_bgr, gray, cv::COLOR_BGR2GRAY);
     cv::Mat gray_thre;
     cv::threshold(gray, gray_thre, GRAY_THRESHOLD, 255, cv::THRESH_BINARY);
 
-    // 3. 对每个 BLUE_dim 区域，检查 GRAY 碎片数，构建合并二值图
-    std::vector<std::vector<cv::Point>> blue_contours;
-    cv::findContours(blue_dim_thre, blue_contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    // 对每个 color_dim 区域，检查 GRAY 碎片数，构建合并二值图
+    std::vector<std::vector<cv::Point>> target_color_contours;
+    cv::findContours(target_color_dim_thre, target_color_contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     // 过滤面积太小或点数不足的 BLUE 区域
-    blue_contours.erase(
-        std::remove_if(blue_contours.begin(), blue_contours.end(),
+    target_color_contours.erase(
+        std::remove_if(target_color_contours.begin(), target_color_contours.end(),
             [this](const auto& c) { return c.size() < 6 || cv::contourArea(c) < MIN_CONTOURS_AREA; }),
-        blue_contours.end());
-    cv::Mat img_thre = cv::Mat::zeros(img_bgr.size(), CV_8UC1);
+        target_color_contours.end()
+    );
     std::vector<std::pair<cv::Rect, int>> fragment_info;
 
-    // 复用小 mask，避免循环内重复分配
+    // 以空白为底图，GRAY 碎片==1 用 GRAY，>=3 为噪音跳过，其余用 BLUE_dim
+    cv::Mat img_thre = cv::Mat::zeros(img_bgr.size(), CV_8UC1);
     cv::Mat roi_mask;
-
-    for (const auto& blue_contour : blue_contours) {
-        cv::Rect blue_bb = cv::boundingRect(blue_contour);
-        cv::Rect safe_bb = blue_bb & cv::Rect(0, 0, gray_thre.cols, gray_thre.rows);
-        if (safe_bb.area() < 10) continue;
+    for (const auto& target_color_contour : target_color_contours) {
+        cv::Rect color_bb = cv::boundingRect(target_color_contour);
+        cv::Rect safe_bb = color_bb & cv::Rect(0, 0, gray_thre.cols, gray_thre.rows);
         cv::Mat gray_roi = gray_thre(safe_bb);
 
-        // 在 GRAY 子图中找轮廓
         std::vector<std::vector<cv::Point>> gray_roi_contours;
         cv::findContours(gray_roi, gray_roi_contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
@@ -76,43 +57,40 @@ cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
         fragment_info.push_back({safe_bb, valid_count});
 
         if (valid_count == 1) {
-            // GRAY 正常 → 直接拷贝 ROI 像素
             gray_thre(safe_bb).copyTo(img_thre(safe_bb));
+        } else if (valid_count >= 3) {
+            // 噪音，跳过
         } else {
-            // GRAY 断裂(2+) 或丢失(0) → 用 BLUE_dim 的像素（小 mask 限定轮廓形状）
+            // 0 or 2：用 BLUE_dim 覆盖
             roi_mask = cv::Mat::zeros(safe_bb.size(), CV_8UC1);
-            // 轮廓点偏移到 ROI 坐标系
             std::vector<cv::Point> local_contour;
-            local_contour.reserve(blue_contour.size());
-            for (const auto& pt : blue_contour) {
+            local_contour.reserve(target_color_contour.size());
+            for (const auto& pt : target_color_contour) {
                 local_contour.push_back(pt - cv::Point(safe_bb.x, safe_bb.y));
             }
             cv::fillConvexPoly(roi_mask, local_contour, 255);
-            blue_dim_thre(safe_bb).copyTo(img_thre(safe_bb), roi_mask);
+            target_color_dim_thre(safe_bb).copyTo(img_thre(safe_bb), roi_mask);
         }
     }
-
-    // 4. 形态学处理合并后的二值图
+    // 闭运算
     cv::Mat kernal_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
     cv::Mat kernal_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
     cv::dilate(img_thre, img_thre, kernal_dilate);
     cv::erode(img_thre, img_thre, kernal_erode);
-
-    // 5. 填充调试图像数据
+    // 填充调试图像数据
     if (debug_out) {
-        debug_out->blue_dim_thre = blue_dim_thre.clone();
+        debug_out->blue_dim_thre = target_color_dim_thre.clone();
         debug_out->gray_thre = gray_thre.clone();
         debug_out->merged_thre = img_thre.clone();
         debug_out->fragment_info = fragment_info;
     }
-
     return img_thre;
 }
 
 void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr)
 {
     // 初始化（重置）参数
-    init();
+    reset();
     // 找到灯条然后拟合成直线
     std::vector<std::vector<cv::Point>> valued_contours = findLightsContours(img_thre, img_bgr);
     find_lights_ = findLightLines(valued_contours);
@@ -133,8 +111,7 @@ std::vector<std::vector<cv::Point>> Detector::findLightsContours(cv::Mat& img_th
 {
     std::vector<std::vector<cv::Point>> contours;
     std::vector<std::vector<cv::Point>> target_contours;
-    std::vector<cv::Vec4i> hierarchy;
-    cv::findContours(img_thre, contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_NONE);
+    cv::findContours(img_thre, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
     // 选出合法的轮廓 --1. 面积不能太小， --2. 长宽比不能太大
     for (const auto& contour : contours) {
         if (!checkLightGeometry(contour)) continue;
@@ -154,7 +131,6 @@ std::vector<Lights> Detector::findLightLines(std::vector<std::vector<cv::Point>>
     // 1. 用椭圆拟合得到准确的方向
     // 2. 用 minAreaRect 的边界限制端点，防止超出轮廓
     for (auto & contour : contours) {
-        if (contour.size() < 5) continue;  // 椭圆拟合至少需要 5 个点
         // 1. 椭圆拟合提供准确方向
         cv::RotatedRect ellipse_rect = cv::fitEllipse(contour);
         // 2. minAreaRect 提供边长边界约束
@@ -193,37 +169,22 @@ std::vector<Lights> Detector::findLightLines(std::vector<std::vector<cv::Point>>
     }
     return lights_list;
 }
-
-bool Detector::TargetColorDectect(const cv::Mat& img_bgr,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
+////////// ===== CHECK 函数 ===== /////////
+bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour)
 {
-    cv::Rect bbox = rect.boundingRect();
-    // 裁剪到图像边界内，防止 ROI 越界崩溃
-    bbox &= cv::Rect(0, 0, img_bgr.cols, img_bgr.rows);
-    if (bbox.empty()) return false;
-
-    // 1. 生成轮廓 mask（只统计轮廓内部像素，且腐蚀后只看中心，避开光晕边缘）
-    // 这样避免双重循环然后得到目标内容
-    cv::Mat mask = cv::Mat::zeros(bbox.size(), CV_8UC1);
-    std::vector<cv::Point> local_contour;
-    local_contour.reserve(contour.size());
-    for (const auto& pt : contour) {
-        local_contour.emplace_back(pt - cv::Point(bbox.x, bbox.y));
-    }
-    cv::drawContours(mask, std::vector<std::vector<cv::Point>>{local_contour}, -1, 255, -1);
-    cv::erode(mask, mask, cv::Mat());
-    // 2. 提取 ROI 并分离 B/R 通道，用 mask 求平均
-    cv::Mat roi = img_bgr(bbox);
-    std::vector<cv::Mat> bgr;
-    cv::split(roi, bgr);
-    double mean_b = cv::mean(bgr[0], mask)[0];
-    double mean_r = cv::mean(bgr[2], mask)[0];
-    // 3. 比例判断，对光照变化更鲁棒 --> 避免杂光(白)
-    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.1;
-    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.1;
-    return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
+    // 检查轮廓点的个数 
+    if (contour.size() <= 6) return false;
+    int area = cv::contourArea(contour);
+    // 检查面积
+    if (area <= MIN_CONTOURS_AREA) return false;
+    // 检查长宽比
+    cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+    double long_length = std::max(min_rect.size.width, min_rect.size.height);
+    double short_length = std::min(min_rect.size.width, min_rect.size.height);
+    double ratio = short_length / long_length;
+    return ratio > MIN_CONTOURS_RATIO && ratio < MAX_CONTOURS_RATIO;
 }
-
-bool Detector::checkPairLights(const Lights& light_left, const Lights& light_right) {
+bool Detector::checkArmorGeometry(const Lights& light_left, const Lights& light_right) {
     //判断逻辑 
     float diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
     diff = std::min(diff, 180 - diff);
@@ -250,6 +211,34 @@ bool Detector::checkPairLights(const Lights& light_left, const Lights& light_rig
     )  return false;
     // 全部检测通过
     return true;
+}
+bool Detector::TargetColorDectect(const cv::Mat& img_bgr,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour)
+{
+    cv::Rect bbox = rect.boundingRect();
+    // 裁剪到图像边界内，防止 ROI 越界崩溃
+    bbox &= cv::Rect(0, 0, img_bgr.cols, img_bgr.rows);
+    if (bbox.empty()) return false;
+
+    // 生成轮廓 mask
+    cv::Mat mask = cv::Mat::zeros(bbox.size(), CV_8UC1);
+    std::vector<cv::Point> local_contour;
+    local_contour.reserve(contour.size());
+    for (const auto& pt : contour) {
+        local_contour.push_back(pt - cv::Point(bbox.x, bbox.y));
+    }
+    cv::drawContours(mask, std::vector<std::vector<cv::Point>>{local_contour}, -1, 255, -1);
+    // 去除光晕
+    cv::erode(mask, mask, cv::Mat());
+    // 提取 ROI 并分离 B/R 通道，用 mask 求平均
+    cv::Mat roi = img_bgr(bbox);
+    std::vector<cv::Mat> bgr;
+    cv::split(roi, bgr);
+    double mean_b = cv::mean(bgr[0], mask)[0];
+    double mean_r = cv::mean(bgr[2], mask)[0];
+    // 比例判断，对光照变化更鲁棒 --> 避免杂光(白)
+    bool is_red  = (mean_r / (mean_b + 1.0)) > 1.1;
+    bool is_blue = (mean_b / (mean_r + 1.0)) > 1.1;
+    return (is_red && TARGET_COLOR == "RED") || (is_blue && TARGET_COLOR == "BLUE");
 }
 float Detector::computePairScore(const Lights& light_left, const Lights& light_right) {
     // 1. 平行度：角度差越小越好
@@ -288,7 +277,7 @@ std::vector<Armor> Detector::matchLights(std::vector<Lights>& all_lights)
     std::vector<Candidate> candidates;
     for (size_t i = 0; i < all_lights.size(); i++) {
         for (size_t j = i + 1; j < all_lights.size(); j++) {
-            if (checkPairLights(all_lights[i], all_lights[j])) {
+            if (checkArmorGeometry(all_lights[i], all_lights[j])) {
                 float score = computePairScore(all_lights[i], all_lights[j]);
                 candidates.push_back({{all_lights[i], all_lights[j]}, static_cast<int>(i), static_cast<int>(j), score});
             }
@@ -313,7 +302,7 @@ std::vector<Armor> Detector::matchLights(std::vector<Lights>& all_lights)
     }
     return armors;
 }
-
+////////// ===== 绘制函数 ===== /////////
 void Detector::drawArmors(cv::Mat& img)
 {
     for (const auto& armor : armors_) {
@@ -324,20 +313,14 @@ void Detector::drawArmors(cv::Mat& img)
 }
 void Detector::drawAllLights(cv::Mat& img)
 {
-    for (const auto& light : find_lights_) {
-        drawRotatedRect(img, light.rect_);
-        cv::putText(img, "top", light.top_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
-        cv::putText(img, "bottom", light.bottom_, cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 0, 255));
-    }
+    for (const auto& light : find_lights_) drawRotatedRect(img, light.rect_); // 默认是蓝色
 }
 
 void Detector::drawColorRejected(cv::Mat& img)
 {
-    for (const auto& rect : color_rejected_rects_) {
-        drawRotatedRect(img, rect, cv::Scalar(0, 255, 255), 2);  // 黄色
-    }
+    for (const auto& rect : color_rejected_rects_) drawRotatedRect(img, rect, cv::Scalar(0, 255, 255), 2);  // 黄色
 }
-
+////////// ===== 数字识别 ===== /////////
 cv::Mat Detector::getNumberROI(const cv::Mat& img_bgr, const Armor& armor)
 {
     // 保证是有内容的装甲板
@@ -348,59 +331,20 @@ cv::Mat Detector::getNumberROI(const cv::Mat& img_bgr, const Armor& armor)
     cv::warpPerspective(img_bgr, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
     // 数字部分ROI
     number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
-    number_origin_rois_.push_back(number_roi.clone());
-    // 预处理：灰度化 + 二值化
+    // 预处理：灰度化
     cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
     return number_roi;
 }
-void Detector::saveNumberRoi()
-{
-    static int outputPictureCounts = 0;
-    for(const auto& armor : armors_) {
-        if (outputPictureCounts < 20 && is_star_save_) {
-        // 确保输出目录存在
-            if (!cv::utils::fs::createDirectories(outputPath_)) {
-                RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
-                    "Failed to create directory: %s", outputPath_.c_str());
-            }
-            std::string file_name = outputPath_ + "/roi_" + std::to_string(++outputPictureCounts_) + ".png";
-            if (!cv::imwrite(file_name, armor.number_roi_.clone())) {
-                RCLCPP_WARN_ONCE(rclcpp::get_logger("Detector"),
-                    "Failed to write image: %s", file_name.c_str());
-            }
-            RCLCPP_INFO(rclcpp::get_logger("Detector"), "保存成功");
-        }
-        if (outputPictureCounts >= 20 && is_star_save_) {
-            outputPictureCounts = 0;
-            is_star_save_ = false;
-            RCLCPP_INFO(rclcpp::get_logger("Detector"), "阶段性保存结束");
-        }
-    }
-}
 
-void Detector::showNumberROI()
+std::vector<cv::Mat> Detector::getNumberRois()
 {
-    if(number_origin_rois_.empty()) return;
-    // 简单拼接显示所有号码ROI
-    cv::Mat concat_img;
-    cv::hconcat(number_origin_rois_, concat_img);
-    cv::imshow("Number Origin ROIs", concat_img);
-    // 清除数据，避免重复显示
-    number_origin_rois_.clear();
-}
-
-void Detector::showNumberBinaryROI()
-{
-    if (armors_.empty()) return;
-    std::vector<cv::Mat> valid_rois;
+    std::vector<cv::Mat> rois;
     for (const auto& armor : armors_) {
         if (!armor.number_roi_.empty()) {
-            valid_rois.push_back(armor.number_roi_);
+            rois.push_back(armor.number_roi_.clone());
         }
     }
-    cv::Mat concat_img;
-    cv::hconcat(valid_rois, concat_img);
-    cv::imshow("Number ROIs", concat_img);
+    return rois;
 }
 
 /////////////////// 工具函数 //////////////////////////

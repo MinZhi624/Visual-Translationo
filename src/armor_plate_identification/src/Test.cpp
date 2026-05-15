@@ -28,7 +28,6 @@ using armor_plate_interfaces::msg::TrackerDebug;
 class Test : public rclcpp::Node
 {
 private:
-    std::vector<Armor> armors_;
     // 视频相关
     cv::VideoCapture c_;
     cv::Mat img_show_;
@@ -37,6 +36,7 @@ private:
     Detector lights_;
     // PoseSolver结果
     PoseSolver pose_solver_;
+    std::vector<Armor> armors_;
     std::vector<ArmorPlate> armor_plates_;
     // 数字识别相关
     NumberClassifier number_classifier_;
@@ -63,6 +63,7 @@ private:
     bool debug_frame_;
     int debug_frame_count_;
     DebugParamController debug_controller_;
+    NumberRoiCollector roi_collector_;
     PreprocessDebug preprocess_debug_;
     // 预处理阈值（已移至 Detector 类）
     // 无头模式
@@ -72,6 +73,8 @@ private:
     std::mutex tracker_debug_mutex_;
     std::deque<ImageSave> img_buffs_;
     std::string test_name_;  // 从视频文件名提取，用于 debug 目录
+    
+    // 初始化
     void init(const std::string& video_path)
     {
         // ===== 相机初始化 ==== //
@@ -157,6 +160,8 @@ private:
         if (debug_frame_) RCLCPP_INFO(this->get_logger(), "帧调试模式开启，将在第 %d 帧结束", debug_frame_count_);
         if (headless_) RCLCPP_INFO(this->get_logger(), "无头模式：跳过所有 GUI 窗口");
     }
+    
+    // 间隔打印消息
     void info()
     {
         // 计时器 1s发布一次信息
@@ -180,9 +185,16 @@ private:
         lights_.detectArmors(img_thre, img_bgr);
         lights_.drawArmors(img_show_);
         armors_ = lights_.getArmors();
-
+        
+        // 收集 ROI
+        if (debug_number_classification_) {
+            roi_collector_.feed(lights_.getNumberRois());
+            if (roi_collector_.isDone()) {
+                static int batch = 0;
+                roi_collector_.save("./Debug/NumberROI/temp/batch_" + std::to_string(++batch));
+            }
+        }
         auto t_id3 = std::chrono::steady_clock::now();
-
         // 细分耗时累计
         id_split_sum_ += std::chrono::duration<double, std::milli>(t_id2 - t_id0).count();
         id_detect_sum_ += std::chrono::duration<double, std::milli>(t_id3 - t_id2).count();
@@ -211,8 +223,7 @@ private:
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
         if (debug_number_classification_) {
-            lights_.showNumberBinaryROI();
-            lights_.showNumberROI();
+            roi_collector_.show();
         }
     }
     void SolvePose()
@@ -241,18 +252,15 @@ private:
         }
         armor_plates_ = armor_plates;
     }
+
+    // 数字识别
     void NumberClassify()
     {
         number_classifier_.classify(armors_);
-        // 保存数据
-        for (size_t i = 0; i < armors_.size() && i < armor_plates_.size(); i++) {
-            armor_plates_[i].number = armors_[i].number_;
-        }
         ////////// DEBUG /////////
         if (debug_number_classification_ && !headless_) {
             drawAllNumberTest(img_show_, armors_);
         }
-        
     }
     void Publish()
     {
@@ -287,7 +295,7 @@ private:
             return;
         }
         if (key == 's' || key == 'S') {
-            lights_.setSave(true);
+            roi_collector_.startCollect(10);
         }
 
         if (debug_base_) {
@@ -296,6 +304,8 @@ private:
             }
         }
     }
+
+    // 图像展示
     void imageShow()
     {
         // 绘制处理用时
@@ -308,12 +318,10 @@ private:
         cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
         cv::imshow("Identifacation", img_show_);
     }
+
+    // 保存
     void Save()
     {
-        ////////// DEBUG ///////////
-        if(debug_number_classification_) {
-            lights_.saveNumberRoi();
-        }
         {
             std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
             double time_sec = static_cast<double>(frame_count_) / fps_;
@@ -324,6 +332,8 @@ private:
             if (img_buffs_.size() > 10) img_buffs_.pop_front();
         }
     }
+
+    // TrackerDebug 回调函数
     void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     {
         std::deque<ImageSave> images_buffs;
@@ -370,20 +380,7 @@ private:
         }
 
         // 输出 TrackerDebug 数据
-        // RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"),
-        //     "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-        //     "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-        //     "yaw:%.4f->%.4f "
-        //     "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
-        //     "%s solve:%d %.1fms",
-        //     msg->target_point.x, msg->target_point.y, msg->target_point.z,
-        //     msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z,
-        //     msg->target_point_world.x, msg->target_point_world.y, msg->target_point_world.z,
-        //     msg->filtered_point_world.x, msg->filtered_point_world.y, msg->filtered_point_world.z,
-        //     msg->raw_yaw, msg->filter_yaw,
-        //     msg->center_x, msg->center_y, msg->center_r,
-        //     msg->center_v_x, msg->center_v_y,
-        //     msg->method.c_str(), msg->solve_ok, msg->time_cost);
+        infoTrackerDebugMsg(rclcpp::get_logger("TRACKER_DEBUG"), *msg);
 
         std::string method = msg->method;
         if (method.empty()) method = "unknown";
@@ -410,8 +407,8 @@ public:
             auto t0 = std::chrono::steady_clock::now();
             Identification(frame);
             auto t1 = std::chrono::steady_clock::now();
-            SolvePose();
             NumberClassify();
+            SolvePose();
             Publish();
             Save();
 
@@ -446,12 +443,14 @@ public:
             if (debug_frame_ && frame_count_ >= debug_frame_count_) {
                 closeTrackerDebugFile();
                 RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_frame_count_);
+                cv::destroyAllWindows();
                 rclcpp::shutdown();
                 return;
             }
         }
         closeTrackerDebugFile();
         RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
+        cv::destroyAllWindows();
         rclcpp::shutdown();
     }
     

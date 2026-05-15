@@ -19,13 +19,17 @@ test_node_cpp:
     ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
-    debug_preprocessing: false
-    debug_identification: false
-    debug_number_classification: false
+    debug_preprocessing: true
+    debug_identification: true
+    debug_number_classification: true
     # 正常
-    debug_frame: false
-    debug_frame_count: 100
-    delay_time: 20
+    # debug_frame: false
+    # debug_frame_count: 0
+    # delay_time: 20
+    # 数字记录
+    debug_frame: true
+    debug_frame_count: 600
+    delay_time: 0
 
 armor_plate_identification_node:
   ros__parameters:
