@@ -10,7 +10,8 @@ PoseSolver::PoseSolver()
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(),
       rvec_(),
-      tvec_()
+      tvec_(),
+      image_distance_to_center_()
 {
 }
 
@@ -24,7 +25,8 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(camera_matrix_ * rectification_matrix_),
       rvec_(),
-      tvec_()
+      tvec_(),
+      image_distance_to_center_()
 {
 }
 
@@ -39,7 +41,8 @@ PoseSolver::PoseSolver(std::vector<cv::Point3f> world_points,
       rectification_matrix_(cv::Mat::eye(3, 3, CV_64F)),
       projection_matrix_(std::move(projection_matrix)),
       rvec_(),
-      tvec_()
+      tvec_(),
+      image_distance_to_center_()
 {
 }
 void PoseSolver::solve(const std::vector<cv::Point2f>& camera_points)
@@ -53,7 +56,7 @@ void PoseSolver::solve(const std::vector<cv::Point2f>& camera_points)
 	cv::Point2f target_center_point = (camera_points[0] + camera_points[1] + camera_points[2] + camera_points[3])  / 4;
 	image_distance_to_center_ = calculateImageDistanceToCenter(target_center_point);
 }
-float PoseSolver::calculateImageDistanceToCenter(cv::Point2f target_center_point)
+float PoseSolver::calculateImageDistanceToCenter(const cv::Point2f & target_center_point)
 {
 	// 计算图像中心到目标中心的距离，通过相机内参来求
 	double cx = camera_matrix_.at<double>(0, 2);
@@ -61,7 +64,7 @@ float PoseSolver::calculateImageDistanceToCenter(cv::Point2f target_center_point
 	cv::Point2f image_center_point(cx, cy);
 	return cv::norm(image_center_point - target_center_point);
 }
-cv::Point2f PoseSolver::project(cv::Point3f point_cam) const
+cv::Point2f PoseSolver::project(const cv::Point3f & point_cam) const
 {
     if (point_cam.z <= 1e-6f) {
         return cv::Point2f(-1.0f, -1.0f);

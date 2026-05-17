@@ -16,7 +16,7 @@ from PIL import Image, ImageFilter
 import cv2
 
 # ==================== 配置 ====================
-DATA_DIR = "/home/minzhi/ws05_fourth_assessment/picture/Learning"
+DATA_DIR = "/home/minzhi/ws05_fourth_assessment/DeepLearning/Learning"
 SAVE_DIR = "/home/minzhi/ws05_fourth_assessment/DeepLearning"
 EPOCHS = 80
 BATCH_SIZE = 32

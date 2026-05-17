@@ -334,7 +334,7 @@ private:
     }
 
     // TrackerDebug 回调函数
-    void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
+    void TrackerDebugCallBack(const TrackerDebug::SharedPtr & msg)
     {
         std::deque<ImageSave> images_buffs;
         {

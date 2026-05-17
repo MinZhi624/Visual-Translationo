@@ -22,13 +22,13 @@ NumberClassifier::NumberClassifier(
     }
 }
 
-bool NumberClassifier::checkClassify(const Armor& armor)
-{
-    if (armor.confidence_ < threshold_) return false;
-    for (const auto& ignore_class : ignore_classes_) {
-        if (armor.number_ == ignore_class) return false;
-    }
-    return true;
+bool NumberClassifier::checkClassify(const Armor &armor) {
+    if (armor.confidence_ < threshold_)
+        return false;
+    return std::none_of(ignore_classes_.begin(), ignore_classes_.end(),
+                        [&](const auto &ignore_class) {
+                            return armor.number_ == ignore_class;
+                        });
 }
 
 void NumberClassifier::classify(std::vector<Armor>& armors)

@@ -49,7 +49,7 @@ public:
 	 * @param point_cam 相机坐标系三维点
 	 * @return 像素坐标（Z<=0时返回(-1,-1)）
 	 */
-	cv::Point2f project(cv::Point3f point_cam) const;
+	cv::Point2f project(const cv::Point3f &) const;
 
 	/**
 	 * @brief 对输入图像进行去畸变
@@ -63,7 +63,7 @@ public:
 	 * @param target_center_point 图像中目标中心点坐标
 	 * @return 距离（像素）
 	 */
-	float calculateImageDistanceToCenter(cv::Point2f target_center_point);
+	float calculateImageDistanceToCenter(const cv::Point2f & target_center_point);
 
 	cv::Mat getTvec() const { return tvec_; };
 	cv::Mat getRvec() const { return rvec_; };
