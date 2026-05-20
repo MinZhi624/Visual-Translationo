@@ -19,8 +19,8 @@ test_node_cpp:
     ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
-    debug_preprocessing: true
-    debug_identification: true
+    debug_preprocessing: false
+    debug_identification: false
     debug_number_classification: true
     # 正常
     # debug_frame: false

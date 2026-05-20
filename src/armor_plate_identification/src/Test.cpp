@@ -105,7 +105,7 @@ private:
         lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
         lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
-        lights_.TARGET_COLOR = target_color_;
+        lights_.target_color_ = stringToColor(target_color_);
         lights_.GRAY_THRESHOLD = this->declare_parameter<int>("threshold_value", 160);
         lights_.COLOR_THRESHOLD = this->declare_parameter<int>("color_threshold", 100);
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),  std::bind(&Test::info, this));
@@ -219,7 +219,6 @@ private:
         if (debug_identification_) {
             debug_controller_.drawParams(img_show_, lights_);
             lights_.drawAllLights(img_show_);
-            lights_.drawColorRejected(img_show_);
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
         if (debug_number_classification_) {
@@ -334,7 +333,7 @@ private:
     }
 
     // TrackerDebug 回调函数
-    void TrackerDebugCallBack(const TrackerDebug::SharedPtr & msg)
+    void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     {
         std::deque<ImageSave> images_buffs;
         {

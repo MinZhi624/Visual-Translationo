@@ -10,6 +10,7 @@ endif()
 # ======================
 set(  ArmorPlateIdentifcation
   src/ArmorPlateIdentifcation.cpp
+  src/Armor.cpp
   src/CameraDriver.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
@@ -18,6 +19,7 @@ set(  ArmorPlateIdentifcation
 )
 set( Test
   src/Test.cpp
+  src/Armor.cpp
   src/DebugIdentifaction.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
