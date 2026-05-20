@@ -15,10 +15,10 @@ def generate_launch_description():
 
     video_path_arg = DeclareLaunchArgument(
         name="video_path",
-        # default_value= video_default_path 
+        default_value= video_default_path 
         # default_value = video_blue_fast
         # default_value = video_blue_fast_rotated_and_move
-        default_value = video_blue_slow
+        # default_value = video_blue_slow
     )
 
     params_file = os.path.join(

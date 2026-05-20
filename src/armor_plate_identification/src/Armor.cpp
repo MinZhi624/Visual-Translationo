@@ -64,7 +64,7 @@ Color Light::getLightColor(const cv::Mat& img_bgr, const cv::RotatedRect& rect, 
 
 ////////////////////// Armor /////////////////////////
 
-Armor::Armor(Light& light_left, Light& light_right, float max_angle_diff, float max_y_diff_ratio)
+Armor::Armor(Light& light_left, Light& light_right)
 {
     paired_lights_ = {light_left, light_right};
     points_ = {light_left.top_, light_right.top_, light_right.bottom_, light_left.bottom_};
@@ -92,18 +92,5 @@ Armor::Armor(Light& light_left, Light& light_right, float max_angle_diff, float 
     double dist_ratio = distance / men_length;
     distance_ratio_ = men_length / distance;
     // ===== 计算装甲板类型 ===== //
-    // 大装甲板 235×127mm → dist_ratio ≈ 3.3
-    // 小装甲板 140×125mm → dist_ratio ≈ 2.0
     type_ = (dist_ratio > DIST_RATIO_THRESH) ? ArmorType::LARGE : ArmorType::SMALL;
-    // ===== Score  ===== //
-    // 1. 平行度：角度差越小越好
-    float angle_score = 1.0f - std::min(static_cast<float>(diff) / max_angle_diff, 1.0f);
-    // 2. 长度比：越接近1越好（放在后面）
-    // 3. 中心距/灯条长度比：按装甲板类型选择目标值
-    float dist_target = (type_ == ArmorType::LARGE) ? DIST_RATIO_LARGE : DIST_RATIO_SMALL;
-    float dist_score = 1.0f - std::min(std::abs(static_cast<float>(dist_ratio) - dist_target), 1.0f);
-    // 4. y差比：沿灯条方向的偏移越小越好
-    float y_score = 1.0f - std::min(static_cast<float>(y_diff_ratio_) / max_y_diff_ratio, 1.0f);
-
-    score_ = angle_score + static_cast<float>(length_ratio_) + dist_score + y_score;
 }

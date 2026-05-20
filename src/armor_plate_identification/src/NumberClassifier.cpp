@@ -2,77 +2,57 @@
 
 #include <opencv2/dnn/dnn.hpp>
 #include <opencv2/imgproc.hpp>
-
-#include <fstream>
+#include "armor_plate_identification/Armor.hpp"
 
 NumberClassifier::NumberClassifier(
-    const std::string& model_path,
-    const std::string& label_path,
-    double threshold,
-    const std::vector<std::string>& ignore_classes
-) : ignore_classes_(ignore_classes), threshold_(threshold)
+    const std::string& config_path,
+    float threshold
+) : config_path_(config_path), threshold_(threshold)
 {
-    // 加载模型
-    net_ = cv::dnn::readNetFromONNX(model_path);
-    // 加载标签
-    std::ifstream label_file(label_path);
-    std::string line;
-    while(std::getline(label_file, line)) {
-        class_names_.push_back(line);
+    net_ = cv::dnn::readNetFromONNX(config_path + "/model/number_cnn.onnx");
+}
+
+bool NumberClassifier::checkArmorName(const Armor& armor) const
+{
+    // 检查数字是否合法
+    return armor.name_ != ArmorName::NONE;
+    // 检查置信度是否足够高
+    return armor.confidence_ > threshold_;
+}
+
+bool NumberClassifier::checkArmorType(const Armor& armor)
+{
+    // 检查数字是否对应装甲板
+    if (armor.type_ == ArmorType::LARGE) {
+        // 大装甲板只有 一 这个数字
+        return armor.name_ == ArmorName::ONE;
+    } else {
+        // 小装甲板除了1
+        return armor.name_ != ArmorName::ONE;
     }
 }
 
-bool NumberClassifier::checkClassify(const Armor &armor) {
-    if (armor.confidence_ < threshold_)
-        return false;
-    return std::none_of(ignore_classes_.begin(), ignore_classes_.end(),
-                        [&](const auto &ignore_class) {
-                            return armor.number_ == ignore_class;
-                        });
-}
-
-void NumberClassifier::classify(std::vector<Armor>& armors)
+void NumberClassifier::classify(Armor& armor)
 {
-    // 推理
-    for (auto& armor : armors) {
-        if(armor.number_roi_.empty()) {
-            armor.confidence_ = 0.0;
-            continue;
-        }
-        cv::Mat image = armor.number_roi_;
-        cv::Mat blob;
-        cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(20, 28), 0, false, false);
-        net_.setInput(blob);
-        cv::Mat outputs = net_.forward();
-        float max_prob = *std::max_element(outputs.begin<float>(), outputs.end<float>());
-        cv::Mat softmax_prob;
-        cv::exp(outputs - max_prob, softmax_prob);
-        float sum = static_cast<float>(cv::sum(softmax_prob)[0]);
-        softmax_prob /= sum;
-        double confidence;
-        cv::Point class_id_point;
-        cv::minMaxLoc(softmax_prob.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
-        int label_id = class_id_point.x;
-        armor.confidence_ = confidence;
-        armor.number_ = class_names_[label_id];
+    if (armor.number_roi_.empty()) {
+        armor.confidence_ = 0.0;
+        armor.name_ = ArmorName::NONE;
+        return;
     }
-    // 过滤
-    armors.erase(std::remove_if(armors.begin(), armors.end(),
-        [this](const Armor& armor) { return !checkClassify(armor); }
-    ), armors.end());
-}
-
-void drawNumberTest(cv::Mat& img, const Armor& armor)
-{
-    if (armor.number_.empty()) return;
-    // 在上边上面画出号码和置信度
-    std::string text = armor.number_ + " (" + std::to_string(static_cast<int>(armor.confidence_ * 100)) + "%)";
-    cv::putText(img, text, (armor.points_[0] + armor.points_[1]) / 2, cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2);
-}
-
-void drawAllNumberTest(cv::Mat& img, const std::vector<Armor>& armors)
-{
-    for (const auto& armor : armors) {
-        drawNumberTest(img, armor);
-    }
+    cv::Mat image = armor.number_roi_;
+    cv::Mat blob;
+    cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(20, 28), 0, false, false);
+    net_.setInput(blob);
+    cv::Mat outputs = net_.forward();
+    float max_prob = *std::max_element(outputs.begin<float>(), outputs.end<float>());
+    cv::Mat softmax_prob;
+    cv::exp(outputs - max_prob, softmax_prob);
+    float sum = static_cast<float>(cv::sum(softmax_prob)[0]);
+    softmax_prob /= sum;
+    double confidence;
+    cv::Point class_id_point;
+    cv::minMaxLoc(softmax_prob.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
+    int label_id = class_id_point.x;
+    armor.confidence_ = static_cast<float>(confidence);
+    armor.name_ = intToArmorName(label_id);
 }

@@ -3,7 +3,13 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
+#include "armor_plate_identification/NumberClassifier.hpp"
 ////////////////////// Detector /////////////////////////
+Detector::Detector(const std::string& model_path, float threshold)
+    : classifier_(model_path, threshold)
+{
+}
+
 void Detector::reset()
 {
     find_lights_.clear();
@@ -11,7 +17,7 @@ void Detector::reset()
     num_lights_ = 0;
 }
 
-cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
+cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out) const
 {
     // COLOR 阈值
     std::vector<cv::Mat> bgr;
@@ -97,7 +103,7 @@ void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr)
         return a.center_.x < b.center_.x;
     });
     // 匹配灯条
-    armors_ = matchLights(find_lights_);
+    armors_ = matchLights(find_lights_, img_bgr);
     // 得到装甲板的号码ROI
     for (auto& armor : armors_) {
         armor.number_roi_ = getNumberROI(img_bgr, armor);
@@ -151,34 +157,56 @@ bool Detector::checkLightColor(const Light& light_left, const Light& light_right
 {
     return light_left.color_ == light_right.color_ && light_left.color_ == target_color_;
 }
-std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights)
+std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr)
 {
     std::vector<Armor> candidates;
     for (size_t i = 0; i < all_lights.size(); i++) {
         for (size_t j = i + 1; j < all_lights.size(); j++) {
             if (!checkLightColor(all_lights[i], all_lights[j])) continue;
-            Armor armor(all_lights[i], all_lights[j], MAX_ANGLE_DIFF, MAX_Y_DIFF_RATIO);
+            Armor armor(all_lights[i], all_lights[j]);
+            // 几何判断
             if (!checkArmorGeometry(armor)) continue;
+            // 数字判读
+            armor.number_roi_ = getNumberROI(img_bgr, armor);
+            armor.pattern_ = getNumberROI_AABB(img_bgr, armor);
+            classifier_.classify(armor);
+            if(!classifier_.checkArmorName(armor)) continue;
+            if(!NumberClassifier::checkArmorType(armor)) continue;;
             candidates.push_back(armor);
         }
     }
-    // 按 score 降序排序
-    std::sort(candidates.begin(), candidates.end(), [](const Armor& a, const Armor& b) {
-        return a.score_ > b.score_;
-    });
-    // NMS 去重：一个灯条只能属于一个装甲板
-    std::vector<Armor> armors;
-    std::vector<bool> used(all_lights.size(), false);
-    for (const auto& armor : candidates) {
-        int id0 = armor.paired_lights_[0].id_;
-        int id1 = armor.paired_lights_[1].id_;
-        if (!used[id0] && !used[id1]) {
-            armors.push_back(armor);
-            used[id0] = true;
-            used[id1] = true;
+    
+    // 去重：共享灯条的装甲板只保留最优解
+    std::vector<bool> removed(candidates.size(), false);
+    for (size_t i = 0; i < candidates.size(); i++) {
+        if (removed[i]) continue;
+        for (size_t j = i + 1; j < candidates.size(); j++) {
+            if (removed[j]) continue;
+            int li = candidates[i].paired_lights_[0].id_;
+            int ri = candidates[i].paired_lights_[1].id_;
+            int lj = candidates[j].paired_lights_[0].id_;
+            int rj = candidates[j].paired_lights_[1].id_;
+            // 没有共用灯条，跳过
+            if (li != lj && li != rj && ri != lj && ri != rj) continue;
+            // 共用同一侧灯条：保留 ROI 面积小的（匹配更精确）
+            if (li == lj || ri == rj) {
+                int area_i = candidates[i].number_roi_.cols * candidates[i].number_roi_.rows;
+                int area_j = candidates[j].number_roi_.cols * candidates[j].number_roi_.rows;
+                if (area_i <= area_j) removed[j] = true;
+                else removed[i] = true;
+            }
+            // 共用相邻侧灯条：保留置信度高的
+            else {
+                if (candidates[i].confidence_ >= candidates[j].confidence_) removed[j] = true;
+                else removed[i] = true;
+            }
         }
     }
-    return armors;
+    std::vector<Armor> result;
+    for (size_t i = 0; i < candidates.size(); i++) {
+        if (!removed[i]) result.push_back(candidates[i]);
+    }
+    return result;
 }
 ////////// ===== 绘制函数 ===== /////////
 void Detector::drawArmors(cv::Mat& img)
@@ -207,6 +235,33 @@ cv::Mat Detector::getNumberROI(const cv::Mat& img_bgr, const Armor& armor)
     // 预处理：灰度化
     cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
     return number_roi;
+}
+
+cv::Mat Detector::getNumberROI_AABB(const cv::Mat& img_bgr, const Armor& armor) const
+{
+    if (armor.paired_lights_.size() != 2) return cv::Mat();
+    const auto& left = armor.paired_lights_[0];
+    const auto& right = armor.paired_lights_[1];
+
+    // top2bottom vector = bottom_ - top_
+    cv::Point2f left_tb = left.bottom_ - left.top_;
+    cv::Point2f right_tb = right.bottom_ - right.top_;
+
+    // Extend by 1.125x to get full armor corners
+    // 1.125 = 0.5 * armor_height / lightbar_length = 0.5 * 126mm / 56mm
+    cv::Point2f tl = left.center_ - left_tb * 1.125f;
+    cv::Point2f bl = left.center_ + left_tb * 1.125f;
+    cv::Point2f tr = right.center_ - right_tb * 1.125f;
+    cv::Point2f br = right.center_ + right_tb * 1.125f;
+
+    // AABB clamp to image bounds
+    int roi_left = std::max(static_cast<int>(std::min(tl.x, bl.x)), 0);
+    int roi_top = std::max(static_cast<int>(std::min(tl.y, tr.y)), 0);
+    int roi_right = std::min(static_cast<int>(std::max(tr.x, br.x)), img_bgr.cols);
+    int roi_bottom = std::min(static_cast<int>(std::max(bl.y, br.y)), img_bgr.rows);
+
+    if (roi_right <= roi_left || roi_bottom <= roi_top) return cv::Mat();
+    return img_bgr(cv::Rect(roi_left, roi_top, roi_right - roi_left, roi_bottom - roi_top)).clone();
 }
 
 std::vector<cv::Mat> Detector::getNumberRois()

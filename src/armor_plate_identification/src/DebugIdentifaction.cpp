@@ -56,6 +56,22 @@ void showMultiImages(const std::string& window_name,
     cv::imshow(window_name, canvas);
 }
 
+void drawNumberTest(cv::Mat& img, const Armor& armor)
+{
+    if (armor.name_ == ArmorName::NONE) return;
+    std::string text = armorNameToString(armor.name_)
+                     + " (" + std::to_string(static_cast<int>(armor.confidence_ * 100)) + "%)";
+    cv::putText(img, text, (armor.points_[0] + armor.points_[1]) / 2,
+                cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2);
+}
+
+void drawAllNumberTest(cv::Mat& img, const std::vector<Armor>& armors)
+{
+    for (const auto& armor : armors) {
+        drawNumberTest(img, armor);
+    }
+}
+
 /////////////////// DebugParamController //////////////////////////
 
 DebugParamController::DebugParamController()

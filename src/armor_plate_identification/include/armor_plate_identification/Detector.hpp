@@ -1,5 +1,6 @@
 #pragma once
 #include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/NumberClassifier.hpp"
 #include <opencv2/core.hpp>
 #include <vector>
 
@@ -16,6 +17,7 @@ class Detector
 private:
 	std::vector<Light> find_lights_;
 	std::vector<Armor> armors_;
+	NumberClassifier classifier_;
 	// 数字图像提取数据
 	static constexpr int WARP_HEIGHT = 28;
 	static constexpr int WARP_WIDTH = 32;
@@ -26,9 +28,9 @@ private:
 	static constexpr int MIN_CONTOURS_AREA = 30;
 	static constexpr float MIN_CONTOURS_RATIO = 0.06f;
 	static constexpr float MAX_CONTOURS_RATIO = 0.5;
-	const cv::Size ROI_SIZE = cv::Size(20, 28);
+	cv::Size ROI_SIZE = cv::Size(20, 28);
 	// 四个点安装顺时针的顺序，从左上角开始
-	const std::vector<cv::Point2f> NUMBER_TARGET_POINTS = {
+	std::vector<cv::Point2f> NUMBER_TARGET_POINTS = {
 		cv::Point2f(0, TOP_LIGHT_Y),
 		cv::Point2f(WARP_WIDTH - 1, TOP_LIGHT_Y),
 		cv::Point2f(WARP_WIDTH - 1, BOTTOM_LIGHT_Y),
@@ -43,12 +45,14 @@ private:
 	bool checkLightColor(const Light& light_left, const Light& light_right) const;
 	bool checkArmorGeometry(const Armor& armor) const;
 	
-	std::vector<Armor> matchLights(std::vector<Light>& all_lights);
+	std::vector<Armor> matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr);
 
 	cv::Mat getNumberROI(const cv::Mat& img_bgr, const Armor& armor);
 
 
 public:
+    Detector() = default;
+    Detector(const std::string& model_path, float threshold);
 	int num_lights_ = 0;
 	// ==调参列表== //
 	// Contuors筛选参数
@@ -65,11 +69,12 @@ public:
 	int GRAY_THRESHOLD = 100;
 	int COLOR_THRESHOLD = 100;
 
-	cv::Mat preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out = nullptr);
+	cv::Mat preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out = nullptr) const;
 	void detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr);
 
 	const std::vector<Armor>& getArmors() const { return armors_; }
 	std::vector<cv::Mat> getNumberRois();
+	cv::Mat getNumberROI_AABB(const cv::Mat& img_bgr, const Armor& armor) const;
 	void drawArmors(cv::Mat& img);
 	void drawAllLights(cv::Mat& img);
 };

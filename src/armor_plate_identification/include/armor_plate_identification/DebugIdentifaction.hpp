@@ -38,6 +38,9 @@ void saveTrackerDebugToFile(const std::string& log_dir,
 /** @brief 关闭 TrackerDebug 日志文件 */
 void closeTrackerDebugFile();
 
+void drawNumberTest(cv::Mat& img, const Armor& armor);
+void drawAllNumberTest(cv::Mat& img, const std::vector<Armor>& armors);
+
 /**
  * @brief 将多个图像拼接显示在一个窗口中（2x2 布局）
  * @param window_name 窗口名称

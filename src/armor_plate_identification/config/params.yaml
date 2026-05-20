@@ -20,7 +20,7 @@ test_node_cpp:
     # === DEBUG ===
     debug_base: true
     debug_preprocessing: false
-    debug_identification: false
+    debug_identification: true
     debug_number_classification: true
     # 正常
     # debug_frame: false
