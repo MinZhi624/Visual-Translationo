@@ -1,4 +1,5 @@
 #include "armor_plate_tracker/Tracker.hpp"
+#include "armor_plate_tracker/DebugTracker.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/aim_command.hpp"
@@ -10,6 +11,7 @@
 #include "tf2_ros/transform_broadcaster.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 #include <mutex>
 #include <deque>
@@ -35,9 +37,7 @@ private:
     rclcpp::Publisher<TrackerData>::SharedPtr tracker_data_pub_;
     // 数据可视化
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr filter_pose_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr measured_pose_pub_;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
     builtin_interfaces::msg::Time image_stamp_;
@@ -72,9 +72,7 @@ private:
             }
         );
         tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
-        filter_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("filter_pose", 10);
-        measured_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("measured_pose", 10);
-        marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("visualization_marker", 10);
+        marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
         if(debug_) {
@@ -83,7 +81,7 @@ private:
         // ===== 装甲板跟踪器 ===== //
         tracker_.setMaxLostTime(max_lost_time_);
         tracker_.setMutationThreshold(mutation_yaw_threshold_);
-        tracker_.init();
+        tracker_.reset();
         
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
     }
@@ -140,118 +138,97 @@ private:
     }
     void info()
     {
-        float measurement_yaw = tracker_.getMeasuredYaw();
-        float measurement_pitch = tracker_.getMeasuredPitch();
-        float filter_yaw = tracker_.getYaw();
-        float filter_pitch = tracker_.getPitch();
-        RCLCPP_INFO(this->get_logger(), "测量数据: yaw = %.4f, pitch = %.4f||滤波数据: yaw = %.4f, pitch = %.4f",
-            measurement_yaw, measurement_pitch, filter_yaw, filter_pitch);
+        
     }
-    visualization_msgs::msg::Marker createSphereMarker(
-        const geometry_msgs::msg::PoseStamped& pose_stamped,
-        int id, float scale, float r, float g, float b, float a)
+    void publishMarkerArray(const rclcpp::Time& now)
     {
-        visualization_msgs::msg::Marker marker;
-        marker.header = pose_stamped.header;
-        marker.ns = "tracker_sphere";
-        marker.id = id;
-        marker.type = visualization_msgs::msg::Marker::SPHERE;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.pose = pose_stamped.pose;
-        marker.scale.x = scale;
-        marker.scale.y = scale;
-        marker.scale.z = scale;
-        marker.color.r = r;
-        marker.color.g = g;
-        marker.color.b = b;
-        marker.color.a = a;
-        marker.lifetime = rclcpp::Duration::from_seconds(1.0);
-        return marker;
-    }
+        auto center = tracker_.getCenterPointWorld();
+        visualization_msgs::msg::MarkerArray arr;
+        // 旋转轴（绿色中心点 + 向上的绿色箭头)
+        arr.markers.push_back(createSphereMarker(
+            center, "world", now, 0,
+            0.08f,
+            0.0f, 1.0f, 0.0f, 1.0f
+        ));
+        Eigen::Vector3d axis_top = center + Eigen::Vector3d(0.0, 0.0, 0.5);
+        arr.markers.push_back(createArrowMarker(
+            center, axis_top, "world", now, 1,
+            0.02f, 0.06f, 0.0f,
+            0.0f, 1.0f, 0.0f, 1.0f
+        ));
+        // 中心速度箭头（黄色）
+        Eigen::Vector3d velocity = tracker_.getCenterVelocity();
+        constexpr double kVelocityScale = 0.5;
+        Eigen::Vector3d arrow_end = center + velocity * kVelocityScale;
+        arr.markers.push_back(createArrowMarker(
+            center, arrow_end, "world", now, 2,
+            0.02f, 0.06f, 0.0f,
+            1.0f, 1.0f, 0.0f, 1.0f
+        ));
+        // 观测装甲板（红色）
+        arr.markers.push_back(createBoxMarker(
+            tracker_.getMeasuredPositionWorld(),
+            tracker_.getMeasuredOrientationWorld(),
+            "world", now, 3,
+            1.0f, 0.0f, 0.0f, 1.0f
+        ));
+        // 滤波装甲板（绿色）
+        arr.markers.push_back(createBoxMarker(
+            tracker_.getFilterPositionWorld(),
+            tracker_.getFilterOrientationWorld(),
+            "world", now, 4,
+            0.0f, 1.0f, 0.0f, 1.0f
+        ));
 
+        marker_array_pub_->publish(arr);
+    }
     void publish(const ArmorPlates::SharedPtr armor_plates)
     {
-        // 发布滤波装甲板数据
-        TrackerData debug_msg;
-        debug_msg.measurement_yaw = tracker_.getMeasuredYaw();
-        debug_msg.measurement_pitch = tracker_.getMeasuredPitch();
-        debug_msg.filter_yaw = tracker_.getYaw();
-        debug_msg.filter_pitch = tracker_.getPitch();
-        if (tracker_data_pub_) {
-            tracker_data_pub_->publish(debug_msg);
-        }
-        // TF 发布到相机坐标系
-        int armor_plate_count = 0;
-        for (const auto& armor_plate : armor_plates->armor_plates) {
-            geometry_msgs::msg::TransformStamped transfrom_stamped;
-            transfrom_stamped.header.stamp = this->now();
-            transfrom_stamped.header.frame_id = armor_plates->header.frame_id;
-            transfrom_stamped.child_frame_id = "armor_plate_" + std::to_string(++armor_plate_count);
-            transfrom_stamped.transform.translation.x = armor_plate.pose.position.x;
-            transfrom_stamped.transform.translation.y = armor_plate.pose.position.y;
-            transfrom_stamped.transform.translation.z = armor_plate.pose.position.z;
-            transfrom_stamped.transform.rotation = armor_plate.pose.orientation;
-            tf_broadcaster_->sendTransform(transfrom_stamped);
-        }
-        // 发布目标位姿 世界坐标系
-        PoseStamped filter_position_world = tracker_.getFilterPositionWorld();
-        PoseStamped measured_position_world = tracker_.getMeasuredPositionWorld();
-        auto now = this->now();
-        filter_position_world.header.stamp = now;
-        measured_position_world.header.stamp = now;
-        filter_pose_pub_->publish(filter_position_world);
-        measured_pose_pub_->publish(measured_position_world);
-        // TF发布到世界坐标系
-        geometry_msgs::msg::TransformStamped filter_transform_stamped;
-        filter_transform_stamped.header.stamp = now;
-        filter_transform_stamped.header.frame_id = "world";
-        filter_transform_stamped.child_frame_id = "measured_pose";
-        filter_transform_stamped.transform.translation.x = filter_position_world.pose.position.x;
-        filter_transform_stamped.transform.translation.y = filter_position_world.pose.position.y;
-        filter_transform_stamped.transform.translation.z = filter_position_world.pose.position.z;
-        filter_transform_stamped.transform.rotation = filter_position_world.pose.orientation;
-        tf_broadcaster_->sendTransform(filter_transform_stamped);
-        // 发布球体 Marker 到 RViz
-        marker_pub_->publish(createSphereMarker(filter_position_world, 0, 0.15f, 0.0f, 1.0f, 0.0f, 1.0f));
-        marker_pub_->publish(createSphereMarker(measured_position_world, 1, 0.20f, 1.0f, 0.0f, 0.0f, 0.5f));
-        ////////// DEBUG //////////
-        if (debug_) {
-            TrackerDebug debug_msg;
-            debug_msg.header.stamp = image_stamp_;
-            auto eigen2geometry = [](const Eigen::Vector3d& vec) {
-                geometry_msgs::msg::Vector3 vec_msg;
-                vec_msg.x = vec.x();
-                vec_msg.y = vec.y();
-                vec_msg.z = vec.z();
-                return vec_msg;
-            };
-            if (!tracker_.isLost()) {
-                Eigen::Vector3d measured_cam = tracker_.getMeasuredPositionCamera();
-                debug_msg.target_point = eigen2geometry(measured_cam);
-                Eigen::Vector3d filtered_cam = tracker_.getFilterPositionCamera();
-                debug_msg.filtered_point = eigen2geometry(filtered_cam);
-            } else {
-                // 丢失时放在相机正前方（光轴上，投影到图像中心）
-                geometry_msgs::msg::Vector3 center_point;
-                center_point.x = 0.0;
-                center_point.y = 0.0;
-                center_point.z = 1.0;
-                debug_msg.target_point = center_point;
-                debug_msg.filtered_point = center_point;
-            }
-
-            tracker_debug_pub_->publish(debug_msg);
-        }
-
-        // 发送增量角
-        if (tracker_.isLost()) {
-            RCLCPP_WARN(this->get_logger(), "目标丢失");
-            return;
-        } else {
+        // AimCommand 和 TrackerData 仅在跟踪成功时发送
+        if (!tracker_.isLost()) {
             AimCommand aim_command;
             aim_command.delta_pitch = tracker_.getPitch();
             aim_command.delta_yaw = tracker_.getYaw();
             aim_command_pub_->publish(aim_command);
+
+            TrackerData tracker_data_msg;
+            tracker_data_msg.header = armor_plates->header;
+            tracker_data_msg.measurement_yaw = tracker_.getMeasuredYaw();
+            tracker_data_msg.measurement_pitch = tracker_.getMeasuredPitch();
+            tracker_data_msg.filter_yaw = tracker_.getYaw();
+            tracker_data_msg.filter_pitch = tracker_.getPitch();
+            if (tracker_data_pub_) {
+                tracker_data_pub_->publish(tracker_data_msg);
+            }
+        }
+
+        // 发布目标位姿 世界坐标系
+        Eigen::Vector3d measured_pos_world = tracker_.getMeasuredPositionWorld();
+        auto now = this->now();
+        auto quatEigenToMsg = [](const Eigen::Quaterniond& q) {
+            geometry_msgs::msg::Quaternion msg;
+            msg.w = q.w();
+            msg.x = q.x();
+            msg.y = q.y();
+            msg.z = q.z();
+            return msg;
+        };
+        // TF发布到世界坐标系
+        geometry_msgs::msg::TransformStamped filter_transform_stamped;
+        filter_transform_stamped.header.stamp = now;
+        filter_transform_stamped.header.frame_id = "world";
+        filter_transform_stamped.child_frame_id = "id_1";
+        filter_transform_stamped.transform.translation.x = measured_pos_world.x();
+        filter_transform_stamped.transform.translation.y = measured_pos_world.y();
+        filter_transform_stamped.transform.translation.z = measured_pos_world.z();
+        filter_transform_stamped.transform.rotation = quatEigenToMsg(tracker_.getMeasuredOrientationWorld());
+        tf_broadcaster_->sendTransform(filter_transform_stamped);
+        // 发布可视化数据
+        publishMarkerArray(now);
+        ////////// DEBUG //////////
+        if (debug_) {
+            TrackerDebug debug_msg = tracker_.CreatedebugMsg(image_stamp_);
+            tracker_debug_pub_->publish(debug_msg);
         }
     }
 

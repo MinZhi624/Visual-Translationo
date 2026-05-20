@@ -3,8 +3,7 @@
 
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
-#include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 #include <opencv2/core.hpp>
 #include <Eigen/Core>
@@ -12,8 +11,6 @@
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
-using geometry_msgs::msg::PoseStamped;
-
 
 struct AngleRecord {
     builtin_interfaces::msg::Time stamp;
@@ -60,38 +57,55 @@ private:
     bool is_lost_;              // 是否处于丢失状态
     // 突变检测阈值（度）
     float yaw_mutation_threshold_;
-    float last_armor_pose_yaw_;
+    float last_armor_pose_yaw_world_;
+    std::string last_armor_number_;
     // 当前帧选中的原始测量值（相机系）
     float measured_yaw_;
     float measured_pitch_;
     // 获得世界坐标系下的点
-    PoseStamped measured_position_world_;
-    PoseStamped filter_position_world_;
+    Eigen::Vector3d measured_position_world_;
+    Eigen::Vector3d filter_position_world_;
+    Eigen::Vector3d center_point_world_;
+    Eigen::Vector3d center_velocity_;
+    float center_r_ = 0.0f;
     // 获得相机坐标系下的点
     Eigen::Vector3d measured_position_camera_;
     Eigen::Vector3d filter_position_camera_;
-
+    Eigen::Quaterniond measured_orientation_world_;
+    Eigen::Quaterniond filter_orientation_world_;
+    // 调试信息
+    float time_cost_ = 0.0f;
+    bool solve_ok_ = false;
     
     // 选择最佳匹配目标
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
     
     // 检查是否突变
-    bool isMutation(const float& armor_pose_yaw);
+    bool isYawMutation(const float& armor_pose_yaw);
     
     // 检查是否丢失太久
     bool isLostTooLong(double current_time) const;
+
+    // 更新测量值相关成员变量
+    void updateMeasurement(const ArmorPlate& armor_plate, double current_time);
+
+    // 更新滤波值相关成员变量（位置+角度）
+    void updateFilteredValue(const Eigen::Vector3d& pc_f, const Eigen::Vector3d& pw_f);
 public:
     // 默认构造函数
     Tracker();
     
-    // 初始化
-    void init();
+    // 重置滤波器（无目标时调用）
+    void reset();
+    
+    // 初始化 EKF（检测到第一个目标时调用）
+    void init(const ArmorPlate& armor_plate, double current_time);
     
     // 设置最大丢失时间（秒）
-    void setMaxLostTime(double seconds);
+    void setMaxLostTime(double seconds) { max_lost_time_ = seconds; }
     
     // 设置突变阈值
-    void setMutationThreshold(float yaw_thresh);
+    void setMutationThreshold(float yaw_thresh) { yaw_mutation_threshold_ = yaw_thresh; }
     
     
     void Update(const std::vector<ArmorPlate>& armor_plates,
@@ -109,21 +123,30 @@ public:
 
     // 获取是否丢失目标
     bool isLost() const { return is_lost_; }
+    // 获取是否已初始化
+    bool isInitialized() const { return initialized_; }
     // 获取上次更新时间
     double getLastUpdateTime() const { return last_update_time_; }
 
-    // 获得世界坐标系下的点 (PoseStamped)
-    PoseStamped getMeasuredPositionWorld() const { return measured_position_world_; }
-    PoseStamped getFilterPositionWorld() const { return filter_position_world_; }
-    // 获得相机坐标系下的点 (Eigen::Vector3d)
+    // 获得世界坐标系下的点
+    Eigen::Vector3d getMeasuredPositionWorld() const { return measured_position_world_; }
+    Eigen::Vector3d getFilterPositionWorld() const { return filter_position_world_; }
+    Eigen::Quaterniond getMeasuredOrientationWorld() const { return measured_orientation_world_; }
+    Eigen::Quaterniond getFilterOrientationWorld() const { return filter_orientation_world_; }
+    Eigen::Vector3d getCenterPointWorld() const { return center_point_world_; }
+    Eigen::Vector3d getCenterVelocity() const { return center_velocity_; }
+    // 获得相机坐标系下的点
     Eigen::Vector3d getMeasuredPositionCamera() const { return measured_position_camera_; }
     Eigen::Vector3d getFilterPositionCamera() const { return filter_position_camera_; }
+
+    // 发布调试数据
+    armor_plate_interfaces::msg::TrackerDebug CreatedebugMsg(const builtin_interfaces::msg::Time& stamp) const;
 };
 
 // 工具函数
-PoseStamped poseFromEigen(const Eigen::Vector3d& tvec, const Eigen::Quaterniond& q);
 float normalizeRadAngle(float rad);
 float calculatePoseYaw(const Eigen::Quaterniond &q);
 float calculateYaw(const Eigen::Vector3d& tvec);
 float calculatePitch(const Eigen::Vector3d& tvec);
 float calculateDistance(const Eigen::Vector3d& tvec);
+Eigen::Quaterniond getQuaternionFromYaw(float yaw);

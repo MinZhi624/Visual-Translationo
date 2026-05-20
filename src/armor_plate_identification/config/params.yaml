@@ -2,13 +2,16 @@ test_node_cpp:
   ros__parameters:
     # === 目标颜色 ===
     target_color: "BLUE"
+    # === 预处理参数 ===
+    threshold_value: 100
+    color_threshold: 100
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
-    min_length_ratio: 0.7
+    min_length_ratio: 0.8
     min_x_diff_ratio: 0.75
-    max_y_diff_ratio: 1.0
+    max_y_diff_ratio: 0.8
     max_distance_ratio: 0.8
-    min_distance_ratio: 0.1
+    min_distance_ratio: 0.3
     # === 数字分类器参数 ===
     model_path: "model/number_cnn.onnx"
     label_path: "model/label_cnn.txt"
@@ -16,9 +19,17 @@ test_node_cpp:
     ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
-    debug_identification: false
-    debug_preprocessing: false
+    debug_preprocessing: true
+    debug_identification: true
     debug_number_classification: true
+    # 正常
+    # debug_frame: false
+    # debug_frame_count: 0
+    # delay_time: 20
+    # 数字记录
+    debug_frame: true
+    debug_frame_count: 600
+    delay_time: 0
 
 armor_plate_identification_node:
   ros__parameters:
@@ -26,13 +37,13 @@ armor_plate_identification_node:
     target_color: "BLUE"
     # === 相机类型 ===
     # 迈德
-    # camera_type: "mindvision"
-    # exposure_time: 8000.0
-    # gain: 8.0
-    # 大恒
-    camera_type: "galaxy"
-    exposure_time: 7000.0
+    camera_type: "mindvision"
+    exposure_time: 8000.0
     gain: 8.0
+    # 大恒
+    # camera_type: "galaxy"
+    # exposure_time: 7000.0
+    # gain: 8.0
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
     min_length_ratio: 0.7
@@ -50,3 +61,4 @@ armor_plate_identification_node:
     debug_identification: false
     debug_preprocessing: false
     debug_number_classification: true
+    delay_time: 0

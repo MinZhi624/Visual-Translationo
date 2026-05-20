@@ -5,7 +5,6 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <camera_info_manager/camera_info_manager.hpp>
 #include <memory>
-#include <string>
 
 // Galaxy SDK
 #include "GxIAPI.h"

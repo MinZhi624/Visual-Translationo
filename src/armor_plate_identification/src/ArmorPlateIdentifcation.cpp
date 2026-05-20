@@ -1,6 +1,6 @@
 #include "armor_plate_identification/Armor.hpp"
 #include "armor_plate_identification/Detector.hpp"
-#include "armor_plate_identification/TestFunc.hpp"
+#include "armor_plate_identification/DebugIdentifaction.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
 #include "armor_plate_identification/NumberClassifier.hpp"
 #include "armor_plate_identification/CameraDriver.hpp"
@@ -17,6 +17,8 @@
 #include <iostream>
 #include <thread>
 #include <mutex>
+#include <chrono>
+#include <deque>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -51,12 +53,19 @@ private:
     bool debug_preprocessing_ = false;
     bool debug_number_classification_ = false;
     DebugParamController debug_controller_;
+    NumberRoiCollector roi_collector_;
+    PreprocessDebug preprocess_debug_;
     sensor_msgs::msg::CameraInfo camera_info_msg_;
+    // 平均处理用时（每50帧更新一次）
+    float process_time_sum_ = 0.0f;
+    float id_time_sum_ = 0.0f;
+    float id_split_sum_ = 0.0f;
+    float id_detect_sum_ = 0.0f;
+    int process_time_count_ = 0;
     // Tracker
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
-    std::deque<ImageSave> images_buffs_;
-
+    std::deque<ImageSave> img_buffs_;
     void init()
     {
         target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
@@ -67,6 +76,8 @@ private:
         lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
         lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
         lights_.TARGET_COLOR = target_color_;
+        lights_.GRAY_THRESHOLD = this->declare_parameter<int>("threshold_value", 160);
+        lights_.COLOR_THRESHOLD = this->declare_parameter<int>("color_threshold", 100);
         this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000), 
             std::bind(&ArmorPlateIdentification::info, this));
 
@@ -121,6 +132,8 @@ private:
         debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
         debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
         debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
+        int delay_time = this->declare_parameter<int>("delay_time", 0);
+        debug_controller_.setPlayDelayMs(delay_time);
         // 订阅 Tracker 回传的调试数据
         tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
             "tracker_debug", 10,
@@ -153,37 +166,57 @@ private:
         }
     }
 
-    void Identification(cv::Mat& image)
+    void Identification(cv::Mat& img_bgr)
     {
-        // 预处理
-        cv::Mat gary_thre;
-        cv::cvtColor(image, gary_thre, cv::COLOR_BGR2GRAY);
-        cv::Mat img_thre;
-        cv::threshold(gary_thre, img_thre, 160, 255, cv::THRESH_BINARY);
-        cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-        cv::dilate(img_thre, img_thre, kernal);
+        auto t_id0 = std::chrono::steady_clock::now();
+
+        // 双通道预处理（调试图像可选）
+        PreprocessDebug* debug_ptr = debug_preprocessing_ ? &preprocess_debug_ : nullptr;
+        cv::Mat img_thre = lights_.preprocess(img_bgr, debug_ptr);
+
+        auto t_id2 = std::chrono::steady_clock::now();
+
         // 灯条匹配
-        lights_.detectArmors(img_thre, image);
+        lights_.detectArmors(img_thre, img_bgr);
         lights_.drawArmors(img_show_);
         armors_ = lights_.getArmors();
-        ////////////////////// DEUBG ////////////////////////
+
+        // 收集 ROI
+        if (debug_number_classification_) {
+            roi_collector_.feed(lights_.getNumberRois());
+            if (roi_collector_.isDone()) {
+                static int batch = 0;
+                roi_collector_.save("./Debug/NumberROI/temp/batch_" + std::to_string(++batch));
+            }
+        }
+        auto t_id3 = std::chrono::steady_clock::now();
+        // 细分耗时累计
+        id_split_sum_ += std::chrono::duration<double, std::milli>(t_id2 - t_id0).count();
+        id_detect_sum_ += std::chrono::duration<double, std::milli>(t_id3 - t_id2).count();
+        ////////////////////// DEBUG ////////////////////////
         if (debug_preprocessing_) {
-            // 预处理四图拼接显示
-            // 绘制目标区域
-            cv::Mat img_target;
-            cv::bitwise_and(image, image, img_target, img_thre);
-            std::vector<cv::Mat> images = {image, gary_thre, img_thre, img_target};
-            std::vector<std::string> labels = {"Original", "Grayscale", "Threshold", "Target Region"};
+            // 标记碎片数到 blue_dim_thre 上
+            cv::Mat blue_debug;
+            cv::cvtColor(preprocess_debug_.blue_dim_thre, blue_debug, cv::COLOR_GRAY2BGR);
+            for (const auto& [rect, count] : preprocess_debug_.fragment_info) {
+                std::string num = std::to_string(count);
+                cv::Scalar color = (count == 1) ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255);
+                cv::putText(blue_debug, num, cv::Point(rect.x + 5, rect.y + 25),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.8, color, 2);
+                cv::rectangle(blue_debug, rect, color, 1);
+            }
+            std::vector<cv::Mat> images = {img_bgr, blue_debug, preprocess_debug_.gray_thre, preprocess_debug_.merged_thre};
+            std::vector<std::string> labels = {"Original", "BLUE_dim (fragments)", "GRAY_thre", "Merged"};
             showMultiImages("PreProcessions-View", images, labels);
         }
         if (debug_identification_) {
             debug_controller_.drawParams(img_show_, lights_);
             lights_.drawAllLights(img_show_);
+            lights_.drawColorRejected(img_show_);
             debug_controller_.drawDebugInfo(img_show_, debug_base_);
         }
         if (debug_number_classification_) {
-            lights_.showNumberBinaryROI();
-            lights_.showNumberROI();
+            roi_collector_.show();
         }
     }
 
@@ -214,12 +247,8 @@ private:
     void NumberClassify()
     {
         number_classifier_.classify(armors_);
-        // 保存数据
-        for (size_t i = 0; i < armors_.size() && i < armor_plates_.size(); i++) {
-            armor_plates_[i].number = armors_[i].number_;
-        }
         ////////// DEBUG /////////
-        if (debug_number_classification_) { 
+        if (debug_number_classification_) {
             drawAllNumberTest(img_show_, armors_);
         }
     }
@@ -250,7 +279,7 @@ private:
             return;
         }
         if (key == 's' || key == 'S') {
-            lights_.setSave(true);
+            roi_collector_.startCollect(10);
         }
         if (debug_base_) {
             if (debug_controller_.handleKey(key, lights_, this->get_logger())) {
@@ -261,20 +290,19 @@ private:
     void ImageShow()
     {
         debug_controller_.drawProcessTime(img_show_, process_time_ms_);
+        if (debug_base_) {
+            debug_controller_.drawDelay(img_show_);
+        }
         cv::Mat show_img;
         cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
         cv::imshow("Identifacation", show_img);
     }
     void Save()
     {
-        ////////// DEBUG ///////////
-        if(debug_number_classification_) {
-            lights_.saveNumberRoi();
-        }
         {
             std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-            images_buffs_.push_back({read_stamp_ ,img_show_.clone()});
-            if (images_buffs_.size() > 10) images_buffs_.pop_front();
+            img_buffs_.push_back({read_stamp_ ,img_show_.clone()});
+            if (img_buffs_.size() > 10) img_buffs_.pop_front();
         }
     }
 
@@ -284,8 +312,8 @@ private:
         std::deque<ImageSave> images_buffs;
         {
             std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-            if (images_buffs_.empty()) return;
-            images_buffs = images_buffs_;
+            if (img_buffs_.empty()) return;
+            images_buffs = img_buffs_;
         }
         // 寻找时间头最接近的帧（容差 1ms）
         auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg](const ImageSave& image_save) {
@@ -351,16 +379,34 @@ public:
                 continue;
             }
             fail_count = 0;
-            
+
             auto t_start = std::chrono::steady_clock::now();
             img_show_ = frame.clone();
+            auto t0 = std::chrono::steady_clock::now();
             Identification(frame);
-            SolvePose();
+            auto t1 = std::chrono::steady_clock::now();
             NumberClassify();
+            SolvePose();
             Publish();
             Save();
             auto t_end = std::chrono::steady_clock::now();
             process_time_ms_ = static_cast<float>(std::chrono::duration<double, std::milli>(t_end - t_start).count());
+
+            float id_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            process_time_sum_ += process_time_ms_;
+            id_time_sum_ += id_ms;
+            process_time_count_++;
+            if (process_time_count_ >= 50) {
+                RCLCPP_INFO(this->get_logger(), "【平均用时】总:%.1fms  识别:%.1fms  [预处理:%.1fms  detectArmors:%.1fms]",
+                    process_time_sum_ / 50.0f, id_time_sum_ / 50.0f,
+                    id_split_sum_ / 50.0f, id_detect_sum_ / 50.0f);
+                process_time_sum_ = 0.0f;
+                id_time_sum_ = 0.0f;
+                id_split_sum_ = 0.0f;
+                id_detect_sum_ = 0.0f;
+                process_time_count_ = 0;
+            }
+
             ImageShow();
             controlParams();
             if (debug_base_) {

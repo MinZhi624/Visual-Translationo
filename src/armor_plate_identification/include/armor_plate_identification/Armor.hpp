@@ -2,7 +2,7 @@
 #include <opencv2/core.hpp>
 #include <builtin_interfaces/msg/time.hpp>
 
-/// @brief 灯条类
+/** @brief 灯条类 */
 class Lights
 {
 public:
@@ -21,6 +21,7 @@ public:
 	Lights() = default;
 };
 
+/** @brief 装甲板类 */
 class Armor
 {
 public:
@@ -32,6 +33,7 @@ public:
 	Armor() = default;
 };
 
+/** @brief 图像保存结构体 */
 struct ImageSave{
 	builtin_interfaces::msg::Time img_stamp;
 	cv::Mat img;

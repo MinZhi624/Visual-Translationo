@@ -1,0 +1,313 @@
+#include "armor_plate_identification/DebugIdentifaction.hpp"
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/core/utils/filesystem.hpp>
+#include <algorithm>
+
+void showMultiImages(const std::string& window_name,
+                     const std::vector<cv::Mat>& imgs,
+                     const std::vector<std::string>& labels)
+{
+    if (imgs.empty()) return;
+    
+    // 固定输出窗口大小
+    const int grid_cols = 2;  // 2列
+    const int grid_rows = 2;  // 2行
+    const int cell_width = 640;
+    const int cell_height = 480;
+    const int text_height = 30;  // 标签高度
+    
+    // 创建画布（2x2 网格）
+    cv::Mat canvas((cell_height + text_height) * grid_rows, 
+                   cell_width * grid_cols, 
+                   CV_8UC3, cv::Scalar(0, 0, 0));
+    
+    for (size_t i = 0; i < imgs.size() && i < 4; ++i) {
+        int row = i / grid_cols;
+        int col = i % grid_cols;
+        
+        // 转换单通道为三通道
+        cv::Mat img_display;
+        if (imgs[i].channels() == 1) {
+            cv::cvtColor(imgs[i], img_display, cv::COLOR_GRAY2BGR);
+        } else {
+            img_display = imgs[i].clone();
+        }
+        
+        // resize 到固定大小
+        cv::Mat img_resized;
+        cv::resize(img_display, img_resized, cv::Size(cell_width, cell_height));
+        
+        // 计算放置位置
+        int x = col * cell_width;
+        int y = row * (cell_height + text_height);
+        
+        // 复制图像到画布
+        cv::Rect roi(x, y + text_height, cell_width, cell_height);
+        img_resized.copyTo(canvas(roi));
+        
+        // 绘制标签
+        std::string label = (i < labels.size()) ? labels[i] : ("Image " + std::to_string(i + 1));
+        cv::putText(canvas, label, cv::Point(x + 10, y + 25),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
+    }
+    
+    cv::imshow(window_name, canvas);
+}
+
+/////////////////// DebugParamController //////////////////////////
+
+DebugParamController::DebugParamController()
+    : selected_param_(0),
+      param_names_({
+          "MAX_ANGLE_DIFF",
+          "MAX_Y_DIFF_RATIO",
+          "MIN_DISTANCE_RATIO",
+          "MAX_DISTANCE_RATIO",
+          "MIN_LENGTH_RATIO",
+          "MIN_X_DIFF_RATIO"
+      })
+{}
+
+bool DebugParamController::handleKey(int key, Detector& lights, const rclcpp::Logger& logger)
+{
+    // 1-6：选择参数
+    if (key >= '1' && key <= '6') {
+        selected_param_ = key - '1';
+        RCLCPP_INFO(logger, "选中参数: %s", param_names_[selected_param_].c_str());
+        return true;
+    }
+
+    // T/G：调节参数值
+    bool increase = (key == 't' || key == 'T');
+    bool decrease = (key == 'g' || key == 'G');
+
+    if (increase || decrease) {
+        float dir = increase ? 1.0f : -1.0f;
+        switch (selected_param_) {
+            case 0: // MAX_ANGLE_DIFF
+                lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
+                break;
+            case 1: // MAX_Y_DIFF_RATIO
+                lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
+                break;
+            case 2: // MIN_DISTANCE_RATIO
+                lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
+                break;
+            case 3: // MAX_DISTANCE_RATIO
+                lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
+                break;
+            case 4: // MIN_LENGTH_RATIO
+                lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
+                break;
+            case 5: // MIN_X_DIFF_RATIO
+                lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
+                break;
+            default:
+                break;
+        }
+        return true;
+    }
+
+    // +/-：速度控制
+    if (key == '+' || key == '=') {
+        play_delay_ms_ = std::max(play_delay_ms_ - 10, 0);
+        RCLCPP_INFO(logger, "播放延迟: %d ms", play_delay_ms_);
+        return true;
+    }
+    if (key == '-' || key == '_') {
+        play_delay_ms_ += 10;
+        RCLCPP_INFO(logger, "播放延迟: %d ms", play_delay_ms_);
+        return true;
+    }
+
+    return false;
+}
+
+void DebugParamController::drawProcessTime(cv::Mat& img, float process_time_ms)
+{
+    if (process_time_ms < 0.0f) return;
+    std::string time_text = "Process: " + std::to_string(process_time_ms) + " ms";
+    time_text = time_text.substr(0, time_text.find('.') + 3);
+    cv::putText(img, time_text, cv::Point(x_, y_ + 0 * line_h_),
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 165, 255), 2);
+}
+
+void DebugParamController::drawDelay(cv::Mat& img)
+{
+    std::string delay_text = "Delay: " + std::to_string(play_delay_ms_) + " ms";
+    cv::putText(img, delay_text, cv::Point(x_, y_ + 1 * line_h_),
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
+}
+
+void DebugParamController::drawParams(cv::Mat& img, const Detector& lights)
+{
+    // 下面6行：可调参数，放在第三行之后
+    for (int i = 0; i < 6; ++i) {
+        float val = 0.0f;
+        switch (i) {
+            case 0: val = lights.MAX_ANGLE_DIFF; break;
+            case 1: val = lights.MAX_Y_DIFF_RATIO; break;
+            case 2: val = lights.MIN_DISTANCE_RATIO; break;
+            case 3: val = lights.MAX_DISTANCE_RATIO; break;
+            case 4: val = lights.MIN_LENGTH_RATIO; break;
+            case 5: val = lights.MIN_X_DIFF_RATIO; break;
+            default: break;
+        }
+        std::string text = param_names_[i] + ": " + std::to_string(val);
+        text = text.substr(0, text.find('.') + 3);
+        cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
+        cv::putText(img, text, cv::Point(x_, y_ + (i + 2) * line_h_),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
+    }
+}
+
+void DebugParamController::drawDebugInfo(cv::Mat& img, bool show_speed_control)
+{
+    int base_row = 8;  // 1 行 process_time + 1 行 delay + 6 个参数
+    if (show_speed_control) {
+        cv::putText(img, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
+                    cv::Point(x_, y_ + base_row * line_h_ + 10),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+    } else {
+        cv::putText(img, "1-6:select  T/G:adj  P:pause  ESC:exit",
+                    cv::Point(x_, y_ + base_row * line_h_ + 10),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+    }
+}
+
+#include <fstream>
+#include <filesystem>
+
+namespace {
+    std::ofstream& getTrackerLogFile() {
+        static std::ofstream file;
+        return file;
+    }
+    std::string& getCurrentLogDir() {
+        static std::string dir;
+        return dir;
+    }
+}
+
+void saveTrackerDebugToFile(const std::string& log_dir,
+                            const armor_plate_interfaces::msg::TrackerDebug& msg)
+{
+    auto& tracker_log_file = getTrackerLogFile();
+    auto& current_log_dir = getCurrentLogDir();
+
+    // 如果目录变化，关闭旧文件
+    if (current_log_dir != log_dir) {
+        if (tracker_log_file.is_open()) {
+            tracker_log_file.close();
+        }
+        current_log_dir = log_dir;
+    }
+
+    // 首次调用时创建目录并打开文件
+    if (!tracker_log_file.is_open()) {
+        std::filesystem::create_directories(log_dir);
+        std::string log_path = log_dir + "/tracker_log.txt";
+        tracker_log_file.open(log_path, std::ios::out | std::ios::trunc);
+        if (tracker_log_file.is_open()) {
+            tracker_log_file << "sec nanosec "
+                << "target_world_x target_world_y target_world_z "
+                << "filtered_world_x filtered_world_y filtered_world_z "
+                << "raw_yaw filter_yaw "
+                << "center_x center_y center_r center_vx center_vy "
+                << "method solve_ok time_cost" << std::endl;
+            RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "日志保存到: %s", log_path.c_str());
+        }
+    }
+
+    if (tracker_log_file.is_open()) {
+        tracker_log_file << msg.header.stamp.sec << " " << msg.header.stamp.nanosec << " "
+            << msg.target_point_world.x << " " << msg.target_point_world.y << " " << msg.target_point_world.z << " "
+            << msg.filtered_point_world.x << " " << msg.filtered_point_world.y << " " << msg.filtered_point_world.z << " "
+            << msg.raw_yaw << " " << msg.filter_yaw << " "
+            << msg.center_x << " " << msg.center_y << " " << msg.center_r << " "
+            << msg.center_v_x << " " << msg.center_v_y << " "
+            << msg.method << " " << msg.solve_ok << " " << msg.time_cost << std::endl;
+    }
+}
+
+void closeTrackerDebugFile()
+{
+    auto& tracker_log_file = getTrackerLogFile();
+    if (tracker_log_file.is_open()) {
+        tracker_log_file.close();
+    }
+    getCurrentLogDir().clear();
+}
+
+/////////////////// infoTrackerDebugMsg //////////////////////////
+
+void infoTrackerDebugMsg(const rclcpp::Logger& logger,
+                         const armor_plate_interfaces::msg::TrackerDebug& msg)
+{
+    RCLCPP_INFO(logger,
+        "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+        "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
+        "yaw:%.4f->%.4f "
+        "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
+        "%s solve:%d %.1fms",
+        msg.target_point.x, msg.target_point.y, msg.target_point.z,
+        msg.filtered_point.x, msg.filtered_point.y, msg.filtered_point.z,
+        msg.target_point_world.x, msg.target_point_world.y, msg.target_point_world.z,
+        msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z,
+        msg.raw_yaw, msg.filter_yaw,
+        msg.center_x, msg.center_y, msg.center_r,
+        msg.center_v_x, msg.center_v_y,
+        msg.method.c_str(), msg.solve_ok, msg.time_cost);
+}
+
+/////////////////// NumberRoiCollector //////////////////////////
+
+int NumberRoiCollector::global_counter_ = 0;
+
+void NumberRoiCollector::startCollect(int frames)
+{
+    remaining_ = frames;
+    collected_.clear();
+    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"), "开始收集 %d 帧 ROI", frames);
+}
+
+void NumberRoiCollector::feed(const std::vector<cv::Mat>& rois)
+{
+    if (remaining_ <= 0) return;
+    collected_.insert(collected_.end(), rois.begin(), rois.end());
+    remaining_--;
+    if (remaining_ == 0) {
+        RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"),
+            "收集完成，共 %lu 张 ROI", collected_.size());
+    }
+}
+
+void NumberRoiCollector::save(const std::string& dir)
+{
+    if (collected_.empty()) return;
+    if (!cv::utils::fs::createDirectories(dir)) {
+        RCLCPP_WARN(rclcpp::get_logger("NumberRoiCollector"),
+            "无法创建目录: %s", dir.c_str());
+        return;
+    }
+    for (const auto& roi : collected_) {
+        std::string path = dir + "/roi_" + std::to_string(++global_counter_) + ".png";
+        if (!cv::imwrite(path, roi)) {
+            RCLCPP_WARN(rclcpp::get_logger("NumberRoiCollector"),
+                "写入失败: %s", path.c_str());
+        }
+    }
+    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"),
+        "已保存 %lu 张 ROI 到 %s", collected_.size(), dir.c_str());
+    collected_.clear();
+}
+
+void NumberRoiCollector::show()
+{
+    if (collected_.empty()) return;
+    cv::Mat concat_img;
+    cv::hconcat(collected_, concat_img);
+    cv::imshow("Number ROIs", concat_img);
+}

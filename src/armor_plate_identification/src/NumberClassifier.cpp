@@ -22,50 +22,43 @@ NumberClassifier::NumberClassifier(
     }
 }
 
+bool NumberClassifier::checkClassify(const Armor &armor) {
+    if (armor.confidence_ < threshold_)
+        return false;
+    return std::none_of(ignore_classes_.begin(), ignore_classes_.end(),
+                        [&](const auto &ignore_class) {
+                            return armor.number_ == ignore_class;
+                        });
+}
+
 void NumberClassifier::classify(std::vector<Armor>& armors)
 {
     // 推理
     for (auto& armor : armors) {
-        // 如果号码ROI为空，直接跳过
         if(armor.number_roi_.empty()) {
             armor.confidence_ = 0.0;
             continue;
         }
         cv::Mat image = armor.number_roi_;
-        // 打包成blob，同时做归一化 (1/255) 和尺寸校验
         cv::Mat blob;
         cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(20, 28), 0, false, false);
-        // 把blob输入网络
         net_.setInput(blob);
-        // 前向传播
         cv::Mat outputs = net_.forward();
-        // 取最大值和索引
         float max_prob = *std::max_element(outputs.begin<float>(), outputs.end<float>());
         cv::Mat softmax_prob;
         cv::exp(outputs - max_prob, softmax_prob);
         float sum = static_cast<float>(cv::sum(softmax_prob)[0]);
         softmax_prob /= sum;
-        // 取最大概率的索引
         double confidence;
         cv::Point class_id_point;
         cv::minMaxLoc(softmax_prob.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
         int label_id = class_id_point.x;
-        // 填入装甲板信息
         armor.confidence_ = confidence;
         armor.number_ = class_names_[label_id];
     }
-    // 过滤掉需要忽略的类别或者置信度过低的类别
-    armors.erase(std::remove_if(armors.begin(), armors.end(), 
-        [this](const Armor& armor) {
-            // 置信度太低
-            if (armor.confidence_ < threshold_) return true;
-            // 需要忽略的类别
-            for (const auto& ignore_class : ignore_classes_) {
-                if (armor.number_ == ignore_class) return true;
-            }
-            // 其他情况保留
-            return false;
-        }
+    // 过滤
+    armors.erase(std::remove_if(armors.begin(), armors.end(),
+        [this](const Armor& armor) { return !checkClassify(armor); }
     ), armors.end());
 }
 

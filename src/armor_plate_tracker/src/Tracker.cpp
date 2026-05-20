@@ -1,6 +1,11 @@
 #include "armor_plate_tracker/Tracker.hpp"
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "Eigen/src/Core/Matrix.h"
 #include "Eigen/src/Geometry/Quaternion.h"
 #include "rclcpp/rclcpp.hpp"
+#include <chrono>
+
+using armor_plate_interfaces::msg::TrackerDebug;
 
 // opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
 const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
@@ -15,11 +20,12 @@ Tracker::Tracker()
     , last_detection_time_(0.0)
     , initialized_(false)
     , max_lost_time_(0.1)
-    , is_lost_(false)
-    , yaw_mutation_threshold_(0.05f) 
+    , is_lost_(true)
+    , yaw_mutation_threshold_(0.05f)
+    , last_armor_number_("")
 {
 }
-void Tracker::init()
+void Tracker::reset()
 {
     // EKF 构造函数已设置 Q/R，只需重置状态和协方差
     Eigen::Vector<double, 9> zero_state = Eigen::Vector<double, 9>::Zero();
@@ -29,24 +35,50 @@ void Tracker::init()
     initialized_ = false;
     last_update_time_ = 0.0;
     last_detection_time_ = 0.0;
-    last_armor_pose_yaw_ = 0.0f;
-    is_lost_ = false;
+    last_armor_pose_yaw_world_ = 0.0f;
     yaw_ = 0.0f;
     pitch_ = 0.0f;
     measured_yaw_ = 0.0f;
     measured_pitch_ = 0.0f;
+    last_armor_number_ = "";
+    center_r_ = 0.0f;
 }
 
-// 设置最大丢失时间（秒）
-void Tracker::setMaxLostTime(double seconds)
+void Tracker::init(const ArmorPlate& armor_plate, double current_time)
 {
-    max_lost_time_ = seconds;
-}
+    // 跟新滤波器
+    Eigen::Vector3d target_position(
+        armor_plate.pose.position.x,
+        armor_plate.pose.position.y,
+        armor_plate.pose.position.z
+    );
+    Eigen::Quaterniond target_plate_q(
+        armor_plate.pose.orientation.w,
+        armor_plate.pose.orientation.x,
+        armor_plate.pose.orientation.y,
+        armor_plate.pose.orientation.z
+    );
+    Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q;
+    float armor_pose_yaw_world = calculatePoseYaw(qw_m);
 
-// 设置突变阈值
-void Tracker::setMutationThreshold(float yaw_thresh)
-{
-    yaw_mutation_threshold_ = yaw_thresh;
+    Eigen::Vector3d pw = R_w_c_ * target_position;
+    const double r_init = 0.26;
+    double x_c0 = pw.x() - r_init * std::sin(armor_pose_yaw_world);
+    double y_c0 = pw.y() - r_init * std::cos(armor_pose_yaw_world);
+    
+    Eigen::Vector<double, 9> init_state;
+    init_state << x_c0, y_c0, pw.z(), 0.0, 0.0, 0.0, r_init, armor_pose_yaw_world, 0.0;
+    
+    Eigen::Matrix<double, 9, 9> init_P = Eigen::Matrix<double, 9, 9>::Identity();
+    init_P.diagonal() << 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 0.01, 0.1, 1.0;
+    
+    ekf_.initialize(init_state, init_P);
+
+    // 首次初始化：测量值 = 滤波值 = 初始观测
+    updateMeasurement(armor_plate, current_time);
+    updateFilteredValue(target_position, pw);
+
+    initialized_ = true;
 }
 
 // 选择最佳匹配目标
@@ -104,13 +136,13 @@ void Tracker::selectBestMatch(const std::vector<ArmorPlate>& armor_plates, Armor
     target_armor = armor_plates[best_idx];
 }
 
-// 检查是否突变
-bool Tracker::isMutation(const float& armor_pose_yaw)
+// 检查Yaw是否突变
+bool Tracker::isYawMutation(const float& armor_pose_yaw)
 {
     if (!initialized_) {
         return false;
     }
-    float dy = std::abs(armor_pose_yaw - last_armor_pose_yaw_);
+    float dy = std::abs(armor_pose_yaw - last_armor_pose_yaw_world_);
     dy = normalizeRadAngle(dy);
     return (dy > yaw_mutation_threshold_);
 }
@@ -127,6 +159,9 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
                      double current_time,
                      float yaw_abs, float pitch_abs)
 {
+    auto t_start = std::chrono::steady_clock::now();
+    solve_ok_ = false;
+
     // 计算dt（与上次更新的时间差）
     double dt = 0.01;  // 默认10ms
     if (last_update_time_ > 0.0) {
@@ -153,15 +188,8 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     if (armor_plates.size() == 0) {
         // 没有检测到目标，进入丢失状态
         is_lost_ = true;
-        if (isLostTooLong(current_time)) {
-            // 丢失太久，重置滤波器
-            init();
-        } else {
-            // 短暂丢失，继续预测
-            if (initialized_) {
-                ekf_.predict();
-            }
-        }
+        if (isLostTooLong(current_time)) reset(); // 丢失时间过长，重置
+        else if (initialized_) ekf_.predict(); // 丢失但未过长，继续预测
         return;
     }
     // 有检测结果，选择最佳匹配
@@ -175,7 +203,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
         target_plate.pose.position.z
     );
     
-    // 提取装甲板姿态四元数（相机坐标系）
+    // 提取装甲板姿态四元数（相机系）
     Eigen::Quaterniond target_plate_q(
         target_plate.pose.orientation.w,
         target_plate.pose.orientation.x,
@@ -185,71 +213,44 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     // 提前计算世界坐标系下的装甲板姿态四元数
     Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q;
     
-    // 保存当前帧选中的原始测量值
-    measured_position_camera_ = target_position;
-    measured_yaw_ = calculateYaw(target_position);
-    measured_pitch_ = calculatePitch(target_position);
-    
-    // 计算两个坐标系下的装甲板姿态 yaw
-    float armor_pose_yaw_camera = calculatePoseYaw(target_plate_q);
+    // 计算装甲板姿态 yaw（世界坐标系）
     float armor_pose_yaw_world = calculatePoseYaw(qw_m);
-    
-    // 突变检测基于相机系 yaw（保持与原来一致）
-    if (isMutation(armor_pose_yaw_camera)) init();
-
+    // 判断突变
+    if (isYawMutation(armor_pose_yaw_world)) reset();
     // 如果是第一次初始化，设置初始状态（世界坐标系）
     if (!initialized_) {
-        Eigen::Vector3d pw = R_w_c_ * target_position;
-        const double r_init = 0.26;
-        double x_c0 = pw.x() - r_init * std::sin(armor_pose_yaw_world);
-        double y_c0 = pw.y() - r_init * std::cos(armor_pose_yaw_world);
-        
-        Eigen::Vector<double, 9> init_state;
-        init_state << x_c0, y_c0, pw.z(), 0.0, 0.0, 0.0, r_init, armor_pose_yaw_world, 0.0;
-        
-        Eigen::Matrix<double, 9, 9> init_P = Eigen::Matrix<double, 9, 9>::Identity();
-        init_P.diagonal() << 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 0.01, 0.1, 1.0;
-        
-        ekf_.initialize(init_state, init_P);
-        
-        yaw_ = calculateYaw(target_position);
-        pitch_ = calculatePitch(target_position);
-        initialized_ = true;
-        is_lost_ = false;
-        last_detection_time_ = current_time;
+        init(target_plate, current_time);
         return;
     }
-    // 世界坐标系下 EKF
-    // Predict
+
+    // 保存当前帧选中的原始测量值
+    updateMeasurement(target_plate, current_time);
+
+    // 世界坐标系下 EKF: Predict
     ekf_.predict();
-    // Correct
+
+    // 世界坐标系下的原始测量值
     Eigen::Vector3d pw_m = R_w_c_ * target_position;
     Eigen::Vector<double, 4> measurement;
     measurement << pw_m.x(), pw_m.y(), pw_m.z(), armor_pose_yaw_world;
-    //// DEBUG //////
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "EKF Measurement: x_a:%.4f y_a: %.4f z_a:%.4f yaw:%.4f",
-        measurement[0], measurement[1], measurement[2], measurement[3]
-    );
-    /////////////////
+
+    Eigen::Vector<double, 9> state;
     ekf_.correct(measurement);
-    // 提取世界系滤波结果，转回相机系，再算角度
+    state = ekf_.getStatePost();
+    solve_ok_ = true;
+
     Eigen::Vector3d pw_f = ekf_.getFilteredObservation().head<3>();
     Eigen::Vector3d pc_f = R_c_w_ * pw_f;
-    yaw_ = calculateYaw(pc_f);
-    pitch_ = calculatePitch(pc_f);
-    // 保存世界系滤波结果（qw_m 已在前面计算）
-    measured_position_world_ = poseFromEigen(pw_m, qw_m);
-    filter_position_world_ = poseFromEigen(pw_f, qw_m);
-    measured_position_camera_ = target_position;
-    filter_position_camera_ = pc_f;
-    // 更新检测到目标的时间和状态
-    last_detection_time_ = current_time;
-    last_armor_pose_yaw_ = armor_pose_yaw_camera;
-    is_lost_ = false;
-    ////////// DEBUG //////////
-    Eigen::Vector<double, 9> state = ekf_.getStatePost();
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "EKF State: x:%.4f y:%.4f z:%.4f r:%.4f yaw:%.4f",
-        state[0], state[1], state[2], state[6], state[7]);
+    updateFilteredValue(pc_f, pw_f);
+
+    // EKF 状态向量提取
+    center_point_world_ = Eigen::Vector3d(state[0], state[1], state[2]);
+    center_velocity_    = Eigen::Vector3d(state[3], state[4], 0);
+    center_r_           = static_cast<float>(state[6]);
+    filter_orientation_world_ = getQuaternionFromYaw(state[7]);
+
+    auto t_end = std::chrono::steady_clock::now();
+    time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
 }
 float calculatePoseYaw(const Eigen::Quaterniond &q)
 {
@@ -276,16 +277,88 @@ float normalizeRadAngle(float rad)
     while(rad < -M_PI) rad += 2.0 * M_PI;
     return rad;
 }
-PoseStamped poseFromEigen(const Eigen::Vector3d& tvec, const Eigen::Quaterniond& q)
+Eigen::Quaterniond getQuaternionFromYaw(float yaw)
 {
-    PoseStamped pose_stamped;
-    pose_stamped.header.frame_id = "world";
-    pose_stamped.pose.position.x = tvec.x();
-    pose_stamped.pose.position.y = tvec.y();
-    pose_stamped.pose.position.z = tvec.z();
-    pose_stamped.pose.orientation.w = q.w();
-    pose_stamped.pose.orientation.x = q.x();
-    pose_stamped.pose.orientation.y = q.y();
-    pose_stamped.pose.orientation.z = q.z();
-    return pose_stamped;
+    // 有关世界Z轴的旋转
+    Eigen::AngleAxisd yawAngle(yaw + M_PI / 2, Eigen::Vector3d::UnitZ());
+    return Eigen::Quaterniond(yawAngle);
+}
+
+void Tracker::updateMeasurement(const ArmorPlate& armor_plate, double current_time)
+{
+    Eigen::Vector3d pc(
+        armor_plate.pose.position.x,
+        armor_plate.pose.position.y,
+        armor_plate.pose.position.z
+    );
+    Eigen::Vector3d pw = R_w_c_ * pc;
+
+    measured_position_camera_ = pc;
+    measured_position_world_  = pw;
+    measured_yaw_   = calculateYaw(pc);
+    measured_pitch_ = calculatePitch(pc);
+
+    Eigen::Quaterniond qc(
+        armor_plate.pose.orientation.w,
+        armor_plate.pose.orientation.x,
+        armor_plate.pose.orientation.y,
+        armor_plate.pose.orientation.z
+    );
+    Eigen::Quaterniond qw = q_w_c_ * qc;
+    float armor_yaw_world = calculatePoseYaw(qw);
+    measured_orientation_world_ = getQuaternionFromYaw(armor_yaw_world);
+
+    last_armor_pose_yaw_world_ = armor_yaw_world;
+    last_armor_number_ = armor_plate.number;
+    last_detection_time_ = current_time;
+    is_lost_ = false;
+}
+
+void Tracker::updateFilteredValue(const Eigen::Vector3d& pc_f, const Eigen::Vector3d& pw_f)
+{
+    filter_position_camera_ = pc_f;
+    filter_position_world_  = pw_f;
+    yaw_   = calculateYaw(pc_f);
+    pitch_ = calculatePitch(pc_f);
+}
+
+TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time& stamp) const
+{
+    TrackerDebug msg;
+    msg.header.stamp = stamp;
+
+    auto toVec3 = [](const Eigen::Vector3d& v) {
+        geometry_msgs::msg::Vector3 vec;
+        vec.x = v.x(); vec.y = v.y(); vec.z = v.z();
+        return vec;
+    };
+
+    if (!is_lost_) {
+        msg.target_point = toVec3(measured_position_camera_);
+        msg.filtered_point = toVec3(filter_position_camera_);
+        msg.target_point_world = toVec3(measured_position_world_);
+        msg.filtered_point_world = toVec3(filter_position_world_);
+    } else {
+        geometry_msgs::msg::Vector3 center;
+        center.x = 0.0; center.y = 0.0; center.z = 1.0;
+        msg.target_point = center;
+        msg.filtered_point = center;
+        msg.target_point_world = center;
+        msg.filtered_point_world = center;
+    }
+
+    msg.raw_yaw = last_armor_pose_yaw_world_;
+    msg.filter_yaw = calculatePoseYaw(filter_orientation_world_);
+
+    msg.center_x = static_cast<float>(center_point_world_.x());
+    msg.center_y = static_cast<float>(center_point_world_.y());
+    msg.center_r = center_r_;
+    msg.center_v_x = static_cast<float>(center_velocity_.x());
+    msg.center_v_y = static_cast<float>(center_velocity_.y());
+
+    msg.time_cost = time_cost_;
+    msg.method = "ekf";
+    msg.solve_ok = solve_ok_;
+
+    return msg;
 }
