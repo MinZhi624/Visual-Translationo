@@ -1,7 +1,7 @@
 #pragma once
 #include <opencv2/core.hpp>
 #include <builtin_interfaces/msg/time.hpp>
-#include <string>
+#include <Eigen/Geometry>
 
 /*  enum class
 	这里采用enum class，这是个更现代的方法：
@@ -89,14 +89,18 @@ private:
 	// 匹配常量
 	static constexpr float DIST_RATIO_THRESH = 2.8f;  // 大/小装甲板分界阈值
 public:
+	// 基本信息
 	std::array<Light, 2> paired_lights_; // 按x轴从左到右排列的两个灯条
 	std::vector<cv::Point2f> points_; // 按照顺时针顺序排列的四个点
+	cv::Point3f xyz_camera_; 	// 相机坐标系下的装甲板位置
+	Eigen::Quaterniond q_camera_; // 相机坐标系下的装甲板姿态
+	float image_distance_to_center_;
 	// 数字识别信息
 	ArmorType type_;
 	ArmorName name_;
-    cv::Mat number_roi_;
-    cv::Mat pattern_;  // AABB 裁切的 BGR 装甲板区域（临时，供旧模型使用）
-	float confidence_ = 0.0f;
+    cv::Mat number_roi_; //数字识别
+    cv::Mat pattern_;  // 去重
+	float confidence_;
 	
 	// 匹配信息
 	double angle_diff_;

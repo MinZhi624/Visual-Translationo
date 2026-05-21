@@ -4,19 +4,26 @@
 #include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
-/** @brief ROI 收集器：按 S 键后连续收集 N 帧的号码 ROI，自动保存 */
+/** @brief ROI 收集器：toggle 录制模式，收集 rejected 的号码 ROI，自动保存 */
 class NumberRoiCollector {
 public:
-    void startCollect(int frames = 10);
-    void feed(const std::vector<cv::Mat>& rois);
-    bool isCollecting() const { return remaining_ > 0; }
-    bool isDone() const { return remaining_ == 0 && !collected_.empty(); }
+    void toggleRecording();
+    void startRecording();
+    void stopRecording();
+    bool isRecording() const { return recording_; }
+
+    /** @brief 录制中追加 rejected ROI，返回新增数量 */
+    int feedRejected(const std::vector<cv::Mat>& rois);
+
     void save(const std::string& dir);
     void show();
+    size_t count() const { return collected_.size(); }
+
 private:
-    int remaining_ = 0;
+    bool recording_ = false;
     std::vector<cv::Mat> collected_;
     static int global_counter_;
+    static int batch_counter_;
 };
 
 /**
@@ -41,6 +48,15 @@ void closeTrackerDebugFile();
 void drawNumberTest(cv::Mat& img, const Armor& armor);
 void drawAllNumberTest(cv::Mat& img, const std::vector<Armor>& armors);
 
+/** @brief 在图像上绘制所有装甲板（交叉线） */
+void drawArmors(cv::Mat& img, const std::vector<Armor>& armors);
+/** @brief 在图像上绘制所有灯条 */
+void drawAllLights(cv::Mat& img, const std::vector<Light>& lights);
+/** @brief 绘制旋转矩形 */
+void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
+/** @brief 用四个点绘制旋转矩形 */
+void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
+
 /**
  * @brief 将多个图像拼接显示在一个窗口中（2x2 布局）
  * @param window_name 窗口名称
@@ -51,19 +67,16 @@ void showMultiImages(const std::string& window_name,
                      const std::vector<cv::Mat>& imgs,
                      const std::vector<std::string>& labels = {});
 
-/** @brief 调试参数控制器，封装 DEBUG_INDENTIFICATION / DEBUG_BASE 公共逻辑 */
+/** @brief 调试控制器，封装播放速度控制和绘制 */
 class DebugParamController {
 public:
-    DebugParamController();
-
     /**
-     * @brief 处理调试按键（1-6 选参数、T/G 调值、+/- 调播放速度）
+     * @brief 处理调试按键（+/- 调播放速度）
      * @param key cv::waitKey 返回的按键值
-     * @param lights 要调节的灯条匹配参数对象
      * @param logger ROS2 日志器
      * @return true 表示按键已被消费
      */
-    bool handleKey(int key, Detector& lights, const rclcpp::Logger& logger);
+    bool handleKey(int key, const rclcpp::Logger& logger);
 
     /**
      * @brief 在图像左上角第一行绘制处理用时
@@ -77,13 +90,6 @@ public:
      * @param img 要绘制的图像
      */
     void drawDelay(cv::Mat& img);
-
-    /**
-     * @brief 在图像左上角绘制 6 个可调参数（从第三行开始）
-     * @param img 要绘制的图像
-     * @param lights 灯条匹配参数对象
-     */
-    void drawParams(cv::Mat& img, const Detector& lights);
 
     /**
      * @brief 在图像上绘制键盘帮助文字
@@ -102,8 +108,6 @@ public:
     void setPlayDelayMs(int ms) { play_delay_ms_ = std::max(ms, 0); }
 
 private:
-    int selected_param_;
-    std::vector<std::string> param_names_;
     int play_delay_ms_ = 0;   // 播放延迟，越大越慢
     int x_ = 10;              // 绘制起点 x
     int y_ = 30;              // 绘制起点 y

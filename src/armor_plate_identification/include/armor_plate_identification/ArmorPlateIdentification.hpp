@@ -36,8 +36,6 @@ private:
     std::string target_color_;
     std::string camera_type_;
     std::string camera_frame_id_ = "camera_link";
-    std::vector<cv::Point3f> world_points_;
-    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     builtin_interfaces::msg::Time read_stamp_;
     float process_time_ms_ = 0.0f;
@@ -61,7 +59,6 @@ private:
     std::deque<ImageSave> img_buffs_;
 
     void init();
-    void info();
     void Identification(cv::Mat& img_bgr);
     void SolvePose();
     void NumberClassify();

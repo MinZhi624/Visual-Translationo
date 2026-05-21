@@ -15,5 +15,7 @@ public:
 
     void classify(Armor& armor);
     bool checkArmorName(const Armor& armor) const;
+
     static bool checkArmorType(const Armor& armor);
+    static cv::Mat getNumberROI(const cv::Mat& img_bgr, const Armor& armor);
 };

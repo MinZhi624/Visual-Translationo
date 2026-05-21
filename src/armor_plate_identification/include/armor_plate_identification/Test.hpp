@@ -35,7 +35,8 @@ private:
     std::vector<Armor> armors_;
     std::vector<ArmorPlate> armor_plates_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
-    float process_time_ms_ = 10.0f;
+    // DEBUG //
+    float process_time_ms_ = 0.0f;
     float process_time_sum_ = 0.0f;
     float id_time_sum_ = 0.0f;
     float id_split_sum_ = 0.0f;
@@ -45,7 +46,6 @@ private:
     int roi_count_ = 0;
     int frame_count_ = 0;
     double fps_ = 50.0;
-    rclcpp::TimerBase::SharedPtr timer_;
     bool debug_base_;
     bool debug_identification_;
     bool debug_preprocessing_;
@@ -62,7 +62,6 @@ private:
     std::string test_name_;
 
     void init(const std::string& video_path);
-    void info();
     void Identification(cv::Mat& img_bgr);
     void SolvePose();
     void NumberClassify();

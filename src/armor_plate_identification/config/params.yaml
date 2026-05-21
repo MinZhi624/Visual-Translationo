@@ -13,14 +13,11 @@ test_node_cpp:
     max_distance_ratio: 0.8
     min_distance_ratio: 0.3
     # === 数字分类器参数 ===
-    model_path: "model/number_cnn.onnx"
-    label_path: "model/label_cnn.txt"
     number_threshold: 0.2
-    ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
     debug_preprocessing: false
-    debug_identification: true
+    debug_identification: false
     debug_number_classification: true
     # 正常
     # debug_frame: false
@@ -35,6 +32,9 @@ armor_plate_identification_node:
   ros__parameters:
     # === 目标颜色 ===
     target_color: "BLUE"
+    # === 预处理参数 ===
+    threshold_value: 100
+    color_threshold: 100
     # === 相机类型 ===
     # 迈德
     camera_type: "mindvision"
@@ -52,10 +52,7 @@ armor_plate_identification_node:
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
     # === 数字分类器参数 ===
-    model_path: "model/number_cnn.onnx"
-    label_path: "model/label_cnn.txt"
     number_threshold: 0.2
-    ignore_labels: ["negative"]
     # === DEBUG ===
     debug_base: true
     debug_identification: false

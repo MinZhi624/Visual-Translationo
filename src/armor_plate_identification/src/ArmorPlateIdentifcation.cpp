@@ -9,25 +9,23 @@ void ArmorPlateIdentification::init()
     std::string model_relative_path = this->declare_parameter<std::string>("model_path", "");
     std::string model_path = package_share_dir + "/" + model_relative_path;
     float number_threshold = static_cast<float>(this->declare_parameter<double>("number_threshold", 0.15));
-    lights_ = Detector(model_path, number_threshold);
-
-    // Detector 参数设置（必须在构造之后）
-    lights_.MAX_ANGLE_DIFF = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
-    lights_.MIN_LENGTH_RATIO = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.7));
-    lights_.MIN_X_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
-    lights_.MAX_Y_DIFF_RATIO = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
-    lights_.MAX_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
-    lights_.MIN_DISTANCE_RATIO = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
-    lights_.target_color_ = stringToColor(target_color_);
-    lights_.GRAY_THRESHOLD = this->declare_parameter<int>("threshold_value", 160);
-    lights_.COLOR_THRESHOLD = this->declare_parameter<int>("color_threshold", 100);
-    this->timer_ = this->create_wall_timer(std::chrono::milliseconds(5000),
-        std::bind(&ArmorPlateIdentification::info, this));
-
-    world_points_.push_back(cv::Point3f(-67.5f, -27.5f, 0)); // 0
-    world_points_.push_back(cv::Point3f(67.5f, -27.5f, 0)); // 1
-    world_points_.push_back(cv::Point3f(67.5f, 27.5f, 0)); // 2
-    world_points_.push_back(cv::Point3f(-67.5f, 27.5f, 0)); // 3
+    // ==== Detector 参数 ==== //
+    LightParams light_params;
+    light_params.min_contours_area_ = 30;
+    light_params.min_contours_ratio_ = 0.06f;
+    light_params.max_contours_ratio_ = 0.5f;
+    ArmorParams armor_params;
+    armor_params.max_angle_diff_ = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
+    armor_params.min_length_ratio_ = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.7));
+    armor_params.min_x_diff_ratio_ = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
+    armor_params.max_y_diff_ratio_ = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
+    armor_params.max_distance_ratio_ = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
+    armor_params.min_distance_ratio_ = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
+    armor_params.target_color_ = target_color_;
+    lights_ = Detector(model_path, number_threshold,
+                       light_params, armor_params,
+                       this->declare_parameter<int>("threshold_value", 160),
+                       this->declare_parameter<int>("color_threshold", 100));
 
     armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
 
@@ -58,7 +56,7 @@ void ArmorPlateIdentification::init()
     for (int i = 0; i < 12; ++i) {
         projection_matrix.at<double>(i / 4, i % 4) = camera_info_msg_.p[i];
     }
-    pose_solver_ = PoseSolver(world_points_, camera_matrix, distortion_coefficients, projection_matrix);
+    pose_solver_ = PoseSolver(camera_matrix, distortion_coefficients, projection_matrix);
     // ===== DEUBG ===== //
     debug_base_ = this->declare_parameter<bool>("debug_base", false);
     debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
@@ -80,21 +78,8 @@ void ArmorPlateIdentification::init()
     if (debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
     if (debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");
 
-    if (debug_identification_ && debug_base_) {
-        RCLCPP_INFO(this->get_logger(), "DEBUG模式：1-6选参数  T/G调值  +/-调速度");
-    } else if (debug_identification_) {
-        RCLCPP_INFO(this->get_logger(), "DEBUG模式：1-6选参数  T/G调值");
-    } else if (debug_base_) {
-        RCLCPP_INFO(this->get_logger(), "DEBUG模式：+/-调速度");
-    }
-}
-
-void ArmorPlateIdentification::info()
-{
-    if (debug_identification_) {
-        RCLCPP_INFO(this->get_logger(), "MAX_ANGLE_DIFF: %.2f, MAX_Y_DIFF_RATIO: %.2f, MIN_DISTANCE_RATIO: %.2f, MAX_DISTANCE_RATIO: %.2f, MIN_LENGTH_RATIO: %.2f, MIN_X_DIFF_RATIO: %.2f",
-        lights_.MAX_ANGLE_DIFF, lights_.MAX_Y_DIFF_RATIO, lights_.MIN_DISTANCE_RATIO, lights_.MAX_DISTANCE_RATIO, lights_.MIN_LENGTH_RATIO, lights_.MIN_X_DIFF_RATIO
-        );
+    if (debug_base_) {
+        RCLCPP_INFO(this->get_logger(), "DEBUG模式：+/-调速度  P-暂停  ESC-退出");
     }
 }
 
@@ -110,16 +95,12 @@ void ArmorPlateIdentification::Identification(cv::Mat& img_bgr)
 
     // 灯条匹配
     lights_.detectArmors(img_thre, img_bgr);
-    lights_.drawArmors(img_show_);
+    drawArmors(img_show_, lights_.getArmors());
     armors_ = lights_.getArmors();
 
-    // 收集 ROI
-    if (debug_number_classification_) {
-        roi_collector_.feed(lights_.getNumberRois());
-        if (roi_collector_.isDone()) {
-            static int batch = 0;
-            roi_collector_.save("./Debug/NumberROI/temp/batch_" + std::to_string(++batch));
-        }
+    // 收集 rejected ROI（录制模式）
+    if (debug_number_classification_ && roi_collector_.isRecording()) {
+        roi_collector_.feedRejected(lights_.getRejectedNumberRois());
     }
     auto t_id3 = std::chrono::steady_clock::now();
     // 细分耗时累计
@@ -142,34 +123,27 @@ void ArmorPlateIdentification::Identification(cv::Mat& img_bgr)
         showMultiImages("PreProcessions-View", images, labels);
     }
     if (debug_identification_) {
-        debug_controller_.drawParams(img_show_, lights_);
-        lights_.drawAllLights(img_show_);
+        drawAllLights(img_show_, lights_.getLights());
         debug_controller_.drawDebugInfo(img_show_, debug_base_);
-    }
-    if (debug_number_classification_) {
-        roi_collector_.show();
     }
 }
 
 void ArmorPlateIdentification::SolvePose()
 {
     std::vector<ArmorPlate> armor_plates;
-    for (const auto& armor : armors_) {
-        pose_solver_.solve(armor.points_);
+    for (auto& armor : armors_) {
+        pose_solver_.solve(armor);
         ArmorPlate armor_plate;
-        cv::Mat tvec = pose_solver_.getTvec();
-        Eigen::Quaternion q = pose_solver_.getQuaternion();
         geometry_msgs::msg::Pose pose;
-        pose.position.x = tvec.at<double>(0) / 1000;
-        pose.position.y = tvec.at<double>(1) / 1000;
-        pose.position.z = tvec.at<double>(2) / 1000;
-        pose.orientation.x = q.x();
-        pose.orientation.y = q.y();
-        pose.orientation.z = q.z();
-        pose.orientation.w = q.w();
-        float image_distance = pose_solver_.getImageDistanceToCenter();
+        pose.position.x = armor.xyz_camera_.x;
+        pose.position.y = armor.xyz_camera_.y;
+        pose.position.z = armor.xyz_camera_.z;
+        pose.orientation.x = armor.q_camera_.x();
+        pose.orientation.y = armor.q_camera_.y();
+        pose.orientation.z = armor.q_camera_.z();
+        pose.orientation.w = armor.q_camera_.w();
         armor_plate.pose = pose;
-        armor_plate.image_distance_to_center = image_distance;
+        armor_plate.image_distance_to_center = armor.image_distance_to_center_;
         armor_plates.push_back(armor_plate);
     }
     armor_plates_ = armor_plates;
@@ -209,10 +183,10 @@ void ArmorPlateIdentification::controlParams()
         return;
     }
     if (key == 's' || key == 'S') {
-        roi_collector_.startCollect(10);
+        roi_collector_.toggleRecording();
     }
     if (debug_base_) {
-        if (debug_controller_.handleKey(key, lights_, this->get_logger())) {
+        if (debug_controller_.handleKey(key, this->get_logger())) {
             return;
         }
     }
@@ -223,6 +197,9 @@ void ArmorPlateIdentification::ImageShow()
     debug_controller_.drawProcessTime(img_show_, process_time_ms_);
     if (debug_base_) {
         debug_controller_.drawDelay(img_show_);
+    }
+    if (debug_number_classification_) {
+        roi_collector_.show();
     }
     cv::Mat show_img;
     cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
@@ -261,8 +238,8 @@ void ArmorPlateIdentification::TrackerDebugCallBack(const TrackerDebug::SharedPt
     cv::Point3f target_cam(msg->target_point.x, msg->target_point.y, msg->target_point.z);
     cv::Point3f filtered_cam(msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z);
 
-    cv::Point2f target_px = pose_solver_.project(target_cam);
-    cv::Point2f filtered_px = pose_solver_.project(filtered_cam);
+    cv::Point2f target_px = pose_solver_.xyzCameraToPixel(target_cam);
+    cv::Point2f filtered_px = pose_solver_.xyzCameraToPixel(filtered_cam);
 
     auto drawCross = [](cv::Mat& img, const cv::Point2f& center, const cv::Scalar& color, int radius = 12) {
         cv::circle(img, center, radius, color, 2, cv::LINE_AA);

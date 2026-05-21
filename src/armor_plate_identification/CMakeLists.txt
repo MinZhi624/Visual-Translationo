@@ -77,8 +77,8 @@ target_include_directories(Test PUBLIC
 ${OpenCV_INCLUDE_DIRS}
 ${EIGEN3_INCLUDE_DIR}
 )
-target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-target_compile_features(Test PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
+target_compile_features(Test PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
 # ======================
 # 链接库
 # ======================

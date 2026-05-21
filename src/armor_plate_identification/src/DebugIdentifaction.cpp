@@ -2,7 +2,6 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <opencv2/core/utils/filesystem.hpp>
 #include <algorithm>
 
 void showMultiImages(const std::string& window_name,
@@ -72,60 +71,45 @@ void drawAllNumberTest(cv::Mat& img, const std::vector<Armor>& armors)
     }
 }
 
+/////////////////// 绘制函数 //////////////////////////
+
+void drawArmors(cv::Mat& img, const std::vector<Armor>& armors)
+{
+    for (const auto& armor : armors) {
+        // 画交叉线（紫色）
+        cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
+        cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
+    }
+}
+
+void drawAllLights(cv::Mat& img, const std::vector<Light>& lights)
+{
+    for (const auto& light : lights) {
+        drawRotatedRect(img, light.rect_); // 默认是蓝色
+    }
+}
+
+void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness)
+{
+    cv::Point2f vertices[4];
+    rect.points(vertices);
+    for (int i = 0; i < 4; i++) {
+        cv::line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
+    }
+}
+
+void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color, int thickness)
+{
+    cv::line(img, p1, p2, color, thickness);
+    cv::line(img, p2, p3, color, thickness);
+    cv::line(img, p3, p4, color, thickness);
+    cv::line(img, p4, p1, color, thickness);
+}
+
 /////////////////// DebugParamController //////////////////////////
 
-DebugParamController::DebugParamController()
-    : selected_param_(0),
-      param_names_({
-          "MAX_ANGLE_DIFF",
-          "MAX_Y_DIFF_RATIO",
-          "MIN_DISTANCE_RATIO",
-          "MAX_DISTANCE_RATIO",
-          "MIN_LENGTH_RATIO",
-          "MIN_X_DIFF_RATIO"
-      })
-{}
-
-bool DebugParamController::handleKey(int key, Detector& lights, const rclcpp::Logger& logger)
+bool DebugParamController::handleKey(int key, const rclcpp::Logger& logger)
 {
-    // 1-6：选择参数
-    if (key >= '1' && key <= '6') {
-        selected_param_ = key - '1';
-        RCLCPP_INFO(logger, "选中参数: %s", param_names_[selected_param_].c_str());
-        return true;
-    }
-
-    // T/G：调节参数值
-    bool increase = (key == 't' || key == 'T');
-    bool decrease = (key == 'g' || key == 'G');
-
-    if (increase || decrease) {
-        float dir = increase ? 1.0f : -1.0f;
-        switch (selected_param_) {
-            case 0: // MAX_ANGLE_DIFF
-                lights.MAX_ANGLE_DIFF = std::clamp(lights.MAX_ANGLE_DIFF + dir * 0.5f, 0.0f, 30.0f);
-                break;
-            case 1: // MAX_Y_DIFF_RATIO
-                lights.MAX_Y_DIFF_RATIO = std::max(lights.MAX_Y_DIFF_RATIO + dir * 0.05f, 0.0f);
-                break;
-            case 2: // MIN_DISTANCE_RATIO
-                lights.MIN_DISTANCE_RATIO = std::max(lights.MIN_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                break;
-            case 3: // MAX_DISTANCE_RATIO
-                lights.MAX_DISTANCE_RATIO = std::max(lights.MAX_DISTANCE_RATIO + dir * 0.1f, 0.0f);
-                break;
-            case 4: // MIN_LENGTH_RATIO
-                lights.MIN_LENGTH_RATIO = std::clamp(lights.MIN_LENGTH_RATIO + dir * 0.05f, 0.0f, 1.0f);
-                break;
-            case 5: // MIN_X_DIFF_RATIO
-                lights.MIN_X_DIFF_RATIO = std::max(lights.MIN_X_DIFF_RATIO + dir * 0.05f, 0.0f);
-                break;
-            default:
-                break;
-        }
-        return true;
-    }
-
     // +/-：速度控制
     if (key == '+' || key == '=') {
         play_delay_ms_ = std::max(play_delay_ms_ - 10, 0);
@@ -157,37 +141,15 @@ void DebugParamController::drawDelay(cv::Mat& img)
                 cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
 }
 
-void DebugParamController::drawParams(cv::Mat& img, const Detector& lights)
-{
-    // 下面6行：可调参数，放在第三行之后
-    for (int i = 0; i < 6; ++i) {
-        float val = 0.0f;
-        switch (i) {
-            case 0: val = lights.MAX_ANGLE_DIFF; break;
-            case 1: val = lights.MAX_Y_DIFF_RATIO; break;
-            case 2: val = lights.MIN_DISTANCE_RATIO; break;
-            case 3: val = lights.MAX_DISTANCE_RATIO; break;
-            case 4: val = lights.MIN_LENGTH_RATIO; break;
-            case 5: val = lights.MIN_X_DIFF_RATIO; break;
-            default: break;
-        }
-        std::string text = param_names_[i] + ": " + std::to_string(val);
-        text = text.substr(0, text.find('.') + 3);
-        cv::Scalar color = (i == selected_param_) ? cv::Scalar(0, 255, 255) : cv::Scalar(255, 255, 255);
-        cv::putText(img, text, cv::Point(x_, y_ + (i + 2) * line_h_),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
-    }
-}
-
 void DebugParamController::drawDebugInfo(cv::Mat& img, bool show_speed_control)
 {
-    int base_row = 8;  // 1 行 process_time + 1 行 delay + 6 个参数
+    int base_row = 2;  // 1 行 process_time + 1 行 delay
     if (show_speed_control) {
-        cv::putText(img, "1-6:select  T/G:adj  +/-:speed  P:pause  ESC:exit",
+        cv::putText(img, "+/-:speed  P:pause  ESC:exit",
                     cv::Point(x_, y_ + base_row * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
     } else {
-        cv::putText(img, "1-6:select  T/G:adj  P:pause  ESC:exit",
+        cv::putText(img, "P:pause  ESC:exit",
                     cv::Point(x_, y_ + base_row * line_h_ + 10),
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
     }
@@ -225,7 +187,7 @@ void saveTrackerDebugToFile(const std::string& log_dir,
     if (!tracker_log_file.is_open()) {
         std::filesystem::create_directories(log_dir);
         std::string log_path = log_dir + "/tracker_log.txt";
-        tracker_log_file.open(log_path, std::ios::out | std::ios::trunc);
+        tracker_log_file.open(log_path, std::ios::out | std::ios::app);
         if (tracker_log_file.is_open()) {
             tracker_log_file << "sec nanosec "
                 << "target_world_x target_world_y target_world_z "
@@ -281,33 +243,51 @@ void infoTrackerDebugMsg(const rclcpp::Logger& logger,
 /////////////////// NumberRoiCollector //////////////////////////
 
 int NumberRoiCollector::global_counter_ = 0;
+int NumberRoiCollector::batch_counter_ = 0;
 
-void NumberRoiCollector::startCollect(int frames)
+void NumberRoiCollector::toggleRecording()
 {
-    remaining_ = frames;
-    collected_.clear();
-    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"), "开始收集 %d 帧 ROI", frames);
+    if (recording_) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
 }
 
-void NumberRoiCollector::feed(const std::vector<cv::Mat>& rois)
+void NumberRoiCollector::startRecording()
 {
-    if (remaining_ <= 0) return;
-    collected_.insert(collected_.end(), rois.begin(), rois.end());
-    remaining_--;
-    if (remaining_ == 0) {
-        RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"),
-            "收集完成，共 %lu 张 ROI", collected_.size());
+    recording_ = true;
+    collected_.clear();
+    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"), "开始录制 rejected ROI");
+}
+
+void NumberRoiCollector::stopRecording()
+{
+    recording_ = false;
+    if (!collected_.empty()) {
+        std::string dir = "./Debug/NumberROI/rejected/batch_" + std::to_string(++batch_counter_);
+        save(dir);
     }
+    RCLCPP_INFO(rclcpp::get_logger("NumberRoiCollector"),
+        "停止录制，共收集 %lu 张 rejected ROI", collected_.size());
+}
+
+int NumberRoiCollector::feedRejected(const std::vector<cv::Mat>& rois)
+{
+    if (!recording_ || rois.empty()) return 0;
+    int before = static_cast<int>(collected_.size());
+    collected_.insert(collected_.end(), rois.begin(), rois.end());
+    int added = static_cast<int>(collected_.size()) - before;
+    if (added > 0) {
+        RCLCPP_WARN(rclcpp::get_logger("NumberRoiCollector"),
+            "录制中: 新增 %d 张 rejected ROI (总计 %lu)", added, collected_.size());
+    }
+    return added;
 }
 
 void NumberRoiCollector::save(const std::string& dir)
 {
     if (collected_.empty()) return;
-    if (!cv::utils::fs::createDirectories(dir)) {
-        RCLCPP_WARN(rclcpp::get_logger("NumberRoiCollector"),
-            "无法创建目录: %s", dir.c_str());
-        return;
-    }
     for (const auto& roi : collected_) {
         std::string path = dir + "/roi_" + std::to_string(++global_counter_) + ".png";
         if (!cv::imwrite(path, roi)) {

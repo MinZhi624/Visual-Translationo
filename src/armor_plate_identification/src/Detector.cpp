@@ -5,8 +5,22 @@
 #include <algorithm>
 #include "armor_plate_identification/NumberClassifier.hpp"
 ////////////////////// Detector /////////////////////////
-Detector::Detector(const std::string& model_path, float threshold)
-    : classifier_(model_path, threshold)
+Detector::Detector(const std::string& config_path, float number_threshold,
+                   const LightParams& light_params, const ArmorParams& armor_params,
+                   int gray_threshold, int color_threshold)
+    : classifier_(config_path, number_threshold),
+      min_contours_area_(light_params.min_contours_area_),
+      min_contours_ratio_(light_params.min_contours_ratio_),
+      max_contours_ratio_(light_params.max_contours_ratio_),
+      max_angle_diff_(armor_params.max_angle_diff_),
+      min_length_ratio_(armor_params.min_length_ratio_),
+      min_x_diff_ratio_(armor_params.min_x_diff_ratio_),
+      max_y_diff_ratio_(armor_params.max_y_diff_ratio_),
+      max_distance_ratio_(armor_params.max_distance_ratio_),
+      min_distance_ratio_(armor_params.min_distance_ratio_),
+      target_color_(stringToColor(armor_params.target_color_)),
+      gray_threshold_(gray_threshold),
+      color_threshold_(color_threshold)
 {
 }
 
@@ -14,6 +28,7 @@ void Detector::reset()
 {
     find_lights_.clear();
     armors_.clear();
+    rejected_armors_.clear();
     num_lights_ = 0;
 }
 
@@ -24,13 +39,13 @@ cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
     cv::split(img_bgr, bgr);
     cv::Mat color_ch = (target_color_ == Color::BLUE) ? bgr[0] : bgr[2];
     cv::Mat target_color_dim_thre;
-    cv::threshold(color_ch, target_color_dim_thre, COLOR_THRESHOLD, 255, cv::THRESH_BINARY);
+    cv::threshold(color_ch, target_color_dim_thre, color_threshold_, 255, cv::THRESH_BINARY);
 
     // GRAY 阈值
     cv::Mat gray;
     cv::cvtColor(img_bgr, gray, cv::COLOR_BGR2GRAY);
     cv::Mat gray_thre;
-    cv::threshold(gray, gray_thre, GRAY_THRESHOLD, 255, cv::THRESH_BINARY);
+    cv::threshold(gray, gray_thre, gray_threshold_, 255, cv::THRESH_BINARY);
 
     // 对每个 color_dim 区域，检查 GRAY 碎片数，构建合并二值图
     std::vector<std::vector<cv::Point>> target_color_contours;
@@ -38,7 +53,7 @@ cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
     // 过滤面积太小或点数不足的 BLUE 区域
     target_color_contours.erase(
         std::remove_if(target_color_contours.begin(), target_color_contours.end(),
-            [](const auto& c) { return c.size() < 6 || cv::contourArea(c) < MIN_CONTOURS_AREA; }),
+            [this](const auto& c) { return c.size() < 6 || cv::contourArea(c) < min_contours_area_; }),
         target_color_contours.end()
     );
     std::vector<std::pair<cv::Rect, int>> fragment_info;
@@ -78,10 +93,9 @@ cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
         }
     }
     // 闭运算
-    cv::Mat kernal_dilate = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
-    cv::Mat kernal_erode = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
-    cv::dilate(img_thre, img_thre, kernal_dilate);
-    cv::erode(img_thre, img_thre, kernal_erode);
+    cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
+    cv::dilate(img_thre, img_thre, kernal);
+    cv::erode(img_thre, img_thre, kernal);
     // 填充调试图像数据
     if (debug_out) {
         debug_out->blue_dim_thre = target_color_dim_thre.clone();
@@ -106,7 +120,7 @@ void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr)
     armors_ = matchLights(find_lights_, img_bgr);
     // 得到装甲板的号码ROI
     for (auto& armor : armors_) {
-        armor.number_roi_ = getNumberROI(img_bgr, armor);
+        armor.number_roi_ = NumberClassifier::getNumberROI(img_bgr, armor);
     }
     // 更新装甲板数量
     num_lights_ = armors_.size();
@@ -128,35 +142,7 @@ std::vector<Light> Detector::findLights(cv::Mat& img_thre, const cv::Mat& img_bg
     }
     return lights_list;
 }
-////////// ===== CHECK 函数 ===== /////////
-bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour) const
-{
-    // 检查轮廓点的个数 
-    if (contour.size() <= 6) return false;
-    int area = cv::contourArea(contour);
-    // 检查面积
-    if (area <= MIN_CONTOURS_AREA) return false;
-    // 检查长宽比
-    cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
-    double long_length = std::max(min_rect.size.width, min_rect.size.height);
-    double short_length = std::min(min_rect.size.width, min_rect.size.height);
-    double ratio = short_length / long_length;
-    return ratio > MIN_CONTOURS_RATIO && ratio < MAX_CONTOURS_RATIO;
-}
-bool Detector::checkArmorGeometry(const Armor& armor) const
-{
-    // 角度差，灯条长度比
-    if (armor.angle_diff_ > MAX_ANGLE_DIFF || armor.length_ratio_ < MIN_LENGTH_RATIO) return false;
-    // X差比率，y差比率
-    if (armor.x_diff_ratio_ < MIN_X_DIFF_RATIO || armor.y_diff_ratio_ > MAX_Y_DIFF_RATIO) return false;
-    // 距离比率
-    if (armor.distance_ratio_ > MAX_DISTANCE_RATIO || armor.distance_ratio_ < MIN_DISTANCE_RATIO) return false;
-    return true;
-}
-bool Detector::checkLightColor(const Light& light_left, const Light& light_right) const
-{
-    return light_left.color_ == light_right.color_ && light_left.color_ == target_color_;
-}
+
 std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr)
 {
     std::vector<Armor> candidates;
@@ -167,11 +153,17 @@ std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights, const c
             // 几何判断
             if (!checkArmorGeometry(armor)) continue;
             // 数字判读
-            armor.number_roi_ = getNumberROI(img_bgr, armor);
-            armor.pattern_ = getNumberROI_AABB(img_bgr, armor);
+            armor.number_roi_ = NumberClassifier::getNumberROI(img_bgr, armor);
+            armor.pattern_ = getArmorPattern(img_bgr, armor);
             classifier_.classify(armor);
-            if(!classifier_.checkArmorName(armor)) continue;
-            if(!NumberClassifier::checkArmorType(armor)) continue;;
+            if(!classifier_.checkArmorName(armor)) {
+                rejected_armors_.push_back(armor);
+                continue;
+            }
+            if(!NumberClassifier::checkArmorType(armor)) {
+                rejected_armors_.push_back(armor);
+                continue;
+            }
             candidates.push_back(armor);
         }
     }
@@ -205,56 +197,57 @@ std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights, const c
     std::vector<Armor> result;
     for (size_t i = 0; i < candidates.size(); i++) {
         if (!removed[i]) result.push_back(candidates[i]);
+        else rejected_armors_.push_back(candidates[i]);
     }
     return result;
 }
-////////// ===== 绘制函数 ===== /////////
-void Detector::drawArmors(cv::Mat& img)
+////////// ===== CHECK 函数 ===== /////////
+bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour) const
 {
-    for (const auto& armor : armors_) {
-        // 画交叉线（紫色）
-        cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
-        cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
-    }
+    // 检查轮廓点的个数 
+    if (contour.size() <= 6) return false;
+    int area = cv::contourArea(contour);
+    // 检查面积
+    if (area <= min_contours_area_) return false;
+    // 检查长宽比
+    cv::RotatedRect min_rect = cv::minAreaRect(cv::Mat(contour));
+    double long_length = std::max(min_rect.size.width, min_rect.size.height);
+    double short_length = std::min(min_rect.size.width, min_rect.size.height);
+    double ratio = short_length / long_length;
+    return ratio > min_contours_ratio_ && ratio < max_contours_ratio_;
 }
-void Detector::drawAllLights(cv::Mat& img)
+bool Detector::checkArmorGeometry(const Armor& armor) const
 {
-    for (const auto& light : find_lights_) drawRotatedRect(img, light.rect_); // 默认是蓝色
+    // 角度差，灯条长度比
+    if (armor.angle_diff_ > max_angle_diff_ || armor.length_ratio_ < min_length_ratio_) return false;
+    // X差比率，y差比率
+    if (armor.x_diff_ratio_ < min_x_diff_ratio_ || armor.y_diff_ratio_ > max_y_diff_ratio_) return false;
+    // 距离比率
+    if (armor.distance_ratio_ > max_distance_ratio_ || armor.distance_ratio_ < min_distance_ratio_) return false;
+    return true;
 }
-////////// ===== 数字识别 ===== /////////
-cv::Mat Detector::getNumberROI(const cv::Mat& img_bgr, const Armor& armor)
+bool Detector::checkLightColor(const Light& light_left, const Light& light_right) const
 {
-    // 保证是有内容的装甲板
-    if (armor.points_.size() != 4) return cv::Mat();
-    // 透视转换
-    auto rotation_matrix = cv::getPerspectiveTransform(armor.points_, NUMBER_TARGET_POINTS);
-    cv::Mat number_roi;
-    cv::warpPerspective(img_bgr, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
-    // 数字部分ROI
-    number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
-    // 预处理：灰度化
-    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
-    return number_roi;
+    return light_left.color_ == light_right.color_ && light_left.color_ == target_color_;
 }
 
-cv::Mat Detector::getNumberROI_AABB(const cv::Mat& img_bgr, const Armor& armor) const
+cv::Mat Detector::getArmorPattern(const cv::Mat& img_bgr, const Armor& armor) const
 {
     if (armor.paired_lights_.size() != 2) return cv::Mat();
     const auto& left = armor.paired_lights_[0];
     const auto& right = armor.paired_lights_[1];
-
-    // top2bottom vector = bottom_ - top_
+    
     cv::Point2f left_tb = left.bottom_ - left.top_;
     cv::Point2f right_tb = right.bottom_ - right.top_;
 
-    // Extend by 1.125x to get full armor corners
+    // 延伸
     // 1.125 = 0.5 * armor_height / lightbar_length = 0.5 * 126mm / 56mm
     cv::Point2f tl = left.center_ - left_tb * 1.125f;
     cv::Point2f bl = left.center_ + left_tb * 1.125f;
     cv::Point2f tr = right.center_ - right_tb * 1.125f;
     cv::Point2f br = right.center_ + right_tb * 1.125f;
 
-    // AABB clamp to image bounds
+    // 防止越界
     int roi_left = std::max(static_cast<int>(std::min(tl.x, bl.x)), 0);
     int roi_top = std::max(static_cast<int>(std::min(tl.y, tr.y)), 0);
     int roi_right = std::min(static_cast<int>(std::max(tr.x, br.x)), img_bgr.cols);
@@ -264,10 +257,10 @@ cv::Mat Detector::getNumberROI_AABB(const cv::Mat& img_bgr, const Armor& armor) 
     return img_bgr(cv::Rect(roi_left, roi_top, roi_right - roi_left, roi_bottom - roi_top)).clone();
 }
 
-std::vector<cv::Mat> Detector::getNumberRois()
+std::vector<cv::Mat> Detector::getRejectedNumberRois()
 {
     std::vector<cv::Mat> rois;
-    for (const auto& armor : armors_) {
+    for (const auto& armor : rejected_armors_) {
         if (!armor.number_roi_.empty()) {
             rois.push_back(armor.number_roi_.clone());
         }
@@ -275,21 +268,3 @@ std::vector<cv::Mat> Detector::getNumberRois()
     return rois;
 }
 
-/////////////////// 工具函数 //////////////////////////
-
-void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness)
-{
-    cv::Point2f vertices[4];
-    rect.points(vertices);
-    for (int i = 0; i < 4; i++) {
-        cv::line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
-    }
-}
-
-void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color, int thickness)
-{
-    cv::line(img, p1, p2, color, thickness);
-    cv::line(img, p2, p3, color, thickness);
-    cv::line(img, p3, p4, color, thickness);
-    cv::line(img, p4, p1, color, thickness);
-}
