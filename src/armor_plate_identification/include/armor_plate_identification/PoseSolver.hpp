@@ -30,10 +30,3 @@ public:
 
 	float calculateImageDistanceToCenter(const cv::Point2f & target_center_point);
 };
-
-/**
- * @brief 将CV::MAT旋转矩阵转换为EIGEN中四元数
- * @param R cv类型的旋转矩阵
- * @return eigen类型的四元数
- */
-inline Eigen::Quaterniond calculateQuaternion(const cv::Mat& R);

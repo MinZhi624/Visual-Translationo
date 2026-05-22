@@ -8,6 +8,8 @@
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/transform_broadcaster.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <opencv2/highgui.hpp>
@@ -35,6 +37,7 @@ private:
     std::vector<Armor> armors_;
     std::vector<ArmorPlate> armor_plates_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
+    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     // DEBUG //
     float process_time_ms_ = 0.0f;
     float process_time_sum_ = 0.0f;

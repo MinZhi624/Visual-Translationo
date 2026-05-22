@@ -7,12 +7,6 @@
 
 using armor_plate_interfaces::msg::TrackerDebug;
 
-// opencv坐标系 → 云台坐标系 (x向前, y向左, z向上)
-const Eigen::Matrix3d R_w_cv = (Eigen::Matrix3d() <<
-    0.0 ,  0.0,  1.0,
-    -1.0,  0.0,  0.0,
-    0.0 , -1.0,  0.0).finished();
-
 // 默认构造函数
 Tracker::Tracker()
     : yaw_(0.0f), pitch_(0.0f)
@@ -63,8 +57,8 @@ void Tracker::init(const ArmorPlate& armor_plate, double current_time)
 
     Eigen::Vector3d pw = R_w_c_ * target_position;
     const double r_init = 0.26;
-    double x_c0 = pw.x() - r_init * std::sin(armor_pose_yaw_world);
-    double y_c0 = pw.y() - r_init * std::cos(armor_pose_yaw_world);
+    double x_c0 = pw.x() + r_init * std::cos(armor_pose_yaw_world);
+    double y_c0 = pw.y() + r_init * std::sin(armor_pose_yaw_world);
     
     Eigen::Vector<double, 9> init_state;
     init_state << x_c0, y_c0, pw.z(), 0.0, 0.0, 0.0, r_init, armor_pose_yaw_world, 0.0;
@@ -113,8 +107,8 @@ void Tracker::selectBestMatch(const std::vector<ArmorPlate>& armor_plates, Armor
     double r = state[6];
     double yaw = state[7];
     Eigen::Vector3d pred_pos(
-        state[0] + r * std::sin(yaw),
-        state[1] - r * std::cos(yaw),
+        state[0] - r * std::cos(yaw),
+        state[1] - r * std::sin(yaw),
         state[2]
     );
     float min_dist = std::numeric_limits<float>::max();
@@ -175,11 +169,11 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     double psi = yaw_abs;
     double theta = pitch_abs;
     // Rw<-c = Rx(pitch_abs)Ry(-yaw_abs) 解耦矩阵
-    Eigen::Matrix3d R_cv_c;
-    R_cv_c << cos(psi),            0,            -sin(psi),
+    Eigen::Matrix3d R_world_gimbal;
+    R_world_gimbal << cos(psi),            0,            -sin(psi),
             -sin(theta)*sin(psi), cos(theta),   -sin(theta)*cos(psi),
             cos(theta)*sin(psi),  sin(theta),   cos(theta)*cos(psi);
-    R_w_c_ = R_w_cv * R_cv_c;
+    R_w_c_ = R_world_gimbal;
     R_c_w_ = R_w_c_.transpose();
     q_w_c_ = Eigen::Quaterniond(R_w_c_);
     // 更新状态转移矩阵中的dt
@@ -248,7 +242,7 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     center_velocity_    = Eigen::Vector3d(state[3], state[4], 0);
     center_r_           = static_cast<float>(state[6]);
     filter_orientation_world_ = getQuaternionFromYaw(state[7]);
-
+    RCLCPP_INFO(rclcpp::get_logger("armor_plate_tracker"),"pose yaw = %.4f", armor_pose_yaw_world);
     auto t_end = std::chrono::steady_clock::now();
     time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
 }
@@ -280,7 +274,7 @@ float normalizeRadAngle(float rad)
 Eigen::Quaterniond getQuaternionFromYaw(float yaw)
 {
     // 有关世界Z轴的旋转
-    Eigen::AngleAxisd yawAngle(yaw + M_PI / 2, Eigen::Vector3d::UnitZ());
+    Eigen::AngleAxisd yawAngle(yaw, Eigen::Vector3d::UnitZ());
     return Eigen::Quaterniond(yawAngle);
 }
 

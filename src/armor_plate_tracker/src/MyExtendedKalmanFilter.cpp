@@ -115,14 +115,20 @@ void MyExtendedKalmanFilter::calculateObservationJacobian()
 {
     /*
         方程如下:
-        1, 0, 0, 0, 0, 0, sin(yaw), rcos(yaw) , 0,
-        0, 1, 0, 0, 0, 0, -cos(yaw), rsin(yaw), 0,
-        0, 0, 1, 0, 0, 0, 0,      , 0         , 0,
-        0, 0, 0, 0, 0, 0, 0,      , 1         , 0,
+        x = x_c - r * cos(yaw)
+        y = y_c - r * sin(yaw)
+        z = z
+        yaw = yaw
+
+        H = dh/dx =
+        [1, 0, 0, 0, 0, 0, -cos(yaw),  r*sin(yaw), 0]
+        [0, 1, 0, 0, 0, 0, -sin(yaw), -r*cos(yaw), 0]
+        [0, 0, 1, 0, 0, 0, 0,          0,           0]
+        [0, 0, 0, 0, 0, 0, 0,          1,           0]
     */
     observation_jacobian_ <<
-        1, 0, 0, 0, 0, 0, std::sin(state_pre_[7]),  state_pre_[6] * std::cos(state_pre_[7]), 0,
-        0, 1, 0, 0, 0, 0, -std::cos(state_pre_[7]), state_pre_[6] * std::sin(state_pre_[7]), 0,
+        1, 0, 0, 0, 0, 0, -std::cos(state_pre_[7]),  state_pre_[6] * std::sin(state_pre_[7]),  0,
+        0, 1, 0, 0, 0, 0, -std::sin(state_pre_[7]), -state_pre_[6] * std::cos(state_pre_[7]), 0,
         0, 0, 1, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 1, 0;
 }
@@ -133,8 +139,8 @@ void MyExtendedKalmanFilter::measurementFunction(
 {
     /*  
         方程如下:
-        x = x_c + r *sin(yaw)
-        y = y_c - r * cos(yaw)
+        x = x_c - r * cos(yaw)
+        y = y_c - r * sin(yaw)
         z = z
         yaw = yaw
     */
@@ -145,8 +151,8 @@ void MyExtendedKalmanFilter::measurementFunction(
     double yaw = state[7];
 
     observation <<
-        x_c + r * std::sin(yaw),
-        y_c - r * std::cos(yaw),
+        x_c - r * std::cos(yaw),
+        y_c - r * std::sin(yaw),
         z_c,
         yaw;
 }

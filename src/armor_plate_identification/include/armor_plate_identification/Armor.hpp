@@ -2,6 +2,7 @@
 #include <opencv2/core.hpp>
 #include <builtin_interfaces/msg/time.hpp>
 #include <Eigen/Geometry>
+#include "Eigen/src/Core/Matrix.h"
 
 /*  enum class
 	这里采用enum class，这是个更现代的方法：
@@ -22,14 +23,14 @@ enum class Color
 	NONE
 };
 
-enum class ArmorName
+enum class ArmorName : int
 {
-	ONE,
-	TWO,
-	THREE,
-	FOUR,
-	FIVE,
-	NONE
+	ONE = 1,
+	TWO = 2,
+	THREE = 3,
+	FOUR = 4,
+	FIVE = 5,
+	NONE = 0
 };
 
 inline Color stringToColor(const std::string& s)
@@ -92,8 +93,8 @@ public:
 	// 基本信息
 	std::array<Light, 2> paired_lights_; // 按x轴从左到右排列的两个灯条
 	std::vector<cv::Point2f> points_; // 按照顺时针顺序排列的四个点
-	cv::Point3f xyz_camera_; 	// 相机坐标系下的装甲板位置
-	Eigen::Quaterniond q_camera_; // 相机坐标系下的装甲板姿态
+	Eigen::Vector3d xyz_gimbal_; 	// 相机坐标系下的装甲板位置
+	Eigen::Quaterniond q_gimbal_; // 相机坐标系下的装甲板姿态
 	float image_distance_to_center_;
 	// 数字识别信息
 	ArmorType type_;

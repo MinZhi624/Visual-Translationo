@@ -1,5 +1,6 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
 #include "armor_plate_identification/Test.hpp"
+#include <rclcpp/logging.hpp>
 void Test::run()
 {
     cv::Mat frame;
@@ -122,6 +123,7 @@ void Test::init(const std::string& video_path)
     pose_solver_ = PoseSolver(camera_matrix, distortion_coefficients);
     // ===== 初始化发布器 ===== //
     armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
+    tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     // ===== DEBUG ===== //
     debug_base_ = this->declare_parameter<bool>("debug_base", false);
     debug_identification_ = this->declare_parameter<bool>("debug_identification", false);
@@ -207,15 +209,14 @@ void Test::SolvePose()
     for (auto& armor : armors_) {
         pose_solver_.solve(armor);
         ArmorPlate armor_plate;
-        geometry_msgs::msg::Pose pose;
-        pose.position.x = armor.xyz_camera_.x;
-        pose.position.y = armor.xyz_camera_.y;
-        pose.position.z = armor.xyz_camera_.z;
-        pose.orientation.x = armor.q_camera_.x();
-        pose.orientation.y = armor.q_camera_.y();
-        pose.orientation.z = armor.q_camera_.z();
-        pose.orientation.w = armor.q_camera_.w();
-        armor_plate.pose = pose;
+        armor_plate.pose.position.x = armor.xyz_gimbal_.x();
+        armor_plate.pose.position.y = armor.xyz_gimbal_.y();
+        armor_plate.pose.position.z = armor.xyz_gimbal_.z();
+        armor_plate.pose.orientation.x = armor.q_gimbal_.x();
+        armor_plate.pose.orientation.y = armor.q_gimbal_.y();
+        armor_plate.pose.orientation.z = armor.q_gimbal_.z();
+        armor_plate.pose.orientation.w = armor.q_gimbal_.w();
+        armor_plate.number = static_cast<int>(armor.name_);
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
         armor_plates.push_back(armor_plate);
     }
@@ -235,6 +236,24 @@ void Test::Publish()
     armor_plates_msg.header.frame_id = "camera_link";
     armor_plates_msg.armor_plates = armor_plates_;
     armor_plates_pub_->publish(armor_plates_msg);
+
+    // 发布相机坐标系下的TF（使用solvePnP解算的完整旋转）
+    for (size_t i = 0; i < armor_plates_.size(); ++i) {
+        const auto& plate = armor_plates_[i];
+        const auto& q = armors_[i].q_gimbal_;
+        geometry_msgs::msg::TransformStamped tf;
+        tf.header.stamp = stamp;
+        tf.header.frame_id = "camera_link";
+        tf.child_frame_id = "armor_" + std::to_string(i);
+        tf.transform.translation.x = plate.pose.position.x;
+        tf.transform.translation.y = plate.pose.position.y;
+        tf.transform.translation.z = plate.pose.position.z;
+        tf.transform.rotation.w = q.w();
+        tf.transform.rotation.x = q.x();
+        tf.transform.rotation.y = q.y();
+        tf.transform.rotation.z = q.z();
+        tf_broadcaster_->sendTransform(tf);
+    }
 }
 
 void Test::controlParams()
@@ -314,11 +333,11 @@ void Test::TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     if (it == images_buffs.end()) return;
 
     cv::Mat debug_img = it->img.clone();
-    cv::Point3f target_cam(msg->target_point.x, msg->target_point.y, msg->target_point.z);
-    cv::Point3f filtered_cam(msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z);
+    cv::Point3f target_gambal(msg->target_point.x, msg->target_point.y, msg->target_point.z);
+    cv::Point3f filtered_gambal(msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z);
 
-    cv::Point2f target_px = pose_solver_.xyzCameraToPixel(target_cam);
-    cv::Point2f filtered_px = pose_solver_.xyzCameraToPixel(filtered_cam);
+    cv::Point2f target_px = pose_solver_.xyzCameraToPixel(target_gambal);
+    cv::Point2f filtered_px = pose_solver_.xyzCameraToPixel(filtered_gambal);
 
     auto drawCross = [](cv::Mat& img, const cv::Point2f& center, const cv::Scalar& color, int radius = 12) {
         cv::circle(img, center, radius, color, 2, cv::LINE_AA);
@@ -340,7 +359,7 @@ void Test::TrackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     }
 
     // 输出 TrackerDebug 数据
-    infoTrackerDebugMsg(rclcpp::get_logger("TRACKER_DEBUG"), *msg);
+    // infoTrackerDebugMsg(rclcpp::get_logger("TRACKER_DEBUG"), *msg);
 
     std::string method = msg->method;
     if (method.empty()) method = "unknown";

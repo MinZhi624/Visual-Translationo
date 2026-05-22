@@ -95,5 +95,5 @@ def generate_launch_description():
         video_path_arg,
         use_foxglove_arg,
         # 启动节点
-        test_node, tracker_node, serial_node, foxglove_bridge_node
+        test_node, tracker_node, foxglove_bridge_node
     ])
