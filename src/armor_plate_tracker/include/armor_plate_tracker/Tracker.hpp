@@ -42,9 +42,10 @@ private:
     // 绝对角度
     float yaw_abs_;
     float pitch_abs_;
-    Eigen::Matrix3d R_w_c_; // R_{w<-c}
-    Eigen::Matrix3d R_c_w_; // R_{c<-w}
-    Eigen::Quaterniond q_w_c_;
+    Eigen::Matrix3d R_w_g_; // R_{w<-g} 世界 <- 云台
+    Eigen::Matrix3d R_g_w_; // R_{g<-w} 云台 <- 世界
+    Eigen::Quaterniond q_w_g_; // 世界 <- 云台
+    Eigen::Quaterniond q_g_c_; // 云台 <- 相机
     // 时间相关
     double last_update_time_;   // 上次更新时间（秒）
     double last_detection_time_;// 上次检测到目标的时间（秒）
@@ -74,19 +75,15 @@ private:
     float time_cost_ = 0.0f;
     bool solve_ok_ = false;
     
-    // 选择最佳匹配目标
+
     void selectBestMatch(const std::vector<ArmorPlate>& armor_plates, ArmorPlate& target_armor);
+
     
-    // 检查是否突变
-    bool isYawMutation(const float& armor_pose_yaw);
-    
-    // 检查是否丢失太久
+    bool checkYawMutation(const float& armor_pose_yaw);
     bool isLostTooLong(double current_time) const;
+    double calculateDt(double current_time);
 
-    // 更新测量值相关成员变量
     void updateMeasurement(const ArmorPlate& armor_plate, double current_time);
-
-    // 更新滤波值相关成员变量（位置+角度）
     void updateFilteredValue(const Eigen::Vector3d& pc_f, const Eigen::Vector3d& pw_f);
 public:
     // 默认构造函数

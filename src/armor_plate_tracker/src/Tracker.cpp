@@ -7,6 +7,27 @@
 
 using armor_plate_interfaces::msg::TrackerDebug;
 
+// 相机坐标系 -> 云台坐标系
+static const Eigen::Matrix3d R_gimbal_camera = (Eigen::Matrix3d() <<
+    0,  0,  1,
+   -1,  0,  0,
+    0, -1,  0).finished();
+// 云台坐标系 -> 相机坐标系
+static const Eigen::Matrix3d R_camera_gimbal = R_gimbal_camera.transpose();
+
+Eigen::Matrix3d getR_world_gimbal(float yaw, float pitch)
+{
+    Eigen::Matrix3d R_yaw;
+    R_yaw = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ());
+
+    Eigen::Matrix3d R_pitch;
+    R_pitch = Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY());
+
+    // 云台坐标系到世界坐标系旋转矩阵
+    Eigen::Matrix3d R_gimbal2world = R_yaw * R_pitch;
+    return R_gimbal2world;
+}
+
 // 默认构造函数
 Tracker::Tracker()
     : yaw_(0.0f), pitch_(0.0f)
@@ -41,27 +62,30 @@ void Tracker::reset()
 void Tracker::init(const ArmorPlate& armor_plate, double current_time)
 {
     // 跟新滤波器
-    Eigen::Vector3d target_position(
+    Eigen::Vector3d xyz_camera(
         armor_plate.pose.position.x,
         armor_plate.pose.position.y,
         armor_plate.pose.position.z
     );
-    Eigen::Quaterniond target_plate_q(
+    Eigen::Quaterniond q_camera(
         armor_plate.pose.orientation.w,
         armor_plate.pose.orientation.x,
         armor_plate.pose.orientation.y,
         armor_plate.pose.orientation.z
     );
-    Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q;
-    float armor_pose_yaw_world = calculatePoseYaw(qw_m);
+    // camera -> gimbal -> world
+    Eigen::Quaterniond q_gimbal_measurement = q_g_c_ * q_camera;
+    Eigen::Quaterniond q_world_measurement = q_w_g_ * q_gimbal_measurement;
+    float armor_pose_yaw_world = calculatePoseYaw(q_world_measurement);
 
-    Eigen::Vector3d pw = R_w_c_ * target_position;
+    Eigen::Vector3d xyz_gimbal = R_gimbal_camera * xyz_camera;
+    Eigen::Vector3d xyz_world = R_w_g_ * xyz_gimbal;
     const double r_init = 0.26;
-    double x_c0 = pw.x() + r_init * std::cos(armor_pose_yaw_world);
-    double y_c0 = pw.y() + r_init * std::sin(armor_pose_yaw_world);
+    double x_c0 = xyz_world.x() + r_init * std::cos(armor_pose_yaw_world);
+    double y_c0 = xyz_world.y() + r_init * std::sin(armor_pose_yaw_world);
     
     Eigen::Vector<double, 9> init_state;
-    init_state << x_c0, y_c0, pw.z(), 0.0, 0.0, 0.0, r_init, armor_pose_yaw_world, 0.0;
+    init_state << x_c0, y_c0, xyz_world.z(), 0.0, 0.0, 0.0, r_init, armor_pose_yaw_world, 0.0;
     
     Eigen::Matrix<double, 9, 9> init_P = Eigen::Matrix<double, 9, 9>::Identity();
     init_P.diagonal() << 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 0.01, 0.1, 1.0;
@@ -70,7 +94,7 @@ void Tracker::init(const ArmorPlate& armor_plate, double current_time)
 
     // 首次初始化：测量值 = 滤波值 = 初始观测
     updateMeasurement(armor_plate, current_time);
-    updateFilteredValue(target_position, pw);
+    updateFilteredValue(xyz_camera, xyz_world);
 
     initialized_ = true;
 }
@@ -106,7 +130,7 @@ void Tracker::selectBestMatch(const std::vector<ArmorPlate>& armor_plates, Armor
     Eigen::Vector<double, 9> state = ekf_.getStatePost();
     double r = state[6];
     double yaw = state[7];
-    Eigen::Vector3d pred_pos(
+    Eigen::Vector3d xyz_pred_world(
         state[0] - r * std::cos(yaw),
         state[1] - r * std::sin(yaw),
         state[2]
@@ -114,13 +138,15 @@ void Tracker::selectBestMatch(const std::vector<ArmorPlate>& armor_plates, Armor
     float min_dist = std::numeric_limits<float>::max();
     size_t best_idx = 0;
     for (size_t i = 0; i < num_plates; ++i) {
-        Eigen::Vector3d p_c;
-        p_c[0] = armor_plates[i].pose.position.x;
-        p_c[1] = armor_plates[i].pose.position.y;
-        p_c[2] = armor_plates[i].pose.position.z;
-        Eigen::Vector3d p_w = R_w_c_ * p_c;
-        Eigen::Vector3d diff = p_w - pred_pos;
-        float dist_sq = diff.norm();
+        Eigen::Vector3d xyz_camera;
+        xyz_camera[0] = armor_plates[i].pose.position.x;
+        xyz_camera[1] = armor_plates[i].pose.position.y;
+        xyz_camera[2] = armor_plates[i].pose.position.z;
+        // camera -> gimbal -> world
+        Eigen::Vector3d xyz_gimbal = R_gimbal_camera * xyz_camera;
+        Eigen::Vector3d xyz_world = R_w_g_ * xyz_gimbal;
+        Eigen::Vector3d diff_world = xyz_world - xyz_pred_world;
+        float dist_sq = diff_world.norm();
         if (dist_sq < min_dist) {
             min_dist = dist_sq;
             best_idx = i;
@@ -131,7 +157,7 @@ void Tracker::selectBestMatch(const std::vector<ArmorPlate>& armor_plates, Armor
 }
 
 // 检查Yaw是否突变
-bool Tracker::isYawMutation(const float& armor_pose_yaw)
+bool Tracker::checkYawMutation(const float& armor_pose_yaw)
 {
     if (!initialized_) {
         return false;
@@ -148,6 +174,18 @@ bool Tracker::isLostTooLong(double current_time) const
     return lost_duration > max_lost_time_;
 }
 
+double Tracker::calculateDt(double current_time)
+{
+    double dt = 0.01;  // 默认10ms
+    if (last_update_time_ > 0.0) {
+        dt = current_time - last_update_time_;
+        if (dt <= 0.0) dt = 0.001;  // 最小1ms
+        if (dt > 1.0) dt = 1.0;     // 最大1s
+    }
+    last_update_time_ = current_time;
+    return dt;
+}
+
 // 主更新函数
 void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
                      double current_time,
@@ -157,25 +195,13 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     solve_ok_ = false;
 
     // 计算dt（与上次更新的时间差）
-    double dt = 0.01;  // 默认10ms
-    if (last_update_time_ > 0.0) {
-        dt = current_time - last_update_time_;
-        if (dt <= 0.0) dt = 0.001;  // 最小1ms
-        if (dt > 1.0) dt = 1.0;     // 最大1s
-    }
-    last_update_time_ = current_time;
+    double dt = calculateDt(current_time);
     
     // 坐标系转换计算
-    double psi = yaw_abs;
-    double theta = pitch_abs;
-    // Rw<-c = Rx(pitch_abs)Ry(-yaw_abs) 解耦矩阵
-    Eigen::Matrix3d R_world_gimbal;
-    R_world_gimbal << cos(psi),            0,            -sin(psi),
-            -sin(theta)*sin(psi), cos(theta),   -sin(theta)*cos(psi),
-            cos(theta)*sin(psi),  sin(theta),   cos(theta)*cos(psi);
-    R_w_c_ = R_world_gimbal;
-    R_c_w_ = R_w_c_.transpose();
-    q_w_c_ = Eigen::Quaterniond(R_w_c_);
+    R_w_g_ = getR_world_gimbal(yaw_abs, pitch_abs);
+    R_g_w_ = R_w_g_.transpose();
+    q_w_g_ = Eigen::Quaterniond(R_w_g_);
+    q_g_c_ = Eigen::Quaterniond(R_gimbal_camera);
     // 更新状态转移矩阵中的dt
     ekf_.updateStateTransitionMatrix(dt);
     // 没有目标情况
@@ -191,26 +217,27 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     selectBestMatch(armor_plates, target_plate);
     
     // 提取选中的目标位置（相机系）
-    Eigen::Vector3d target_position(
+    Eigen::Vector3d xyz_camera(
         target_plate.pose.position.x,
         target_plate.pose.position.y,
         target_plate.pose.position.z
     );
     
     // 提取装甲板姿态四元数（相机系）
-    Eigen::Quaterniond target_plate_q(
+    Eigen::Quaterniond q_camera(
         target_plate.pose.orientation.w,
         target_plate.pose.orientation.x,
         target_plate.pose.orientation.y,
         target_plate.pose.orientation.z
     );
-    // 提前计算世界坐标系下的装甲板姿态四元数
-    Eigen::Quaterniond qw_m = q_w_c_ * target_plate_q;
+    // camera -> gimbal -> world
+    Eigen::Quaterniond q_gimbal_measurement = q_g_c_ * q_camera;
+    Eigen::Quaterniond q_world_measurement = q_w_g_ * q_gimbal_measurement;
     
     // 计算装甲板姿态 yaw（世界坐标系）
-    float armor_pose_yaw_world = calculatePoseYaw(qw_m);
+    float armor_pose_yaw_world = calculatePoseYaw(q_world_measurement);
     // 判断突变
-    if (isYawMutation(armor_pose_yaw_world)) reset();
+    if (checkYawMutation(armor_pose_yaw_world)) reset();
     // 如果是第一次初始化，设置初始状态（世界坐标系）
     if (!initialized_) {
         init(target_plate, current_time);
@@ -223,31 +250,34 @@ void Tracker::Update(const std::vector<ArmorPlate>& armor_plates,
     // 世界坐标系下 EKF: Predict
     ekf_.predict();
 
-    // 世界坐标系下的原始测量值
-    Eigen::Vector3d pw_m = R_w_c_ * target_position;
+    // 世界坐标系下的原始测量值 (camera -> gimbal -> world)
+    Eigen::Vector3d xyz_gimbal_measurement = R_gimbal_camera * xyz_camera;
+    Eigen::Vector3d xyz_world_measurement = R_w_g_ * xyz_gimbal_measurement;
     Eigen::Vector<double, 4> measurement;
-    measurement << pw_m.x(), pw_m.y(), pw_m.z(), armor_pose_yaw_world;
+    measurement << xyz_world_measurement.x(), xyz_world_measurement.y(), xyz_world_measurement.z(), armor_pose_yaw_world;
 
     Eigen::Vector<double, 9> state;
     ekf_.correct(measurement);
     state = ekf_.getStatePost();
     solve_ok_ = true;
 
-    Eigen::Vector3d pw_f = ekf_.getFilteredObservation().head<3>();
-    Eigen::Vector3d pc_f = R_c_w_ * pw_f;
-    updateFilteredValue(pc_f, pw_f);
+    Eigen::Vector3d xyz_world_filtered = ekf_.getFilteredObservation().head<3>();
+    // world -> gimbal -> camera
+    Eigen::Vector3d xyz_gimbal_filtered = R_g_w_ * xyz_world_filtered;
+    Eigen::Vector3d xyz_camera_filtered = R_camera_gimbal * xyz_gimbal_filtered;
+    updateFilteredValue(xyz_camera_filtered, xyz_world_filtered);
 
     // EKF 状态向量提取
     center_point_world_ = Eigen::Vector3d(state[0], state[1], state[2]);
     center_velocity_    = Eigen::Vector3d(state[3], state[4], 0);
     center_r_           = static_cast<float>(state[6]);
     filter_orientation_world_ = getQuaternionFromYaw(state[7]);
-    RCLCPP_INFO(rclcpp::get_logger("armor_plate_tracker"),"pose yaw = %.4f", armor_pose_yaw_world);
     auto t_end = std::chrono::steady_clock::now();
     time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
 }
 float calculatePoseYaw(const Eigen::Quaterniond &q)
 {
+    // Z 轴提取
     double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
     double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
     return static_cast<float>(std::atan2(siny_cosp, cosy_cosp));
@@ -280,26 +310,30 @@ Eigen::Quaterniond getQuaternionFromYaw(float yaw)
 
 void Tracker::updateMeasurement(const ArmorPlate& armor_plate, double current_time)
 {
-    Eigen::Vector3d pc(
+    Eigen::Vector3d xyz_camera(
         armor_plate.pose.position.x,
         armor_plate.pose.position.y,
         armor_plate.pose.position.z
     );
-    Eigen::Vector3d pw = R_w_c_ * pc;
+    // camera -> gimbal -> world
+    Eigen::Vector3d xyz_gimbal = R_gimbal_camera * xyz_camera;
+    Eigen::Vector3d xyz_world = R_w_g_ * xyz_gimbal;
 
-    measured_position_camera_ = pc;
-    measured_position_world_  = pw;
-    measured_yaw_   = calculateYaw(pc);
-    measured_pitch_ = calculatePitch(pc);
+    measured_position_camera_ = xyz_camera;
+    measured_position_world_  = xyz_world;
+    measured_yaw_   = calculateYaw(xyz_camera);
+    measured_pitch_ = calculatePitch(xyz_camera);
 
-    Eigen::Quaterniond qc(
+    Eigen::Quaterniond q_camera(
         armor_plate.pose.orientation.w,
         armor_plate.pose.orientation.x,
         armor_plate.pose.orientation.y,
         armor_plate.pose.orientation.z
     );
-    Eigen::Quaterniond qw = q_w_c_ * qc;
-    float armor_yaw_world = calculatePoseYaw(qw);
+    // camera -> gimbal -> world
+    Eigen::Quaterniond q_gimbal = q_g_c_ * q_camera;
+    Eigen::Quaterniond q_world = q_w_g_ * q_gimbal;
+    float armor_yaw_world = calculatePoseYaw(q_world);
     measured_orientation_world_ = getQuaternionFromYaw(armor_yaw_world);
 
     last_armor_pose_yaw_world_ = armor_yaw_world;
@@ -308,12 +342,12 @@ void Tracker::updateMeasurement(const ArmorPlate& armor_plate, double current_ti
     is_lost_ = false;
 }
 
-void Tracker::updateFilteredValue(const Eigen::Vector3d& pc_f, const Eigen::Vector3d& pw_f)
+void Tracker::updateFilteredValue(const Eigen::Vector3d& xyz_camera_filtered, const Eigen::Vector3d& xyz_world_filtered)
 {
-    filter_position_camera_ = pc_f;
-    filter_position_world_  = pw_f;
-    yaw_   = calculateYaw(pc_f);
-    pitch_ = calculatePitch(pc_f);
+    filter_position_camera_ = xyz_camera_filtered;
+    filter_position_world_  = xyz_world_filtered;
+    yaw_   = calculateYaw(xyz_camera_filtered);
+    pitch_ = calculatePitch(xyz_camera_filtered);
 }
 
 TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time& stamp) const

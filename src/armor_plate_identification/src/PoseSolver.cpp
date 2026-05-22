@@ -34,14 +34,6 @@ static const std::vector<cv::Point3f> LARGE_ARMOR_POINTS = {
     cv::Point3f(0, LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT)    // 左下
 };
 
-// 相机坐标系 -> 云台坐标系
-static const Eigen::Matrix3d R_gimbal_camera = (Eigen::Matrix3d() <<
-    0,  0,  1,
-   -1,  0,  0,
-    0, -1,  0).finished();
-// 云台坐标系 -> 相机坐标系
-static const Eigen::Matrix3d R_camera_gimbal = R_gimbal_camera.transpose();
-
 PoseSolver::PoseSolver()
     : camera_matrix_(),
       distortion_coefficients_(),
@@ -89,10 +81,8 @@ void PoseSolver::solve(Armor & armor)
     cv::cv2eigen(rmat, R_camrea_armor);
     cv::cv2eigen(tvec, t_camera);
 
-    Eigen::Matrix3d R_gimbal_armor = R_gimbal_camera * R_camrea_armor;
-
-    armor.xyz_gimbal_ = R_gimbal_camera * t_camera;
-    armor.q_gimbal_ = Eigen::Quaterniond(R_gimbal_armor);
+    armor.xyz_camera_ = t_camera;
+    armor.q_camera_ = Eigen::Quaterniond(R_camrea_armor);
 
     cv::Point2f target_center = (armor.points_[0] + armor.points_[1] + armor.points_[2] + armor.points_[3]) / 4;
     armor.image_distance_to_center_ = calculateImageDistanceToCenter(target_center);
@@ -100,15 +90,6 @@ void PoseSolver::solve(Armor & armor)
 
 cv::Point2f PoseSolver::xyzCameraToPixel(cv::Point3f point3D) const
 {
-    // 将云台坐标系下的点转换到相机坐标系
-    Eigen::Vector3d p_gimbal(point3D.x, point3D.y, point3D.z);
-    Eigen::Vector3d p_camera = R_camera_gimbal * p_gimbal;
-    point3D = cv::Point3f(
-        static_cast<float>(p_camera.x()),
-        static_cast<float>(p_camera.y()),
-        static_cast<float>(p_camera.z())
-    );
-
     if (point3D.z <= 1e-6f) {
         return cv::Point2f(-1.0f, -1.0f);
     }

@@ -93,8 +93,8 @@ public:
 	// 基本信息
 	std::array<Light, 2> paired_lights_; // 按x轴从左到右排列的两个灯条
 	std::vector<cv::Point2f> points_; // 按照顺时针顺序排列的四个点
-	Eigen::Vector3d xyz_gimbal_; 	// 相机坐标系下的装甲板位置
-	Eigen::Quaterniond q_gimbal_; // 相机坐标系下的装甲板姿态
+	Eigen::Vector3d xyz_camera_; 	// 相机坐标系下的装甲板位置
+	Eigen::Quaterniond q_camera_; // 相机坐标系下的装甲板姿态
 	float image_distance_to_center_;
 	// 数字识别信息
 	ArmorType type_;

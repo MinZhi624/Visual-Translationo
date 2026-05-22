@@ -134,13 +134,13 @@ void ArmorPlateIdentification::SolvePose()
     for (auto& armor : armors_) {
         pose_solver_.solve(armor);
         ArmorPlate armor_plate;
-        armor_plate.pose.position.x = armor.xyz_gimbal_.x();
-        armor_plate.pose.position.y = armor.xyz_gimbal_.y();
-        armor_plate.pose.position.z = armor.xyz_gimbal_.z();
-        armor_plate.pose.orientation.x = armor.q_gimbal_.x();
-        armor_plate.pose.orientation.y = armor.q_gimbal_.y();
-        armor_plate.pose.orientation.z = armor.q_gimbal_.z();
-        armor_plate.pose.orientation.w = armor.q_gimbal_.w();
+        armor_plate.pose.position.x = armor.xyz_camera_.x();
+        armor_plate.pose.position.y = armor.xyz_camera_.y();
+        armor_plate.pose.position.z = armor.xyz_camera_.z();
+        armor_plate.pose.orientation.x = armor.q_camera_.x();
+        armor_plate.pose.orientation.y = armor.q_camera_.y();
+        armor_plate.pose.orientation.z = armor.q_camera_.z();
+        armor_plate.pose.orientation.w = armor.q_camera_.w();
         armor_plate.number = static_cast<int>(armor.name_);
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
         armor_plates.push_back(armor_plate);
