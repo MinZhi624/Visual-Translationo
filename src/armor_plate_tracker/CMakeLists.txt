@@ -24,6 +24,7 @@ add_executable(armor_plate_tracker_node
   src/MyExtendedKalmanFilter.cpp
   src/Tracker.cpp
   src/DebugTracker.cpp
+  src/CoordinateTransformer.cpp
 )
 
 target_include_directories(armor_plate_tracker_node PUBLIC

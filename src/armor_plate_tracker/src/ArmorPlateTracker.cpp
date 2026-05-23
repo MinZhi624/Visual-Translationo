@@ -30,9 +30,8 @@ private:
     double max_lost_time_;
     double mutation_yaw_threshold_;
     // ===== ROS 相关  ===== //
-    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
-    rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_ganle_sub_;
+    rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_angle_sub_;
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
     rclcpp::Publisher<TrackerData>::SharedPtr tracker_data_pub_;
     // 数据可视化
@@ -60,10 +59,9 @@ private:
             10,
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&ArmorPlateTracker::info, this));
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-        gimbal_ganle_sub_ = this->create_subscription<GimbalAngle>(
+        gimbal_angle_sub_ = this->create_subscription<GimbalAngle>(
             "gimbal_angle", 10,
             [this](const GimbalAngle::SharedPtr msg){
                 std::lock_guard<std::mutex> lock(angle_buffer_mutex_);
@@ -136,13 +134,11 @@ private:
         tracker_.Update(armor_plates, current_time_, yaw_abs, pitch_abs);
         publish(msg);
     }
-    void info()
-    {
-        
-    }
     void publishMarkerArray(const rclcpp::Time& now)
     {
         auto center = tracker_.getCenterPointWorld();
+        const auto & measured = tracker_.getMeasuredArmor();
+        const auto & filtered = tracker_.getFilterArmor();
         visualization_msgs::msg::MarkerArray arr;
         // 旋转轴（绿色中心点 + 向上的绿色箭头)
         arr.markers.push_back(createSphereMarker(
@@ -167,15 +163,13 @@ private:
         ));
         // 观测装甲板（红色）
         arr.markers.push_back(createBoxMarker(
-            tracker_.getMeasuredPositionWorld(),
-            tracker_.getMeasuredOrientationWorld(),
+            measured.xyz_world_, measured.q_world_armor_,
             "world", now, 3,
             1.0f, 0.0f, 0.0f, 1.0f
         ));
         // 滤波装甲板（绿色）
         arr.markers.push_back(createBoxMarker(
-            tracker_.getFilterPositionWorld(),
-            tracker_.getFilterOrientationWorld(),
+            filtered.xyz_world_, filtered.q_world_armor_,
             "world", now, 4,
             0.0f, 1.0f, 0.0f, 1.0f
         ));
@@ -184,6 +178,9 @@ private:
     }
     void publish(const ArmorPlates::SharedPtr armor_plates)
     {
+        const auto & measured = tracker_.getMeasuredArmor();
+        const auto & filtered = tracker_.getFilterArmor();
+
         // AimCommand 和 TrackerData 仅在跟踪成功时发送
         if (!tracker_.isLost()) {
             AimCommand aim_command;
@@ -191,19 +188,22 @@ private:
             aim_command.delta_yaw = tracker_.getYaw();
             aim_command_pub_->publish(aim_command);
 
+            RCLCPP_INFO(this->get_logger(),
+                "delta_yaw=%.4f rad (%.2f deg), delta_pitch=%.4f rad (%.2f deg)",
+                aim_command.delta_yaw, aim_command.delta_yaw * 180.0 / M_PI,
+                aim_command.delta_pitch, aim_command.delta_pitch * 180.0 / M_PI);
+
             TrackerData tracker_data_msg;
             tracker_data_msg.header = armor_plates->header;
-            tracker_data_msg.measurement_yaw = tracker_.getMeasuredYaw();
-            tracker_data_msg.measurement_pitch = tracker_.getMeasuredPitch();
-            tracker_data_msg.filter_yaw = tracker_.getYaw();
-            tracker_data_msg.filter_pitch = tracker_.getPitch();
+            tracker_data_msg.measurement_yaw = measured.ypd_camera_.x();
+            tracker_data_msg.measurement_pitch = measured.ypd_camera_.y();
+            tracker_data_msg.filter_yaw = filtered.ypd_camera_.x();
+            tracker_data_msg.filter_pitch = filtered.ypd_camera_.y();
             if (tracker_data_pub_) {
                 tracker_data_pub_->publish(tracker_data_msg);
             }
         }
 
-        // 发布目标位姿 世界坐标系
-        Eigen::Vector3d measured_pos_world = tracker_.getMeasuredPositionWorld();
         auto now = this->now();
         auto quatEigenToMsg = [](const Eigen::Quaterniond& q) {
             geometry_msgs::msg::Quaternion msg;
@@ -218,10 +218,10 @@ private:
         filter_transform_stamped.header.stamp = now;
         filter_transform_stamped.header.frame_id = "world";
         filter_transform_stamped.child_frame_id = "id_1";
-        filter_transform_stamped.transform.translation.x = measured_pos_world.x();
-        filter_transform_stamped.transform.translation.y = measured_pos_world.y();
-        filter_transform_stamped.transform.translation.z = measured_pos_world.z();
-        filter_transform_stamped.transform.rotation = quatEigenToMsg(tracker_.getMeasuredOrientationWorld());
+        filter_transform_stamped.transform.translation.x = measured.xyz_world_.x();
+        filter_transform_stamped.transform.translation.y = measured.xyz_world_.y();
+        filter_transform_stamped.transform.translation.z = measured.xyz_world_.z();
+        filter_transform_stamped.transform.rotation = quatEigenToMsg(measured.q_world_armor_);
         tf_broadcaster_->sendTransform(filter_transform_stamped);
         // 发布可视化数据
         publishMarkerArray(now);
