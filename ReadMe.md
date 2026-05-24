@@ -15,34 +15,32 @@
 ## 数据流
 
 ```
-                              [相机/视频]
-                                   │
-                                   ▼
+              [相机/视频]        [电控回传]
+                   │                 │
+                   │                 │ /gimbal_angle (GimbalAngle)
+                   ▼                 ▼
                     ┌──────────────────────────────┐
                     │  armor_plate_identification  │
-                    │    (识别 + PnP + 数字识别)    │
+                    │  (识别 + PnP + 数字识别 + 云台数据打包) │
                     └──────────────────────────────┘
                                    │
-                                   │ ArmorPlates
+                                   │ ArmorPlates (含 gimbal_yaw_abs/pitch_abs)
                                    ▼
                     ┌──────────────────────────────┐
                     │     armor_plate_tracker      │
-                    │   (世界坐标系KF + 时间对齐)   │
-                    │                              │
-                    │  订阅 /gimbal_angle ←─────────┼──── [电控回传]
-                    │       (GimbalAngle)           │      │
-                    └──────────────────────────────┘      │
-                                   │                      │
-              ┌────────────────────┼────────────────────┐  │
-              │                    │                    │  │
-              ▼                    ▼                    ▼  │
-   ┌─────────────────┐  ┌─────────────────────┐  ┌────────┴─────────┐
-   │  armor_plate_   │  │ data_visualization_ │  │      RViz        │
-   │     serial      │  │       node          │  │                  │
-   │  (串口发送)      │  │  (OpenCV 窗口)      │  │  /filter_pose    │
-   │                 │  │                     │  │  /measured_pose  │
-   │ AimCommand      │  │   TrackerDebug      │  │  Marker / TF     │
-   └─────────────────┘  └─────────────────────┘  └──────────────────┘
+                    │     (世界坐标系KF)            │
+                    └──────────────────────────────┘
+                                   │
+              ┌────────────────────┼────────────────────┐
+              │                    │
+              ▼                    ▼
+   ┌─────────────────┐  ┌──────────────────────────┐
+   │  armor_plate_   │  │         RViz             │
+   │     serial      │  │                          │
+   │  (串口发送)      │  │  /filter_pose            │
+   │                 │  │  /measured_pose           │
+   │ AimCommand      │  │  Marker / TF              │
+   └─────────────────┘  └──────────────────────────┘
               │
               ▼
            [电控]
@@ -52,7 +50,7 @@
 
 | Topic | 类型 | 说明 |
 |-------|------|------|
-| `/armor_plates` | `ArmorPlates` | 检测到的装甲板数组（含位姿、数字、图像中心距） |
+| `/armor_plates` | `ArmorPlates` | 检测到的装甲板数组（含位姿、数字、图像中心距、云台绝对角） |
 | `/gimbal_angle` | `GimbalAngle` | 电控回传的绝对 yaw/pitch（带时间戳） |
 | `/aim_command` | `AimCommand` | 控制指令（delta_yaw, delta_pitch，单位 rad） |
 | `/tracker_debug` | `TrackerDebug` | 相机系下测量点与滤波点（用于图像叠加绘制） |
@@ -66,9 +64,8 @@
 
 | 功能包 | 职责 | 节点 | 订阅 | 发布 |
 |--------|------|------|------|------|
-| `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别 | `ArmorPlateIdentification` (相机) / `Test` (视频) | — | `/armor_plates`, TF |
-| `armor_plate_tracker` | 时间对齐、目标选择、世界坐标系 KF | `armor_plate_tracker_node` | `/armor_plates`, `/gimbal_angle` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/filter_pose`, `/measured_pose`, TF |
-| `armor_plate_data_visualization` | yaw/pitch 实时曲线绘制 | `data_visualization_node` | `/tracker_debug` | (OpenCV 窗口) |
+| `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别、云台数据打包 | `ArmorPlateIdentification` (相机) / `Test` (视频) | `/gimbal_angle` | `/armor_plates`, TF |
+| `armor_plate_tracker` | 目标选择、世界坐标系 KF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/filter_pose`, `/measured_pose`, TF |
 | `armor_plate_serial` | 串口双向通信 | `serial_node` | `/aim_command` | `/gimbal_angle`, (串口) |
 | `armor_plate_interfaces` | 自定义消息定义 | — | — | — |
 | `armor_plate_bringup` | 一键启动组合 | `run.launch.py` / `test.launch.py` | — | — |
@@ -109,7 +106,7 @@
 
 ### 5. 目标跟踪（世界坐标系 KF）
 
-- **时间对齐**：`ArmorPlates.header.stamp` = 图像到手时刻；维护 `deque` 缓存最近 50 帧 `/gimbal_angle`，最近邻匹配
+- **云台数据**：Identification 订阅 `/gimbal_angle` 并打包进 `ArmorPlates` 消息（`gimbal_yaw_abs`、`gimbal_pitch_abs`），Tracker 直接读取，无需独立时间对齐
 - **旋转矩阵**：`R_w←c = Rx(pitch)·Ry(-yaw)`，与四元数严格对应
 - **x/y/z 三个独立 3 阶 KF**（位置-速度-加速度），在世界坐标系下 predict/correct
 - 目标选择：未初始化时选图像中心最近；已初始化时选世界系下与预测位置最近
@@ -164,13 +161,12 @@ typedef struct {
 ### 编译
 
 ```bash
-cd /home/minzhi/ws05_fourth_assessment
+cd /home/minzhi/Desktop/Visual-Translationo
 
 colcon build --packages-select \
   armor_plate_interfaces \
   armor_plate_identification \
   armor_plate_tracker \
-  armor_plate_data_visualization \
   armor_plate_serial \
   armor_plate_bringup
 
@@ -198,9 +194,8 @@ ros2 launch armor_plate_identification run.launch.py
 # 离线测试（视频文件）
 ros2 launch armor_plate_identification test.launch.py video_path:=/path/to/video.mp4
 
-# Tracker / 可视化 / 串口
+# Tracker / 串口
 ros2 launch armor_plate_tracker run.launch.py
-ros2 run armor_plate_data_visualization data_visualization_node
 ros2 run armor_plate_serial serial_node
 ```
 
@@ -244,7 +239,7 @@ Tracker 参数在 `armor_plate_tracker/config/params.yaml`：
 ## 目录结构
 
 ```
-ws05_fourth_assessment/
+Visual-Translationo/
 ├── src/
 │   ├── armor_plate_bringup/           # 一键启动
 │   ├── armor_plate_identification/    # 识别主包（相机/视频 + PnP + 数字识别）
@@ -257,7 +252,6 @@ ws05_fourth_assessment/
 │   ├── armor_plate_tracker/           # 跟踪 + 世界坐标系 KF
 │   │   ├── config/params.yaml
 │   │   └── launch/run.launch.py
-│   ├── armor_plate_data_visualization/# 数据可视化
 │   ├── armor_plate_serial/            # 串口双向通信
 │   └── armor_plate_interfaces/        # 自定义消息
 ├── DeepLearning/                      # 数字识别模型训练工具链

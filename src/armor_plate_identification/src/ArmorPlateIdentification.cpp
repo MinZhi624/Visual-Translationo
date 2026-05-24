@@ -87,6 +87,14 @@ void ArmorPlateIdentification::init()
     initDetector();
 
     armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
+    gimbal_angle_sub_ = this->create_subscription<GimbalAngle>(
+        "gimbal_angle", 10,
+        [this](const GimbalAngle::SharedPtr msg) {
+            std::lock_guard<std::mutex> lock(gimbal_mutex_);
+            gimbal_data_.yaw_abs = msg->yaw_abs;
+            gimbal_data_.pitch_abs = msg->pitch_abs;
+        }
+    );
 
     camera_type_ = this->declare_parameter<std::string>("camera_type", "galaxy");
     double exposure_time = this->declare_parameter<double>("exposure_time", 3500.0);
@@ -159,6 +167,11 @@ void ArmorPlateIdentification::publish()
     armor_plates_msg.header.stamp = read_stamp_;
     armor_plates_msg.header.frame_id = "camera_link";
     armor_plates_msg.armor_plates = armor_plates_;
+    {
+        std::lock_guard<std::mutex> lock(gimbal_mutex_);
+        armor_plates_msg.gimbal_yaw_abs = gimbal_data_.yaw_abs;
+        armor_plates_msg.gimbal_pitch_abs = gimbal_data_.pitch_abs;
+    }
     armor_plates_pub_->publish(armor_plates_msg);
 }
 

@@ -3,7 +3,6 @@
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/aim_command.hpp"
-#include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 #include "armor_plate_interfaces/msg/tracker_data.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
@@ -13,12 +12,8 @@
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
-#include <mutex>
-#include <deque>
-
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::AimCommand;
-using armor_plate_interfaces::msg::GimbalAngle;
 using armor_plate_interfaces::msg::TrackerData;
 using armor_plate_interfaces::msg::TrackerDebug;
 
@@ -31,7 +26,6 @@ private:
     double mutation_yaw_threshold_;
     // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
-    rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_angle_sub_;
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
     rclcpp::Publisher<TrackerData>::SharedPtr tracker_data_pub_;
     // 数据可视化
@@ -40,9 +34,6 @@ private:
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
     builtin_interfaces::msg::Time image_stamp_;
-    // ===== 绝对角度 ===== //
-    std::deque<AngleRecord> angle_buffer_;
-    std::mutex angle_buffer_mutex_;
 
     // ===== DEBUG =====//
     bool debug_;
@@ -61,14 +52,6 @@ private:
         );
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-        gimbal_angle_sub_ = this->create_subscription<GimbalAngle>(
-            "gimbal_angle", 10,
-            [this](const GimbalAngle::SharedPtr msg){
-                std::lock_guard<std::mutex> lock(angle_buffer_mutex_);
-                angle_buffer_.push_back({msg->stamp, msg->yaw_abs, msg->pitch_abs});
-                if(angle_buffer_.size() > 50) angle_buffer_.pop_front();
-            }
-        );
         tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
         marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
         // ===== DEBUG ===== //
@@ -83,55 +66,13 @@ private:
         
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
     }
-    double findClosestAngle(const builtin_interfaces::msg::Time& image_stamp, float& output_yaw, float& output_pitch)
-    {
-        double image_time = image_stamp.sec + image_stamp.nanosec * 1e-9;
-        
-        // 获取角度缓存
-        std::vector<AngleRecord> local_buffer;
-        {
-            std::lock_guard<std::mutex> lock(angle_buffer_mutex_);
-            if (angle_buffer_.empty()) {
-                output_yaw = 0.0f;
-                output_pitch = 0.0f;
-                // RCLCPP_WARN(this->get_logger(), "角度缓存为空，无法对齐，使用 0");
-                return 0.0;
-            }
-            local_buffer.assign(angle_buffer_.begin(), angle_buffer_.end());
-        }
-        
-        auto closest_it = local_buffer.begin();
-        double min_diff = std::abs(
-            (closest_it->stamp.sec + closest_it->stamp.nanosec * 1e-9) - image_time);
-        
-        for (auto it = local_buffer.begin() + 1; it != local_buffer.end(); ++it) {
-            double record_time = it->stamp.sec + it->stamp.nanosec * 1e-9;
-            double diff = std::abs(record_time - image_time);
-            if (diff < min_diff) {
-                min_diff = diff;
-                closest_it = it;
-            }
-        }
-        
-        output_yaw = closest_it->yaw_abs;
-        output_pitch = closest_it->pitch_abs;
-        
-        if (min_diff > 0.05) {
-            RCLCPP_WARN(this->get_logger(), 
-                "角度-图像时间差 %.1f ms，对齐可能不准", min_diff * 1000.0);
-        }
-        return closest_it->stamp.sec + closest_it->stamp.nanosec * 1e-9 - image_time;
-    }
     void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
     {
         // 数据获取
         image_stamp_ = msg->header.stamp;
         current_time_ = image_stamp_.sec + image_stamp_.nanosec * 1e-9;
         const auto& armor_plates = msg->armor_plates;
-        float yaw_abs = 0.0;
-        float pitch_abs = 0.0;
-        findClosestAngle(msg->header.stamp, yaw_abs, pitch_abs);
-        tracker_.Update(armor_plates, current_time_, yaw_abs, pitch_abs);
+        tracker_.Update(armor_plates, current_time_, msg->gimbal_yaw_abs, msg->gimbal_pitch_abs);
         publish(msg);
     }
     void publishMarkerArray(const rclcpp::Time& now)

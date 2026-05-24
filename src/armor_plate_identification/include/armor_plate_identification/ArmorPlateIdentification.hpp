@@ -9,6 +9,7 @@
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -25,6 +26,12 @@
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::TrackerDebug;
+using armor_plate_interfaces::msg::GimbalAngle;
+
+struct GimbalData {
+    float yaw_abs = 0.0f;
+    float pitch_abs = 0.0f;
+};
 
 class ArmorPlateIdentification : public rclcpp::Node
 {
@@ -36,6 +43,9 @@ private:
     std::string target_color_;
     std::string camera_type_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
+    rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_angle_sub_;
+    GimbalData gimbal_data_;
+    std::mutex gimbal_mutex_;
     builtin_interfaces::msg::Time read_stamp_;
     std::vector<DetectorArmor> armors_;
     std::vector<ArmorPlate> armor_plates_;

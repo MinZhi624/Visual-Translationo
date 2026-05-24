@@ -12,12 +12,6 @@
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
 
-struct AngleRecord {
-    builtin_interfaces::msg::Time stamp;
-    float yaw_abs;
-    float pitch_abs;
-};
-
 class Tracker
 {
 private:
