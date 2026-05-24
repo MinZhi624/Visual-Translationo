@@ -54,7 +54,7 @@ Eigen::Quaterniond CoordinateTransformer::worldToCamera(const Eigen::Quaterniond
 
 Eigen::Vector3d CoordinateTransformer::calcYPR(const Eigen::Quaterniond & q)
 {
-    // 提取 yaw (Z), pitch (Y), roll (X) — Tait-Bryan ZYX
+    // 提取 yaw (Z), pitch (Y), roll (X)
     double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
     double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
     double yaw = std::atan2(siny_cosp, cosy_cosp);

@@ -3,6 +3,15 @@
 #include <builtin_interfaces/msg/time.hpp>
 #include <Eigen/Geometry>
 #include "Eigen/src/Core/Matrix.h"
+#include <vector>
+
+/** @brief 预处理调试图像数据 */
+struct PreprocessDebug {
+    cv::Mat blue_dim_thre;   // BLUE/RED 通道二值图
+    cv::Mat gray_thre;       // GRAY 通道二值图
+    cv::Mat merged_thre;     // 合并后二值图
+    std::vector<std::pair<cv::Rect, int>> fragment_info;  // 每个 color 区域的碎片数
+};
 
 /*  enum class
 	这里采用enum class，这是个更现代的方法：
@@ -10,13 +19,13 @@
 	2. 安全，防止隐式转换
 */
 
-enum class ArmorType 
+enum class ArmorType
 {
 	SMALL,
 	LARGE
 };
 
-enum class Color 
+enum class Color
 {
 	RED,
 	BLUE,
@@ -84,7 +93,7 @@ static Color getLightColor(const cv::Mat& img_bgr,const cv::RotatedRect& rect, c
 };
 
 /** @brief 装甲板类 */
-class Armor
+class DetectorArmor
 {
 private:
 	// 匹配常量
@@ -102,7 +111,7 @@ public:
     cv::Mat number_roi_; //数字识别
     cv::Mat pattern_;  // 去重
 	float confidence_;
-	
+
 	// 匹配信息
 	double angle_diff_;
 	double length_ratio_;
@@ -110,8 +119,8 @@ public:
 	double x_diff_ratio_;
 	double distance_ratio_;
 
-	Armor() = default;
-	Armor(Light& light_left, Light& light_right);
+	DetectorArmor() = default;
+	DetectorArmor(Light& light_left, Light& light_right);
 };
 
 /** @brief 图像保存结构体 */

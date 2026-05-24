@@ -61,6 +61,7 @@ Checks: >
   -performance-enum-size,
   -performance-no-int-to-ptr,
   -performance-avoid-endl,
+  -performance-unnecessary-value-param,
   readability-*,
   -readability-identifier-naming,
   -readability-redundant-preprocessor,

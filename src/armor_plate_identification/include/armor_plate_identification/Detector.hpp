@@ -1,17 +1,9 @@
 #pragma once
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/NumberClassifier.hpp"
 #include <opencv2/core.hpp>
 #include <string>
 #include <vector>
-
-/** @brief 预处理调试图像数据 */
-struct PreprocessDebug {
-	cv::Mat blue_dim_thre;   // BLUE 通道二值图
-	cv::Mat gray_thre;       // GRAY 通道二值图
-	cv::Mat merged_thre;     // 合并后二值图
-	std::vector<std::pair<cv::Rect, int>> fragment_info;  // 每个 BLUE 区域的碎片数
-};
 
 // 传参结构体 //
 struct LightParams {
@@ -34,8 +26,8 @@ class Detector
 {
 private:
 	std::vector<Light> find_lights_;
-	std::vector<Armor> armors_;
-	std::vector<Armor> rejected_armors_;
+	std::vector<DetectorArmor> armors_;
+	std::vector<DetectorArmor> rejected_armors_;
 	NumberClassifier classifier_;
 
 	// LightParams
@@ -53,6 +45,8 @@ private:
 	// 预处理阈值
 	int gray_threshold_;
 	int color_threshold_;
+	// 预处理调试数据（内部维护）
+	PreprocessDebug preprocess_debug_;
 
 	void reset();
 
@@ -60,11 +54,11 @@ private:
 
 	bool checkLightGeometry(const std::vector<cv::Point>& contour) const;
 	bool checkLightColor(const Light& light_left, const Light& light_right) const;
-	bool checkArmorGeometry(const Armor& armor) const;
+	bool checkArmorGeometry(const DetectorArmor& armor) const;
 
-	std::vector<Armor> matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr);
+	std::vector<DetectorArmor> matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr);
 
-	cv::Mat getArmorPattern(const cv::Mat& img_bgr, const Armor& armor) const;
+	cv::Mat getArmorPattern(const cv::Mat& img_bgr, const DetectorArmor& armor) const;
 
 public:
     Detector() = default;
@@ -73,10 +67,11 @@ public:
              int gray_threshold, int color_threshold);
 	int num_lights_ = 0;
 
-	cv::Mat preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out = nullptr) const;
+	cv::Mat preprocess(const cv::Mat& img_bgr);
+	const PreprocessDebug& getPreprocessDebug() const { return preprocess_debug_; }
 	void detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr);
 
-	const std::vector<Armor>& getArmors() const { return armors_; }
+	const std::vector<DetectorArmor>& getArmors() const { return armors_; }
 	const std::vector<Light>& getLights() const { return find_lights_; }
 	std::vector<cv::Mat> getRejectedNumberRois();
 };

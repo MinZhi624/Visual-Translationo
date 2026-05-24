@@ -66,7 +66,7 @@
 
 | 功能包 | 职责 | 节点 | 订阅 | 发布 |
 |--------|------|------|------|------|
-| `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别 | `ArmorPlateIdentifcation` (相机) / `Test` (视频) | — | `/armor_plates`, TF |
+| `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别 | `ArmorPlateIdentification` (相机) / `Test` (视频) | — | `/armor_plates`, TF |
 | `armor_plate_tracker` | 时间对齐、目标选择、世界坐标系 KF | `armor_plate_tracker_node` | `/armor_plates`, `/gimbal_angle` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/filter_pose`, `/measured_pose`, TF |
 | `armor_plate_data_visualization` | yaw/pitch 实时曲线绘制 | `data_visualization_node` | `/tracker_debug` | (OpenCV 窗口) |
 | `armor_plate_serial` | 串口双向通信 | `serial_node` | `/aim_command` | `/gimbal_angle`, (串口) |

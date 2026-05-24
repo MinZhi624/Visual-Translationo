@@ -65,13 +65,13 @@ PoseSolver::PoseSolver(
 {
 }
 
-void PoseSolver::solve(Armor & armor)
+void PoseSolver::solve(DetectorArmor & armor)
 {
     const auto& world_points = (armor.type_ == ArmorType::LARGE)
         ? LARGE_ARMOR_POINTS
         : SMALL_ARMOR_POINTS;
     cv::Mat rvec, tvec;
-    cv::solvePnP(world_points, armor.points_, camera_matrix_, distortion_coefficients_,rvec, tvec, false, cv::SOLVEPNP_IPPE);
+    cv::solvePnP(world_points, armor.points_, camera_matrix_, distortion_coefficients_,rvec, tvec, false, cv::SOLVEPNP_ITERATIVE);
 
     cv::Mat rmat;
     cv::Rodrigues(rvec, rmat);

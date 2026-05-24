@@ -1,9 +1,9 @@
 ﻿#include "armor_plate_identification/Detector.hpp"
-#include <opencv2/core/types.hpp>
+#include "armor_plate_identification/NumberClassifier.hpp"
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
-#include "armor_plate_identification/NumberClassifier.hpp"
+
 ////////////////////// Detector /////////////////////////
 Detector::Detector(const std::string& config_path, float number_threshold,
                    const LightParams& light_params, const ArmorParams& armor_params,
@@ -32,7 +32,7 @@ void Detector::reset()
     num_lights_ = 0;
 }
 
-cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out) const
+cv::Mat Detector::preprocess(const cv::Mat& img_bgr)
 {
     // COLOR 阈值
     std::vector<cv::Mat> bgr;
@@ -97,12 +97,10 @@ cv::Mat Detector::preprocess(const cv::Mat& img_bgr, PreprocessDebug* debug_out)
     cv::dilate(img_thre, img_thre, kernal);
     cv::erode(img_thre, img_thre, kernal);
     // 填充调试图像数据
-    if (debug_out) {
-        debug_out->blue_dim_thre = target_color_dim_thre.clone();
-        debug_out->gray_thre = gray_thre.clone();
-        debug_out->merged_thre = img_thre.clone();
-        debug_out->fragment_info = fragment_info;
-    }
+    preprocess_debug_.blue_dim_thre = target_color_dim_thre.clone();
+    preprocess_debug_.gray_thre = gray_thre.clone();
+    preprocess_debug_.merged_thre = img_thre.clone();
+    preprocess_debug_.fragment_info = fragment_info;
     return img_thre;
 }
 
@@ -143,13 +141,13 @@ std::vector<Light> Detector::findLights(cv::Mat& img_thre, const cv::Mat& img_bg
     return lights_list;
 }
 
-std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr)
+std::vector<DetectorArmor> Detector::matchLights(std::vector<Light>& all_lights, const cv::Mat& img_bgr)
 {
-    std::vector<Armor> candidates;
+    std::vector<DetectorArmor> candidates;
     for (size_t i = 0; i < all_lights.size(); i++) {
         for (size_t j = i + 1; j < all_lights.size(); j++) {
             if (!checkLightColor(all_lights[i], all_lights[j])) continue;
-            Armor armor(all_lights[i], all_lights[j]);
+            DetectorArmor armor(all_lights[i], all_lights[j]);
             // 几何判断
             if (!checkArmorGeometry(armor)) continue;
             // 数字判读
@@ -194,7 +192,7 @@ std::vector<Armor> Detector::matchLights(std::vector<Light>& all_lights, const c
             }
         }
     }
-    std::vector<Armor> result;
+    std::vector<DetectorArmor> result;
     for (size_t i = 0; i < candidates.size(); i++) {
         if (!removed[i]) result.push_back(candidates[i]);
         else rejected_armors_.push_back(candidates[i]);
@@ -216,7 +214,7 @@ bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour) const
     double ratio = short_length / long_length;
     return ratio > min_contours_ratio_ && ratio < max_contours_ratio_;
 }
-bool Detector::checkArmorGeometry(const Armor& armor) const
+bool Detector::checkArmorGeometry(const DetectorArmor& armor) const
 {
     // 角度差，灯条长度比
     if (armor.angle_diff_ > max_angle_diff_ || armor.length_ratio_ < min_length_ratio_) return false;
@@ -231,7 +229,7 @@ bool Detector::checkLightColor(const Light& light_left, const Light& light_right
     return light_left.color_ == light_right.color_ && light_left.color_ == target_color_;
 }
 
-cv::Mat Detector::getArmorPattern(const cv::Mat& img_bgr, const Armor& armor) const
+cv::Mat Detector::getArmorPattern(const cv::Mat& img_bgr, const DetectorArmor& armor) const
 {
     if (armor.paired_lights_.size() != 2) return cv::Mat();
     const auto& left = armor.paired_lights_[0];

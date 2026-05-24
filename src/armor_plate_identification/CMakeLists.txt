@@ -8,21 +8,22 @@ endif()
 # ======================
 # 打包
 # ======================
-set(  ArmorPlateIdentifcation
-  src/ArmorPlateIdentifcation.cpp
-  src/Armor.cpp
+set(  ArmorPlateIdentification
+  src/ArmorPlateIdentification.cpp
+  src/DetectorArmor.cpp
   src/CameraDriver.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
-  src/DebugIdentifaction.cpp
+  src/DebugBase.cpp
   src/NumberClassifier.cpp
 )
 set( Test
   src/Test.cpp
-  src/Armor.cpp
-  src/DebugIdentifaction.cpp
+  src/DetectorArmor.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
+  src/DebugBase.cpp
+  src/DebugTest.cpp
   src/NumberClassifier.cpp
 )
 # ======================
@@ -32,18 +33,14 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(cv_bridge REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(image_transport REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
 
 # ======================
 # 库文件
 # ======================
-add_executable(ArmorPlateIdentifcation ${ArmorPlateIdentifcation})
+add_executable(ArmorPlateIdentification ${ArmorPlateIdentification})
 add_executable(Test ${Test})
 
 # ======================
@@ -58,54 +55,50 @@ set(MINDVISION_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_parties/mvsdk")
 # ======================
 # include 路径
 # ======================
-target_include_directories(ArmorPlateIdentifcation PUBLIC
-$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-$<INSTALL_INTERFACE:include>
-${GALAXY_SDK_ROOT}/include
-${MINDVISION_SDK_ROOT}/include
+target_include_directories(ArmorPlateIdentification PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${GALAXY_SDK_ROOT}/include
+  ${MINDVISION_SDK_ROOT}/include
 )
 target_include_directories(Test PUBLIC
-$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-$<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
 )
 
-target_include_directories(ArmorPlateIdentifcation PUBLIC
-${OpenCV_INCLUDE_DIRS}
-${EIGEN3_INCLUDE_DIR}
+target_include_directories(ArmorPlateIdentification PUBLIC
+  ${OpenCV_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}
 )
 target_include_directories(Test PUBLIC
-${OpenCV_INCLUDE_DIRS}
-${EIGEN3_INCLUDE_DIR}
+  ${OpenCV_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}
 )
-target_compile_features(ArmorPlateIdentifcation PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
+target_compile_features(ArmorPlateIdentification PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
 target_compile_features(Test PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
 # ======================
 # 链接库
 # ======================
-target_link_directories(ArmorPlateIdentifcation PUBLIC
+target_link_directories(ArmorPlateIdentification PUBLIC
   ${GALAXY_SDK_ROOT}/lib/amd64
   ${MINDVISION_SDK_ROOT}/lib/amd64
 )
-target_link_libraries(ArmorPlateIdentifcation
-${OpenCV_LIBS}
-gxiapi
-MVSDK
+target_link_libraries(ArmorPlateIdentification
+  ${OpenCV_LIBS}
+  gxiapi
+  MVSDK
 )
 target_link_libraries(Test
-${OpenCV_LIBS}
+  ${OpenCV_LIBS}
 )
 # ======================
 # 依赖关系
 # ======================
 ament_target_dependencies(
-  ArmorPlateIdentifcation
+  ArmorPlateIdentification
   "rclcpp"
   "OpenCV"
-  "geometry_msgs"
   "sensor_msgs"
-  "cv_bridge"
-  "tf2_ros"
-  "image_transport"
   "camera_info_manager"
   "armor_plate_interfaces"
 )
@@ -113,10 +106,6 @@ ament_target_dependencies(
   Test
   "rclcpp"
   "OpenCV"
-  "geometry_msgs"
-  "sensor_msgs"
-  "cv_bridge"
-  "tf2_ros"
   "armor_plate_interfaces"
 )
   
@@ -141,7 +130,7 @@ ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/third_parties_lib
 # 安装
 # ======================
 install(TARGETS 
-  ArmorPlateIdentifcation Test
+  ArmorPlateIdentification Test
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY 

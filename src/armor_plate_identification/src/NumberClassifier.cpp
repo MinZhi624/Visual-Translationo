@@ -3,7 +3,7 @@
 #include <opencv2/dnn/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 
 NumberClassifier::NumberClassifier(
     const std::string& config_path,
@@ -13,12 +13,12 @@ NumberClassifier::NumberClassifier(
     net_ = cv::dnn::readNetFromONNX(config_path + "/model/number_cnn.onnx");
 }
 
-bool NumberClassifier::checkArmorName(const Armor& armor) const
+bool NumberClassifier::checkArmorName(const DetectorArmor& armor) const
 {
     return armor.name_ != ArmorName::NONE && armor.confidence_ > threshold_;
 }
 
-bool NumberClassifier::checkArmorType(const Armor& armor)
+bool NumberClassifier::checkArmorType(const DetectorArmor& armor)
 {
     // 检查数字是否对应装甲板
     if (armor.type_ == ArmorType::LARGE) {
@@ -30,7 +30,7 @@ bool NumberClassifier::checkArmorType(const Armor& armor)
     }
 }
 
-void NumberClassifier::classify(Armor& armor)
+void NumberClassifier::classify(DetectorArmor& armor)
 {
     if (armor.number_roi_.empty()) {
         armor.confidence_ = 0.0;
@@ -55,7 +55,7 @@ void NumberClassifier::classify(Armor& armor)
     armor.name_ = intToArmorName(label_id);
 }
 
-cv::Mat NumberClassifier::getNumberROI(const cv::Mat& img_bgr, const Armor& armor)
+cv::Mat NumberClassifier::getNumberROI(const cv::Mat& img_bgr, const DetectorArmor& armor)
 {
     static const int WARP_HEIGHT = 28;
 

@@ -1,15 +1,13 @@
 #pragma once
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/Detector.hpp"
-#include "armor_plate_identification/DebugIdentifaction.hpp"
+#include "armor_plate_identification/DebugTest.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "tf2_ros/transform_broadcaster.hpp"
-#include "geometry_msgs/msg/transform_stamped.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <opencv2/highgui.hpp>
@@ -34,47 +32,34 @@ private:
     std::string target_color_;
     Detector lights_;
     PoseSolver pose_solver_;
-    std::vector<Armor> armors_;
+    std::vector<DetectorArmor> armors_;
     std::vector<ArmorPlate> armor_plates_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-    // DEBUG //
-    float process_time_ms_ = 0.0f;
-    float process_time_sum_ = 0.0f;
-    float id_time_sum_ = 0.0f;
-    float id_split_sum_ = 0.0f;
-    float id_detect_sum_ = 0.0f;
-    int process_time_count_ = 0;
-    double aabb_time_sum_us_ = 0.0;
-    int roi_count_ = 0;
-    int frame_count_ = 0;
+
+    // Test 特有
     double fps_ = 50.0;
-    bool debug_base_;
-    bool debug_identification_;
-    bool debug_preprocessing_;
-    bool debug_number_classification_;
-    bool debug_frame_;
-    int debug_frame_count_;
-    DebugParamController debug_controller_;
-    NumberRoiCollector roi_collector_;
-    PreprocessDebug preprocess_debug_;
-    bool headless_;
+    DebugTest debug_test_;
+    std::string test_name_;
+
+    // TrackerDebug
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
     std::deque<ImageSave> img_buffs_;
-    std::string test_name_;
+    int tracker_debug_count_ = 0;
 
     void init(const std::string& video_path);
-    void Identification(cv::Mat& img_bgr);
-    void SolvePose();
-    void NumberClassify();
-    void Publish();
-    void controlParams();
-    void imageShow();
-    void Save();
-    void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg);
+    void identification(cv::Mat& img_bgr);
+    void solvePose();
+    void publish();
+    void save();
+    void show();
+    void trackerDebugCallBack(const TrackerDebug::SharedPtr msg);
 
+    void initDebug();
+    void initDetector();
+    void initPoseSolver();
 public:
     Test(std::string video_path);
     void run();
+    void closeTrackerDebugFile();
 };

@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 
 #include <opencv2/dnn.hpp>
 
@@ -13,9 +13,9 @@ public:
     NumberClassifier() = default;
     NumberClassifier(const std::string & config_path, float threshold);
 
-    void classify(Armor& armor);
-    bool checkArmorName(const Armor& armor) const;
+    void classify(DetectorArmor& armor);
+    bool checkArmorName(const DetectorArmor& armor) const;
 
-    static bool checkArmorType(const Armor& armor);
-    static cv::Mat getNumberROI(const cv::Mat& img_bgr, const Armor& armor);
+    static bool checkArmorType(const DetectorArmor& armor);
+    static cv::Mat getNumberROI(const cv::Mat& img_bgr, const DetectorArmor& armor);
 };

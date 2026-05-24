@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 #include <opencv2/core.hpp>
 #include <Eigen/Geometry>
 
@@ -24,7 +24,7 @@ public:
 		cv::Mat projection_matrix
 	);
 
-	void solve(Armor & armor);
+	void solve(DetectorArmor & armor);
 
 	cv::Point2f xyzCameraToPixel(cv::Point3f point3D) const;
 

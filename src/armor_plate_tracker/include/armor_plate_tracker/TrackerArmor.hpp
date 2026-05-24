@@ -10,19 +10,15 @@ public:
     int id = -1;
     float image_distance_to_center = 0.0f;
 
-    // 位置
     Eigen::Vector3d xyz_camera_{0, 0, 0};
     Eigen::Vector3d xyz_world_{0, 0, 0};
 
-    // 装甲板朝向 (从四元数提取的 yaw/pitch/roll)
     Eigen::Vector3d ypr_camera_{0, 0, 0};
     Eigen::Vector3d ypr_world_{0, 0, 0};
 
-    // 指向角 (从位置向量计算的 yaw/pitch/distance)
     Eigen::Vector3d ypd_camera_{0, 0, 0};
     Eigen::Vector3d ypd_world_{0, 0, 0};
 
-    // 姿态四元数
     Eigen::Quaterniond q_camera_armor_{1, 0, 0, 0};
     Eigen::Quaterniond q_world_armor_{1, 0, 0, 0};
 

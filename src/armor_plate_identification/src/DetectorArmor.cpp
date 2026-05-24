@@ -1,4 +1,4 @@
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 #include <opencv2/imgproc.hpp>
 #include <cmath>
 #include <algorithm>
@@ -62,9 +62,9 @@ Color Light::getLightColor(const cv::Mat& img_bgr, const cv::RotatedRect& rect, 
     return Color::NONE;
 }
 
-////////////////////// Armor /////////////////////////
+////////////////////// DetectorArmor /////////////////////////
 
-Armor::Armor(Light& light_left, Light& light_right)
+DetectorArmor::DetectorArmor(Light& light_left, Light& light_right)
 {
     paired_lights_ = {light_left, light_right};
     points_ = {light_left.top_, light_right.top_, light_right.bottom_, light_left.bottom_};

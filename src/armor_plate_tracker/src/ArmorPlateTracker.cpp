@@ -188,10 +188,10 @@ private:
             aim_command.delta_yaw = tracker_.getYaw();
             aim_command_pub_->publish(aim_command);
 
-            RCLCPP_INFO(this->get_logger(),
-                "delta_yaw=%.4f rad (%.2f deg), delta_pitch=%.4f rad (%.2f deg)",
-                aim_command.delta_yaw, aim_command.delta_yaw * 180.0 / M_PI,
-                aim_command.delta_pitch, aim_command.delta_pitch * 180.0 / M_PI);
+            // RCLCPP_INFO(this->get_logger(),
+            //     "delta_yaw=%.4f rad (%.2f deg), delta_pitch=%.4f rad (%.2f deg)",
+            //     aim_command.delta_yaw, aim_command.delta_yaw * 180.0 / M_PI,
+            //     aim_command.delta_pitch, aim_command.delta_pitch * 180.0 / M_PI);
 
             TrackerData tracker_data_msg;
             tracker_data_msg.header = armor_plates->header;

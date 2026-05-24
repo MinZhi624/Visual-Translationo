@@ -66,7 +66,7 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     // 4. 计算残差并更新后验状态
     Eigen::Vector<double, 4> residual = measurement - predicted_obs;
     
-    // yaw 残差归一化：处理 -π/π 跳变，避免 179° 与 -179° 的差被算成 358°
+    // yaw 残差归一化：处理 -π/π 跳变
     while (residual[3] > M_PI) residual[3] -= 2.0 * M_PI;
     while (residual[3] < -M_PI) residual[3] += 2.0 * M_PI;
     
@@ -160,9 +160,9 @@ void MyExtendedKalmanFilter::measurementFunction(
 void MyExtendedKalmanFilter::checkValue()
 {
     // r 硬限制在 [0.12, 0.4]
-    if (state_post_[6] < 0.12) state_post_[6] = 0.12;
-    if (state_post_[6] > 0.4)  state_post_[6] = 0.4;
-    
+    state_post_[6] = std::max(0.12, state_post_[6]);
+    state_post_[6] = std::min(0.4, state_post_[6]);
+
     // yaw 归一化到 [-π, π]
     while (state_post_[7] > M_PI) state_post_[7] -= 2.0 * M_PI;
     while (state_post_[7] < -M_PI) state_post_[7] += 2.0 * M_PI;

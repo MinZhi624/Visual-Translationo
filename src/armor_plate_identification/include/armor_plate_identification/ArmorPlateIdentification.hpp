@@ -1,7 +1,7 @@
 #pragma once
-#include "armor_plate_identification/Armor.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/Detector.hpp"
-#include "armor_plate_identification/DebugIdentifaction.hpp"
+#include "armor_plate_identification/DebugBase.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
 #include "armor_plate_identification/NumberClassifier.hpp"
 #include "armor_plate_identification/CameraDriver.hpp"
@@ -35,38 +35,27 @@ private:
     CameraDriver camera_driver_;
     std::string target_color_;
     std::string camera_type_;
-    std::string camera_frame_id_ = "camera_link";
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     builtin_interfaces::msg::Time read_stamp_;
-    float process_time_ms_ = 0.0f;
-    std::vector<Armor> armors_;
+    std::vector<DetectorArmor> armors_;
     std::vector<ArmorPlate> armor_plates_;
-    bool debug_base_ = false;
-    bool debug_identification_ = false;
-    bool debug_preprocessing_ = false;
-    bool debug_number_classification_ = false;
-    DebugParamController debug_controller_;
-    NumberRoiCollector roi_collector_;
-    PreprocessDebug preprocess_debug_;
+    DebugBase debug_base_;
     sensor_msgs::msg::CameraInfo camera_info_msg_;
-    float process_time_sum_ = 0.0f;
-    float id_time_sum_ = 0.0f;
-    float id_split_sum_ = 0.0f;
-    float id_detect_sum_ = 0.0f;
-    int process_time_count_ = 0;
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
     std::deque<ImageSave> img_buffs_;
 
     void init();
-    void Identification(cv::Mat& img_bgr);
-    void SolvePose();
-    void NumberClassify();
-    void Publish();
-    void controlParams();
-    void ImageShow();
-    void Save();
-    void TrackerDebugCallBack(const TrackerDebug::SharedPtr msg);
+    void identification(cv::Mat& img_bgr);
+    void solvePose();
+    void publish();
+    void save();
+    void show();
+    void trackerDebugCallBack(const TrackerDebug::SharedPtr msg);
+
+    void initDebug();
+    void initDetector();
+    void initPoseSolver();
 
 public:
     ArmorPlateIdentification();

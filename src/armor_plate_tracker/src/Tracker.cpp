@@ -1,6 +1,5 @@
 #include "armor_plate_tracker/Tracker.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
-#include "rclcpp/rclcpp.hpp"
 #include <chrono>
 
 using armor_plate_interfaces::msg::TrackerDebug;
@@ -115,8 +114,7 @@ double Tracker::calculateDt(double current_time)
     double dt = 0.01;
     if (last_update_time_ > 0.0) {
         dt = current_time - last_update_time_;
-        if (dt <= 0.0) dt = 0.001;
-        if (dt > 1.0) dt = 1.0;
+        std::min(dt, 1.0);
     }
     last_update_time_ = current_time;
     return dt;
