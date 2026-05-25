@@ -20,13 +20,13 @@ test_node_cpp:
     debug_identification: false
     debug_number_classification: true
     # 正常
-    # debug_frame: false
-    # debug_frame_count: 0
-    # delay_time: 20
+    debug_frame: false
+    debug_frame_count: 0
+    delay_time: 20
     # 数字记录
-    debug_frame: true
-    debug_frame_count: 600
-    delay_time: 0
+    # debug_frame: true
+    # debug_frame_count: 600
+    # delay_time: 0
 
 armor_plate_identification_node:
   ros__parameters:
@@ -37,13 +37,13 @@ armor_plate_identification_node:
     color_threshold: 100
     # === 相机类型 ===
     # 迈德
-    camera_type: "mindvision"
-    exposure_time: 8000.0
-    gain: 8.0
-    # 大恒
-    # camera_type: "galaxy"
-    # exposure_time: 7000.0
+    # camera_type: "mindvision"
+    # exposure_time: 8000.0
     # gain: 8.0
+    # 大恒
+    camera_type: "galaxy"
+    exposure_time: 7000.0
+    gain: 8.0
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
     min_length_ratio: 0.7

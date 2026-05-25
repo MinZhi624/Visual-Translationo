@@ -12,7 +12,7 @@ const Eigen::Matrix3d CoordinateTransformer::R_camera_gimbal_ = R_gimbal_camera_
 Eigen::Matrix3d CoordinateTransformer::calcR_world_gimbal(double yaw, double pitch)
 {
     Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()).toRotationMatrix();
+    Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(-pitch, Eigen::Vector3d::UnitY()).toRotationMatrix();
     return R_yaw * R_pitch;
 }
 
@@ -87,6 +87,7 @@ void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
         armor.q_world_armor_ = cameraToWorld(armor.q_camera_armor_);
     } else {
         armor.xyz_camera_ = worldToCamera(armor.xyz_world_);
+        armor.xyz_gimbal =  R_camera_gimbal_ * armor. xyz_camera_;
         armor.q_camera_armor_ = worldToCamera(armor.q_world_armor_);
     }
     armor.ypr_camera_ = calcYPR(armor.q_camera_armor_);
