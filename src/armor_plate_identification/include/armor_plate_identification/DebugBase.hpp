@@ -23,7 +23,6 @@ struct DebugBaseParams
     bool debug_number_classification_ = false;
     int delay_time = 20;
     int stats_interval = 50;
-    std::string log_dir;
 };
 
 
@@ -97,4 +96,5 @@ private:
     void drawDelayTime(cv::Mat& img);
     void showPreprocessWindow();
     void showRoiCollector();
+    void showNumberRois();
 };

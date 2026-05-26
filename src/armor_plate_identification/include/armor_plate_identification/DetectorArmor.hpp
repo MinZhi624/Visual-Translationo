@@ -52,8 +52,11 @@ inline Color stringToColor(const std::string& s)
 inline ArmorName intToArmorName(int id)
 {
 	switch (id) {
-		case 0: return ArmorName::THREE;
-		case 1: return ArmorName::FOUR;
+		case 1: return ArmorName::ONE;
+		case 2: return ArmorName::TWO;
+		case 3: return ArmorName::THREE;
+		case 4: return ArmorName::FOUR;
+		case 5: return ArmorName::FIVE;
 		default: return ArmorName::NONE;
 	}
 }

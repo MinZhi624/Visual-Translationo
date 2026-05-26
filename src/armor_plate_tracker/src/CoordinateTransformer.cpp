@@ -87,7 +87,6 @@ void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
         armor.q_world_armor_ = cameraToWorld(armor.q_camera_armor_);
     } else {
         armor.xyz_camera_ = worldToCamera(armor.xyz_world_);
-        armor.xyz_gimbal =  R_camera_gimbal_ * armor. xyz_camera_;
         armor.q_camera_armor_ = worldToCamera(armor.q_world_armor_);
     }
     armor.ypr_camera_ = calcYPR(armor.q_camera_armor_);

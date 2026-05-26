@@ -1,16 +1,23 @@
+#include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/NumberClassifier.hpp"
 
 #include <opencv2/dnn/dnn.hpp>
-#include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include "armor_plate_identification/DetectorArmor.hpp"
+
+#include <opencv2/imgproc.hpp>
+#include <openvino/runtime/infer_request.hpp>
+#include <openvino/runtime/properties.hpp>
 
 NumberClassifier::NumberClassifier(
     const std::string& config_path,
     float threshold
 ) : config_path_(config_path), threshold_(threshold)
 {
+    // Opencv DNN
     net_ = cv::dnn::readNetFromONNX(config_path + "/model/number_cnn.onnx");
+    // OpenVINO 
+    auto model = core_.read_model(config_path + "/model/number_cnn.onnx");
+    compiled_model_ = core_.compile_model(model, "AUTO", ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
 }
 
 bool NumberClassifier::checkArmorName(const DetectorArmor& armor) const
@@ -30,6 +37,21 @@ bool NumberClassifier::checkArmorType(const DetectorArmor& armor)
     }
 }
 
+cv::Mat NumberClassifier::softmax(const cv::Mat& logits)
+{
+    float max_prob = *std::max_element(logits.begin<float>(), logits.end<float>());
+    cv::Mat prob;
+    cv::exp(logits - max_prob, prob);
+    float sum = static_cast<float>(cv::sum(prob)[0]);
+    prob /= sum;
+    return prob;
+}
+
+float NumberClassifier::sigmoid(float x)
+{
+    return 1.0f / (1.0f + std::exp(-x));
+}
+
 void NumberClassifier::classify(DetectorArmor& armor)
 {
     if (armor.number_roi_.empty()) {
@@ -39,52 +61,91 @@ void NumberClassifier::classify(DetectorArmor& armor)
     }
     cv::Mat image = armor.number_roi_;
     cv::Mat blob;
-    cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(20, 28), 0, false, false);
+    cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(28, 28), 0, false, false);
     net_.setInput(blob);
-    cv::Mat outputs = net_.forward();
-    float max_prob = *std::max_element(outputs.begin<float>(), outputs.end<float>());
-    cv::Mat softmax_prob;
-    cv::exp(outputs - max_prob, softmax_prob);
-    float sum = static_cast<float>(cv::sum(softmax_prob)[0]);
-    softmax_prob /= sum;
-    double confidence;
-    cv::Point class_id_point;
-    cv::minMaxLoc(softmax_prob.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
-    int label_id = class_id_point.x;
-    armor.confidence_ = static_cast<float>(confidence);
+    cv::Mat outputs = net_.forward();  // shape: (1, 11) -> [obj, cls0..cls9]
+
+    // 分离 obj 和 cls
+    float obj_logit = outputs.at<float>(0, 0);
+    cv::Mat cls_logits = outputs.colRange(1, 11);  // shape: (1, 10)
+
+    // 对 cls 部分单独做 softmax
+    cv::Mat softmax_prob = softmax(cls_logits);
+
+    // 10 类 → 6 类：合并 0+6~9 为 NONE，1~5 不变
+    const float* p = softmax_prob.ptr<float>();
+    float probs[6] = {
+        p[0] + p[6] + p[7] + p[8] + p[9],  // NONE
+        p[1],                                // ONE
+        p[2],                                // TWO
+        p[3],                                // THREE
+        p[4],                                // FOUR
+        p[5]                                 // FIVE
+    };
+    int label_id = static_cast<int>(std::max_element(probs, probs + 6) - probs);
+
+    // 综合置信度 = sigmoid(obj) * 类别概率
+    armor.confidence_ = sigmoid(obj_logit) * probs[label_id];
+    armor.name_ = intToArmorName(label_id);
+}
+void NumberClassifier::classifyFromOpenVino(DetectorArmor& armor)
+{
+    if(armor.number_roi_.empty()) {
+        armor.confidence_ = 0.0;
+        armor.name_ = ArmorName::NONE;
+        return;
+    }
+    cv::Mat image = armor.number_roi_;
+    cv::Mat blob;
+    cv::dnn::blobFromImage(image, blob, 1.0 / 255.0, cv::Size(28, 28), 0, false, false);
+
+    ov::InferRequest infer_request = compiled_model_.create_infer_request();
+
+    ov::Tensor input_tensor(
+        ov::element::f32,
+        {1, 1, 28, 28},
+        blob.ptr<float>()
+    );
+
+    infer_request.set_input_tensor(input_tensor);
+    infer_request.infer();
+
+    auto output_tensor = infer_request.get_output_tensor();
+
+    float *output_data = output_tensor.data<float>();
+    cv::Mat cls_logits = cv::Mat(1, 10, CV_32F, const_cast<float*>(output_data + 1));
+    cv::Mat softmax_prob = softmax(cls_logits);
+    const float* p = softmax_prob.ptr<float>();
+    float probs[6] = {
+        p[0] + p[6] + p[7] + p[8] + p[9],  // NONE
+        p[1],                                // ONE
+        p[2],                                // TWO
+        p[3],                                // THREE
+        p[4],                                // FOUR
+        p[5]                                 // FIVE
+    };
+    int label_id = static_cast<int>(std::max_element(probs, probs + 6) - probs);
+
+    // 综合置信度 = sigmoid(obj) * 类别概率
+    armor.confidence_ = sigmoid(output_data[0]) * probs[label_id];
     armor.name_ = intToArmorName(label_id);
 }
 
+
 cv::Mat NumberClassifier::getNumberROI(const cv::Mat& img_bgr, const DetectorArmor& armor)
 {
-    static const int WARP_HEIGHT = 28;
-
-    static const int LIGHT_HEIGHT = 12;
-    static const int SMALL_ARMOR_WIDTH = 32;
-    static const int LARGE_ARMOR_WIDTH = 54;
-
-    static const cv::Size ROI_SIZE = cv::Size(20, 28);
-    
-    static const int TOP_LIGHT_Y = (WARP_HEIGHT - LIGHT_HEIGHT) / 2 - 1;
-    static const int BOTTOM_LIGHT_Y = TOP_LIGHT_Y + LIGHT_HEIGHT;
-    static const int WARP_WIDTH = (armor.type_ == ArmorType::LARGE) ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
-
-    static const std::vector<cv::Point2f> NUMBER_TARGET_POINTS = {
-        cv::Point2f(0, TOP_LIGHT_Y),
-        cv::Point2f(WARP_WIDTH - 1, TOP_LIGHT_Y),
-        cv::Point2f(WARP_WIDTH - 1, BOTTOM_LIGHT_Y),
-        cv::Point2f(0, BOTTOM_LIGHT_Y)
+    const std::vector<cv::Point2f> dst_pts = {
+        {0.f, 7.f}, {0.f, 21.f}, {28.f, 21.f}, {28.f, 7.f}
     };
-
-    // 保证是有内容的装甲板
-    if (armor.points_.size() != 4) return cv::Mat();
-    // 透视转换
-    auto rotation_matrix = cv::getPerspectiveTransform(armor.points_, NUMBER_TARGET_POINTS);
-    cv::Mat number_roi;
-    cv::warpPerspective(img_bgr, number_roi, rotation_matrix, cv::Size(WARP_WIDTH, WARP_HEIGHT));
-    // 数字部分ROI
-    number_roi = number_roi(cv::Rect(cv::Point((WARP_WIDTH - ROI_SIZE.width) / 2, 0), ROI_SIZE));
-    // 预处理：灰度化
-    cv::cvtColor(number_roi, number_roi, cv::COLOR_BGR2GRAY);
-    return number_roi;
+    std::vector<cv::Point2f> src_pts = {
+        armor.paired_lights_.front().top_,
+        armor.paired_lights_.front().bottom_,
+        armor.paired_lights_.back().bottom_,
+        armor.paired_lights_.back().top_
+    };
+    auto M = cv::getPerspectiveTransform(src_pts, dst_pts);
+    cv::Mat roi;
+    cv::warpPerspective(img_bgr, roi, M, cv::Size(28, 28));
+    cv::cvtColor(roi, roi, cv::COLOR_BGR2GRAY);
+    return roi;
 }

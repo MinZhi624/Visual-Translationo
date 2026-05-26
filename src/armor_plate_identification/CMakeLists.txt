@@ -36,7 +36,7 @@ find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
-
+find_package(OpenVINO REQUIRED)
 # ======================
 # 库文件
 # ======================
@@ -85,11 +85,13 @@ target_link_directories(ArmorPlateIdentification PUBLIC
 )
 target_link_libraries(ArmorPlateIdentification
   ${OpenCV_LIBS}
+  openvino::runtime
   gxiapi
   MVSDK
 )
 target_link_libraries(Test
   ${OpenCV_LIBS}
+  openvino::runtime
 )
 # ======================
 # 依赖关系

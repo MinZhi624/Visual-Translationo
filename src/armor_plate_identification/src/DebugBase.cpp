@@ -116,6 +116,7 @@ void DebugBase::show()
     }
     if (params_.debug_number_classification_) {
         showRoiCollector();
+        showNumberRois();
     }
 }
 
@@ -155,8 +156,8 @@ KeyAction DebugBase::handleKey(int key)
 
 void DebugBase::save()
 {
-    if (!recording_ && !collected_.empty() && !params_.log_dir.empty()) {
-        std::string dir = params_.log_dir + "/rejected/batch_" + std::to_string(++batch_counter_);
+    if (!recording_ && !collected_.empty()) {
+        std::string dir = "Debug/NumberROI/rejected/batch_" + std::to_string(++batch_counter_);
         std::filesystem::create_directories(dir);
         for (const auto& roi : collected_) {
             std::string path = dir + "/roi_" + std::to_string(++global_counter_) + ".png";
@@ -305,6 +306,20 @@ void drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors)
         cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
         cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
     }
+}
+
+void DebugBase::showNumberRois()
+{
+    std::vector<cv::Mat> rois;
+    for (const auto& armor : cached_armors_) {
+        if (!armor.number_roi_.empty()) {
+            rois.push_back(armor.number_roi_);
+        }
+    }
+    if (rois.empty()) return;
+    cv::Mat canvas;
+    cv::hconcat(rois, canvas);
+    cv::imshow("number_rois", canvas);
 }
 
 void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug& msg)

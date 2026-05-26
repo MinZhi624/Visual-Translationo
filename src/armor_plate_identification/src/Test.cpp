@@ -248,7 +248,6 @@ void Test::initDebug()
     base_params.debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
     base_params.delay_time = this->declare_parameter<int>("delay_time", 20);
     base_params.stats_interval = this->declare_parameter<int>("stats_interval", 50);
-    base_params.log_dir = this->declare_parameter<std::string>("log_dir", "");
 
     DebugTestParams test_params;
     test_params.headless = this->declare_parameter<bool>("headless", false);
