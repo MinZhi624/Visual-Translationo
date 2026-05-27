@@ -1,6 +1,8 @@
 #include "armor_plate_tracker/Tracker.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "rclcpp/logging.hpp"
 #include <chrono>
+#include <rclcpp/logger.hpp>
 
 using armor_plate_interfaces::msg::TrackerDebug;
 
@@ -10,6 +12,8 @@ static float normalizeRadAngle(float rad)
     while (rad < -M_PI) rad += 2.0f * M_PI;
     return rad;
 }
+
+static constexpr float MIN_VALID_ARMOR_PITCH_WORLD = -0.05f;
 
 // ========== Tracker ==========
 
@@ -158,6 +162,17 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     // 选择最佳匹配
     TrackerArmor target;
     selectBestMatch(armors, target);
+
+    if (target.ypr_world_.y() < MIN_VALID_ARMOR_PITCH_WORLD) {
+        RCLCPP_WARN(rclcpp::get_logger("TRACKER"),
+            "reject mirrored PnP: ypr in camera: (%.4f, %.4f, %.4f), ypr in world: (%.4f, %.4f, %.4f)",
+            target.ypr_camera_.x(), target.ypr_camera_.y(), target.ypr_camera_.z(),
+            target.ypr_world_.x(), target.ypr_world_.y(), target.ypr_world_.z()
+        );
+        is_lost_ = true;
+        if (initialized_) ekf_.predict();
+        return;
+    }
 
     float armor_pose_yaw_world = target.ypr_world_.x();
     if (checkYawMutation(armor_pose_yaw_world)) reset();

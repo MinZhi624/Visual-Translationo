@@ -45,12 +45,15 @@ private:
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
         // ===== ROS 相关 ===== //
+        auto qos = rclcpp::QoS(rclcpp::KeepLast(1))
+             .best_effort()
+             .durability_volatile();
         armor_plates_sub_ = this->create_subscription<ArmorPlates>(
             "armor_plates", 
-            10,
+            qos,
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", 10);
+        aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", qos);
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
         marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);

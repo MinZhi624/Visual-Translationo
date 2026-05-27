@@ -118,16 +118,12 @@ void Test::init(const std::string& video_path)
 
     initDetector();
     initPoseSolver();
-
-    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(1))
+             .best_effort()
+             .durability_volatile();
+    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", qos);
 
     initDebug();
-
-    tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
-        "tracker_debug", 10,
-        std::bind(&Test::trackerDebugCallBack, this, std::placeholders::_1)
-    );
-
     if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
     if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
 }
@@ -156,8 +152,8 @@ void Test::identification(cv::Mat& img_bgr)
 void Test::solvePose()
 {
     std::vector<ArmorPlate> armor_plates;
-    for (auto& armor : armors_) {
-        pose_solver_.solve(armor);
+    pose_solver_.solve(armors_);
+    for (const auto& armor : armors_) {
         ArmorPlate armor_plate;
         armor_plate.pose.position.x = armor.xyz_camera_.x();
         armor_plate.pose.position.y = armor.xyz_camera_.y();
@@ -255,6 +251,11 @@ void Test::initDebug()
     test_params.debug_frame_count = this->declare_parameter<int>("debug_frame_count", 100);
 
     debug_test_ = DebugTest(base_params, test_params);
+
+    tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
+        "tracker_debug", 10,
+        std::bind(&Test::trackerDebugCallBack, this, std::placeholders::_1)
+    );
 
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
     if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");

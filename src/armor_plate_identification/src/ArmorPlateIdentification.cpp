@@ -143,8 +143,15 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
 void ArmorPlateIdentification::solvePose()
 {
     std::vector<ArmorPlate> armor_plates;
-    for (auto& armor : armors_) {
-        pose_solver_.solve(armor);
+    float yaw_abs = 0.0f;
+    float pitch_abs = 0.0f;
+    {
+        std::lock_guard<std::mutex> lock(gimbal_mutex_);
+        yaw_abs = gimbal_data_.yaw_abs;
+        pitch_abs = gimbal_data_.pitch_abs;
+    }
+    pose_solver_.solve(armors_, yaw_abs, pitch_abs);
+    for (const auto& armor : armors_) {
         ArmorPlate armor_plate;
         armor_plate.pose.position.x = armor.xyz_camera_.x();
         armor_plate.pose.position.y = armor.xyz_camera_.y();
