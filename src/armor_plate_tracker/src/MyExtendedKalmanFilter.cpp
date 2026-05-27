@@ -18,7 +18,7 @@ MyExtendedKalmanFilter::MyExtendedKalmanFilter()
     
     observation_noise_cov_ = Eigen::Matrix<double, 4, 4>::Zero();
     observation_noise_cov_.diagonal() <<
-        0.004, 0.004, 0.001, 0.01;
+        0.04, 0.04, 0.001, 0.01;
 
     kalman_gain_ = Eigen::Matrix<double, 9, 4>::Zero();
     origin_observation_ = Eigen::Vector<double, 4>::Zero();
@@ -46,8 +46,10 @@ void MyExtendedKalmanFilter::predict()
     while (state_pre_[7] < -M_PI) state_pre_[7] += 2.0 * M_PI;
 }
 
-Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement)
+Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement, int armor_id)
 {
+    armor_id_ = armor_id;
+
     // 保存原始观测值
     origin_observation_ = measurement;
 
@@ -115,20 +117,22 @@ void MyExtendedKalmanFilter::calculateObservationJacobian()
 {
     /*
         方程如下:
-        x = x_c - r * cos(yaw)
-        y = y_c - r * sin(yaw)
+        car_yaw = yaw + armor_id * PI / 2
+        x = x_c - r * cos(car_yaw)
+        y = y_c - r * sin(car_yaw)
         z = z
-        yaw = yaw
+        yaw = car_yaw
 
         H = dh/dx =
-        [1, 0, 0, 0, 0, 0, -cos(yaw),  r*sin(yaw), 0]
-        [0, 1, 0, 0, 0, 0, -sin(yaw), -r*cos(yaw), 0]
+        [1, 0, 0, 0, 0, 0, -cos(car_yaw),  r*sin(car_yaw), 0]
+        [0, 1, 0, 0, 0, 0, -sin(car_yaw), -r*cos(car_yaw), 0]
         [0, 0, 1, 0, 0, 0, 0,          0,           0]
         [0, 0, 0, 0, 0, 0, 0,          1,           0]
     */
+    double car_yaw = state_pre_[7] + armor_id_ * M_PI / 2;
     observation_jacobian_ <<
-        1, 0, 0, 0, 0, 0, -std::cos(state_pre_[7]),  state_pre_[6] * std::sin(state_pre_[7]),  0,
-        0, 1, 0, 0, 0, 0, -std::sin(state_pre_[7]), -state_pre_[6] * std::cos(state_pre_[7]), 0,
+        1, 0, 0, 0, 0, 0, -std::cos(car_yaw),  state_pre_[6] * std::sin(car_yaw),  0,
+        0, 1, 0, 0, 0, 0, -std::sin(car_yaw), -state_pre_[6] * std::cos(car_yaw), 0,
         0, 0, 1, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 1, 0;
 }
@@ -139,22 +143,24 @@ void MyExtendedKalmanFilter::measurementFunction(
 {
     /*  
         方程如下:
-        x = x_c - r * cos(yaw)
-        y = y_c - r * sin(yaw)
+        car_yaw = yaw + armor_id * PI / 2
+        x = x_c - r * cos(car_yaw)
+        y = y_c - r * sin(car_yaw)
         z = z
-        yaw = yaw
+        yaw = car_yaw
     */
     double x_c = state[0];
     double y_c = state[1];
     double z_c = state[2];
     double r = state[6];
     double yaw = state[7];
+    double car_yaw = yaw + armor_id_ * M_PI / 2;
 
     observation <<
-        x_c - r * std::cos(yaw),
-        y_c - r * std::sin(yaw),
+        x_c - r * std::cos(car_yaw),
+        y_c - r * std::sin(car_yaw),
         z_c,
-        yaw;
+        car_yaw;
 }
 
 void MyExtendedKalmanFilter::checkValue()

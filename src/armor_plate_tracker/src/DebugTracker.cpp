@@ -27,7 +27,7 @@ visualization_msgs::msg::Marker createSphereMarker(
     marker.color.g = g;
     marker.color.b = b;
     marker.color.a = a;
-    marker.lifetime = rclcpp::Duration::from_seconds(0.5);
+    marker.lifetime = rclcpp::Duration::from_seconds(100.0);
     return marker;
 }
 
@@ -61,7 +61,7 @@ visualization_msgs::msg::Marker createBoxMarker(
     marker.color.g = g;
     marker.color.b = b;
     marker.color.a = a;
-    marker.lifetime = rclcpp::Duration::from_seconds(1.0);
+    marker.lifetime = rclcpp::Duration::from_seconds(100.0);
     return marker;
 }
 
@@ -101,7 +101,37 @@ visualization_msgs::msg::Marker createArrowMarker(
     marker.color.g = g;
     marker.color.b = b;
     marker.color.a = a;
-    marker.lifetime = rclcpp::Duration::from_seconds(1.0);
+    marker.lifetime = rclcpp::Duration::from_seconds(100.0);
+    return marker;
+}
+
+visualization_msgs::msg::Marker createTextMarker(
+    const Eigen::Vector3d& position,
+    const std::string& text,
+    const std::string& frame_id,
+    const rclcpp::Time& stamp,
+    int id,
+    float scale,
+    float r, float g, float b, float a)
+{
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = frame_id;
+    marker.header.stamp = stamp;
+    marker.ns = "tracker_text";
+    marker.id = id;
+    marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.pose.position.x = position.x();
+    marker.pose.position.y = position.y();
+    marker.pose.position.z = position.z() + 0.1;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.z = scale;
+    marker.color.r = r;
+    marker.color.g = g;
+    marker.color.b = b;
+    marker.color.a = a;
+    marker.text = text;
+    marker.lifetime = rclcpp::Duration::from_seconds(100.0);
     return marker;
 }
 

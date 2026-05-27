@@ -11,15 +11,15 @@ def generate_launch_description():
     # 定义参数
     video_default_path = get_package_share_directory("armor_plate_identification") + "/video/Blue.mp4"
     video_blue_fast = get_package_share_directory("armor_plate_identification") + "/video/BlueFast.mp4"
-    video_blue_fast_rotated_and_move = get_package_share_directory("armor_plate_identification") + "video/BlueFastRotatedAndMove.mp4"
+    video_blue_fast_rotated_and_move = get_package_share_directory("armor_plate_identification") + "/video/BlueFastRotatedAndMove.mp4"
     video_blue_slow = get_package_share_directory("armor_plate_identification") + "/video/BlueSlow.mp4"
 
     video_path_arg = DeclareLaunchArgument(
         name="video_path",
-        # default_value= video_default_path 
+        default_value= video_default_path 
         # default_value = video_blue_fast_rotated_and_move
         # default_value = video_fast
-        default_value = video_blue_slow
+        # default_value = video_blue_slow
     )
 
     identification_node_params_file = os.path.join(

@@ -5,6 +5,7 @@ class MyExtendedKalmanFilter
 {
 private:
     // x 状态向量
+    //       0  1  2   3    4    5   6   7     8
     // 包括： x, y, z, v_x, v_y, v_z, r, yaw, v_yaw, 
     // 其中x，y代表的是旋转轴的位置， z则是装甲板高度
     Eigen::Vector<double, 9> state_pre_;
@@ -25,6 +26,7 @@ private:
     // Z 观测值、滤波值
     Eigen::Vector<double, 4> origin_observation_;    
     Eigen::Vector<double, 4> filtered_observation_;  
+    int armor_id_ = 0;
     void calculateObservationJacobian();
     void measurementFunction(const Eigen::Vector<double, 9>& state, Eigen::Vector<double, 4>& observation);
     void checkValue();
@@ -33,7 +35,7 @@ public:
     void initialize(const Eigen::Vector<double, 9>& state_pre, const Eigen::Matrix<double, 9, 9>& error_cov_pre);
     // 核心
     void predict();
-    Eigen::Vector<double, 4> correct(const Eigen::Vector<double, 4>& measurement);
+    Eigen::Vector<double, 4> correct(const Eigen::Vector<double, 4>& measurement, int armor_id);
     // 设置
     void updateStateTransitionMatrix(const double& dt);
     void setStatePre(Eigen::Vector<double, 9> state_pre) { state_pre_ = state_pre; }

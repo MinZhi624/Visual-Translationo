@@ -30,3 +30,12 @@ visualization_msgs::msg::Marker createArrowMarker(
     float head_diameter,
     float head_length,
     float r, float g, float b, float a);
+
+visualization_msgs::msg::Marker createTextMarker(
+    const Eigen::Vector3d& position,
+    const std::string& text,
+    const std::string& frame_id,
+    const rclcpp::Time& stamp,
+    int id,
+    float scale,
+    float r, float g, float b, float a);

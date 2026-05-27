@@ -7,8 +7,6 @@
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 #include "rclcpp/rclcpp.hpp"
-#include "tf2_ros/transform_broadcaster.hpp"
-#include "geometry_msgs/msg/transform_stamped.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
@@ -29,7 +27,6 @@ private:
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
     rclcpp::Publisher<TrackerData>::SharedPtr tracker_data_pub_;
     // 数据可视化
-    std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
     // ===== 时间相关 ===== //
     double current_time_ = 0.0;
@@ -54,7 +51,6 @@ private:
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
         aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", qos);
-        tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
         marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
         // ===== DEBUG ===== //
@@ -83,6 +79,7 @@ private:
         auto center = tracker_.getCenterPointWorld();
         const auto & measured = tracker_.getMeasuredArmor();
         const auto & filtered = tracker_.getFilterArmor();
+        int selected_id = tracker_.getSelectedArmorId();
         visualization_msgs::msg::MarkerArray arr;
         // 旋转轴（绿色中心点 + 向上的绿色箭头)
         arr.markers.push_back(createSphereMarker(
@@ -111,12 +108,46 @@ private:
             "world", now, 3,
             1.0f, 0.0f, 0.0f, 1.0f
         ));
+        if (selected_id >= 0) {
+            arr.markers.push_back(createTextMarker(
+                measured.xyz_world_, "target id=" + std::to_string(selected_id),
+                "world", now, 13,
+                0.08f,
+                1.0f, 0.2f, 0.2f, 1.0f
+            ));
+        }
         // 滤波装甲板（绿色）
         arr.markers.push_back(createBoxMarker(
             filtered.xyz_world_, filtered.q_world_armor_,
             "world", now, 4,
             0.0f, 1.0f, 0.0f, 1.0f
         ));
+        // 四个预测装甲板（绿色，id 5-8）+ 文字标签（id 9-12）
+        if (tracker_.isInitialized()) {
+            auto armor_list = tracker_.getTrackerArmorList();
+            for (int i = 0; i < 4; ++i) {
+                double angle = armor_list[i][3];
+                Eigen::Vector3d pos(armor_list[i][0], armor_list[i][1], armor_list[i][2]);
+                Eigen::Quaterniond q(Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ()));
+                bool selected = i == selected_id;
+                arr.markers.push_back(createBoxMarker(
+                    pos, q,
+                    "world", now, 5 + i,
+                    selected ? 0.0f : 0.0f,
+                    selected ? 0.4f : 1.0f,
+                    selected ? 1.0f : 0.0f,
+                    1.0f
+                ));
+                arr.markers.push_back(createTextMarker(
+                    pos, selected ? "id=" + std::to_string(i) + " *" : "id=" + std::to_string(i),
+                    "world", now, 9 + i,
+                    0.08f,
+                    selected ? 0.0f : 1.0f,
+                    selected ? 0.6f : 1.0f,
+                    1.0f, 1.0f
+                ));
+            }
+        }
 
         marker_array_pub_->publish(arr);
     }
@@ -149,24 +180,6 @@ private:
         }
 
         auto now = this->now();
-        auto quatEigenToMsg = [](const Eigen::Quaterniond& q) {
-            geometry_msgs::msg::Quaternion msg;
-            msg.w = q.w();
-            msg.x = q.x();
-            msg.y = q.y();
-            msg.z = q.z();
-            return msg;
-        };
-        // TF发布到世界坐标系
-        geometry_msgs::msg::TransformStamped filter_transform_stamped;
-        filter_transform_stamped.header.stamp = now;
-        filter_transform_stamped.header.frame_id = "world";
-        filter_transform_stamped.child_frame_id = "id_1";
-        filter_transform_stamped.transform.translation.x = measured.xyz_world_.x();
-        filter_transform_stamped.transform.translation.y = measured.xyz_world_.y();
-        filter_transform_stamped.transform.translation.z = measured.xyz_world_.z();
-        filter_transform_stamped.transform.rotation = quatEigenToMsg(measured.q_world_armor_);
-        tf_broadcaster_->sendTransform(filter_transform_stamped);
         // 发布可视化数据
         publishMarkerArray(now);
         ////////// DEBUG //////////

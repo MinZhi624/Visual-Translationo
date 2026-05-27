@@ -26,6 +26,8 @@ private:
     TrackerArmor filter_armor_;
 
     // EKF 中心点状态
+    int armor_id = 0; // 装甲板id（4个，分别一个车有四个装甲板）
+    int selected_armor_id_ = -1;
     Eigen::Vector3d center_point_world_{0, 0, 0};
     Eigen::Vector3d center_velocity_{0, 0, 0};
     float center_r_ = 0.0f;
@@ -72,7 +74,7 @@ public:
     // 获取装甲板数据
     const TrackerArmor & getMeasuredArmor() const { return measured_armor_; }
     const TrackerArmor & getFilterArmor() const { return filter_armor_; }
-
+    const std::vector<Eigen::Vector<double, 4>> getTrackerArmorList();
     // 增量角（从 filter_armor_ 的 ypd_camera_ 获取）
     float getYaw() const { return filter_armor_.ypd_camera_.x(); }
     float getPitch() const { return filter_armor_.ypd_camera_.y(); }
@@ -84,6 +86,7 @@ public:
     // EKF 中心点
     Eigen::Vector3d getCenterPointWorld() const { return center_point_world_; }
     Eigen::Vector3d getCenterVelocity() const { return center_velocity_; }
+    int getSelectedArmorId() const { return selected_armor_id_; }
 
     armor_plate_interfaces::msg::TrackerDebug CreatedebugMsg(const builtin_interfaces::msg::Time & stamp) const;
 };
