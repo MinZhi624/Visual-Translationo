@@ -262,8 +262,6 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     center_velocity_ = Eigen::Vector3d(state[3], state[4], 0);
     center_r_ = static_cast<float>(state[6]);
 
-    RCLCPP_INFO(rclcpp::get_logger("TRACKER_ID"), "update tracker: yaw=%.4f, pitch=%.4f", measured_armor_.ypd_world_.x(), measured_armor_.ypd_world_.y());
-
     auto t_end = std::chrono::steady_clock::now();
     time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
 }

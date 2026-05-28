@@ -60,6 +60,18 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     // 保存原始观测值
     origin_observation_ = measurement;
     observation_jacobian_= calculateObservationJacobian();
+    
+    /* 自适应 R 矩阵
+        核心原因，当装甲板侧过来的时候，位姿解算会不准，详细看Compare/Identification里面的图片.
+        会呈现出来椭圆的的现象。尤其是当我角点识别不好的preprocess的情况下
+    */ 
+    double yaw_world =  std::atan2(measurement[1], measurement[0]);
+    double dilta_angle = std::abs(yaw_world - measurement[3]);
+    observation_noise_cov_.diagonal() <<    4e-3, 
+                                            4e-3,
+                                            log(std::abs(dilta_angle) + 1) + 1,
+                                            log(std::abs(measurement[2]) + 1) / 200 + 9e-2;
+    
     // 计算观测预测值
     auto predicted_obs = measurementFunction(state_pre_);
 
