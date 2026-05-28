@@ -170,10 +170,10 @@ private:
 
             TrackerData tracker_data_msg;
             tracker_data_msg.header = armor_plates->header;
-            tracker_data_msg.measurement_yaw = measured.ypd_camera_.x();
-            tracker_data_msg.measurement_pitch = measured.ypd_camera_.y();
-            tracker_data_msg.filter_yaw = filtered.ypd_camera_.x();
-            tracker_data_msg.filter_pitch = filtered.ypd_camera_.y();
+            tracker_data_msg.measurement_yaw = measured.ypd_gimbal_.x();
+            tracker_data_msg.measurement_pitch = measured.ypd_gimbal_.y();
+            tracker_data_msg.filter_yaw = filtered.ypd_gimbal_.x();
+            tracker_data_msg.filter_pitch = filtered.ypd_gimbal_.y();
             if (tracker_data_pub_) {
                 tracker_data_pub_->publish(tracker_data_msg);
             }

@@ -75,9 +75,9 @@ public:
     const TrackerArmor & getMeasuredArmor() const { return measured_armor_; }
     const TrackerArmor & getFilterArmor() const { return filter_armor_; }
     const std::vector<Eigen::Vector<double, 4>> getTrackerArmorList();
-    // 增量角（从 filter_armor_ 的 ypd_camera_ 获取）
-    float getYaw() const { return filter_armor_.ypd_camera_.x(); }
-    float getPitch() const { return filter_armor_.ypd_camera_.y(); }
+    // 增量角（从 filter_armor_ 的 ypd_gimbal_ 获取）
+    float getYaw() const { return filter_armor_.ypd_gimbal_.x(); }
+    float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }
 
     bool isLost() const { return is_lost_; }
     bool isInitialized() const { return initialized_; }

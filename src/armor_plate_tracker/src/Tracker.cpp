@@ -9,7 +9,7 @@
 
 using armor_plate_interfaces::msg::TrackerDebug;
 
-static float normalizeRadAngle(float rad)
+static double normalizeRadAngle(double rad)
 {
     while (rad > M_PI) rad -= 2.0f * M_PI;
     while (rad < -M_PI) rad += 2.0f * M_PI;
@@ -244,16 +244,15 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
 
     // EKF Correct
     Eigen::Vector<double, 4> measurement;
-    measurement << target.xyz_world_.x(), target.xyz_world_.y(),
-                   target.xyz_world_.z(), armor_pose_yaw_world;
+    measurement << target.ypd_world_.x(), target.ypd_world_.y(),
+                   target.ypd_world_.z(), armor_pose_yaw_world;
 
     Eigen::Vector<double, 4> filtered_obs = ekf_.correct(measurement, selected_armor_id_);
     Eigen::Vector<double, 9> state = ekf_.getStatePost();
     solve_ok_ = true;
 
     // 滤波结果
-    Eigen::Vector3d xyz_world_filtered = filtered_obs.head<3>();
-    TrackerArmor filtered(xyz_world_filtered, filtered_obs[3]);
+    TrackerArmor filtered(filtered_obs);
     transformer_.updateTrackerArmor(filtered);
     updateMeasurement(target, current_time);
     updateFilteredValue(filtered);
@@ -262,6 +261,8 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     center_point_world_ = Eigen::Vector3d(state[0], state[1], state[2]);
     center_velocity_ = Eigen::Vector3d(state[3], state[4], 0);
     center_r_ = static_cast<float>(state[6]);
+
+    RCLCPP_INFO(rclcpp::get_logger("TRACKER_ID"), "update tracker: yaw=%.4f, pitch=%.4f", measured_armor_.ypd_world_.x(), measured_armor_.ypd_world_.y());
 
     auto t_end = std::chrono::steady_clock::now();
     time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();

@@ -1,5 +1,6 @@
 #pragma once
 #include <Eigen/Core>
+#include "Eigen/src/Core/Matrix.h"
 
 class MyExtendedKalmanFilter
 {
@@ -27,8 +28,15 @@ private:
     Eigen::Vector<double, 4> origin_observation_;    
     Eigen::Vector<double, 4> filtered_observation_;  
     int armor_id_ = 0;
-    void calculateObservationJacobian();
-    void measurementFunction(const Eigen::Vector<double, 9>& state, Eigen::Vector<double, 4>& observation);
+    
+    Eigen::Matrix<double, 4, 9> calculateObservationJacobian();
+    Eigen::Matrix4d calculateXYZAToYPDAJacobian(const Eigen::Vector<double, 4> & xyza);
+    Eigen::Matrix<double, 4, 9> calculateStateToXYZAJacobian(const Eigen::Vector<double, 9> & state, int armor_id);
+
+    Eigen::Vector<double, 4> measurementFunction(const Eigen::Vector<double, 9>& state);
+    Eigen::Vector<double, 4> measurementFunctionStateToXYZA(const Eigen::Vector<double, 9>& state, int armor_id);
+    Eigen::Vector<double, 4> measurementFunctionXYZAToYPDA(const Eigen::Vector<double, 4>& xyza);
+    
     void checkValue();
 public:
     MyExtendedKalmanFilter();

@@ -71,9 +71,12 @@ Eigen::Vector3d CoordinateTransformer::calcYPR(const Eigen::Quaterniond & q)
 
 Eigen::Vector3d CoordinateTransformer::calcYPD(const Eigen::Vector3d & xyz)
 {
-    double yaw = -std::atan2(xyz.x(), xyz.z());
-    double horizontal_dist = std::sqrt(xyz.x() * xyz.x() + xyz.z() * xyz.z());
-    double pitch = std::atan2(-xyz.y(), horizontal_dist);
+    /*
+        云台 、 世界坐标系下
+        x 向前, y 向左， z向上
+    */
+    double yaw = std::atan2(xyz.y(), xyz.x());
+    double pitch = std::atan2(xyz.z(), std::sqrt(xyz.x() * xyz.x() + xyz.y() * xyz.y()));
     double distance = xyz.norm();
     return {yaw, pitch, distance};
 }
@@ -91,6 +94,6 @@ void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
     }
     armor.ypr_camera_ = calcYPR(armor.q_camera_armor_);
     armor.ypr_world_ = calcYPR(armor.q_world_armor_);
-    armor.ypd_camera_ = calcYPD(armor.xyz_camera_);
+    armor.ypd_gimbal_ = calcYPD(R_gimbal_camera_ * armor.xyz_camera_);
     armor.ypd_world_ = calcYPD(armor.xyz_world_);
 }

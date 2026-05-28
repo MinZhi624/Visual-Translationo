@@ -16,7 +16,7 @@ public:
     Eigen::Vector3d ypr_camera_{0, 0, 0};
     Eigen::Vector3d ypr_world_{0, 0, 0};
 
-    Eigen::Vector3d ypd_camera_{0, 0, 0};
+    Eigen::Vector3d ypd_gimbal_{0, 0, 0};
     Eigen::Vector3d ypd_world_{0, 0, 0};
 
     Eigen::Quaterniond q_camera_armor_{1, 0, 0, 0};
@@ -30,10 +30,20 @@ public:
     {
     }
 
-    // 世界坐标系构造（滤波数据：位置 + yaw）
-    TrackerArmor(const Eigen::Vector3d & xyz_world, double yaw)
-        : source_(Source::WORLD), xyz_world_(xyz_world),
-          q_world_armor_(Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()))
+    // 世界坐标系构造（滤波数据：ypda → xyz + yaw）
+    TrackerArmor(const Eigen::Vector4d & ypda_world)
+        : source_(Source::WORLD), ypd_world_(ypda_world.head<3>())
     {
+        double yaw   = ypda_world[0];
+        double pitch = ypda_world[1];
+        double dist  = ypda_world[2];
+        double angle = ypda_world[3];
+
+        double cos_p = std::cos(pitch);
+        xyz_world_.x() = dist * cos_p * std::cos(yaw);
+        xyz_world_.y() = dist * cos_p * std::sin(yaw);
+        xyz_world_.z() = dist * std::sin(pitch);
+
+        q_world_armor_ = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ());
     }
 };
