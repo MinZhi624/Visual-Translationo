@@ -21,8 +21,9 @@ MyExtendedKalmanFilter::MyExtendedKalmanFilter()
     observation_jacobian_ = Eigen::Matrix<double, 4, 9>::Zero();
 
     process_noise_cov_ = Eigen::Matrix<double, 9, 9>::Zero();
+    
     process_noise_cov_.diagonal() <<
-        0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0005, 0.001, 0.01;
+        0.001, 0.01, 0.001, 0.01, 0.001, 0.01, 0.001, 0.01, 0.0;
         
     observation_noise_cov_ = Eigen::Matrix<double, 4, 4>::Zero();
     observation_noise_cov_.diagonal() <<
@@ -50,8 +51,8 @@ void MyExtendedKalmanFilter::predict()
                    + process_noise_cov_;
     
     // 先验 yaw 归一化到 [-π, π]，防止 predict 后角度越界
-    while (state_pre_[7] > M_PI) state_pre_[7] -= 2.0 * M_PI;
-    while (state_pre_[7] < -M_PI) state_pre_[7] += 2.0 * M_PI;
+    while (state_pre_[6] > M_PI) state_pre_[6] -= 2.0 * M_PI;
+    while (state_pre_[6] < -M_PI) state_pre_[6] += 2.0 * M_PI;
 }
 
 Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement, int armor_id)
@@ -100,29 +101,49 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     return filtered_observation_;
 }
 
+void MyExtendedKalmanFilter::updateProcessNoiseCov(const double & dt)
+{
+    double a_var = 100;
+    double yaw_a_var = 400;
+    double Q11 = dt * dt;
+    double Q21 = dt * dt * dt / 2.0;
+    double Q12 = dt * dt * dt / 2.0;
+    double Q22 = dt * dt * dt * dt / 4.0;
+    process_noise_cov_ << 
+        a_var * Q11, a_var * Q21,      0,           0,           0,           0,               0,               0,     0,
+        a_var * Q12, a_var * Q22,      0,           0,           0,           0,               0,               0,     0,
+        0,                 0,    a_var * Q11, a_var * Q21,       0,           0,               0,               0,     0,
+        0,                 0,    a_var * Q12, a_var * Q22,       0,           0,               0,               0,     0,
+        0,                 0,          0,           0,     a_var * Q11, a_var * Q21,           0,               0,     0,
+        0,                 0,          0,           0,     a_var * Q12, a_var * Q22,           0,               0,     0,
+        0,                 0,          0,           0,           0,           0,     yaw_a_var * Q11, yaw_a_var * Q21, 0, 
+        0,                 0,          0,           0,           0,           0,     yaw_a_var * Q12, yaw_a_var * Q22, 0,
+        0,                 0,          0,           0,           0,           0,               0,               0,     0;
+}
+
 void MyExtendedKalmanFilter::updateStateTransitionMatrix(const double& dt)
 {
     /*
         方程如下:  都是线性的
         x^k = x^{k-1} + v^{k-1}_x * dt 
-        y^k = y^{k-1} + v^{k-1}_y * dt
-        Z^k = Z^{k-1} + v^{k-1}_z * dt
         v^k_x = v^{k-1}_x
+        y^k = y^{k-1} + v^{k-1}_y * dt
         v^k_y = v^{k-1}_y
+        z^k = z^{k-1} + v^{k-1}_z * dt
         v^k_z = v^{k-1}_z 
+        yaw^k = yaw^{k-1} + omega^{k-1} * dt
+        omega^k = omega^{k-1}
         r^k = r^{k-1}
-        yaw^k = yaw^{k-1} + v^{k-1}_yaw * dt
-        v^k_yaw = v^{k-1}_yaw
     */
     state_transition_matrix_ << 
-        1, 0, 0, dt, 0, 0, 0, 0, 0,
-        0, 1, 0, 0, dt, 0, 0, 0, 0,
-        0, 0, 1, 0, 0, dt, 0, 0, 0,
+        1, dt, 0, 0, 0, 0, 0, 0, 0,
+        0, 1, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 1, dt, 0, 0, 0, 0, 0,
         0, 0, 0, 1, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 1, 0, 0, 0, 0,
+        0, 0, 0, 0, 1, dt, 0, 0, 0,
         0, 0, 0, 0, 0, 1, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 1, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1, dt,
+        0, 0, 0, 0, 0, 0, 1, dt, 0,
+        0, 0, 0, 0, 0, 0, 0, 1, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 1;
 }
 
@@ -144,13 +165,13 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunction(const Eigen
 
 void MyExtendedKalmanFilter::checkValue()
 {
-    // r 硬限制在 [0.12, 0.4]
-    state_post_[6] = std::max(0.12, state_post_[6]);
-    state_post_[6] = std::min(0.4, state_post_[6]);
-
     // yaw 归一化到 [-π, π]
-    while (state_post_[7] > M_PI) state_post_[7] -= 2.0 * M_PI;
-    while (state_post_[7] < -M_PI) state_post_[7] += 2.0 * M_PI;
+    while (state_post_[6] > M_PI) state_post_[6] -= 2.0 * M_PI;
+    while (state_post_[6] < -M_PI) state_post_[6] += 2.0 * M_PI;
+
+    // r 硬限制在 [0.12, 0.4]
+    state_post_[8] = std::max(0.12, state_post_[8]);
+    state_post_[8] = std::min(0.4, state_post_[8]);
 }
 
 Eigen::Matrix<double, 4, 9> MyExtendedKalmanFilter::calculateStateToXYZAJacobian(const Eigen::Vector<double, 9>& state, int armor_id)
@@ -164,22 +185,33 @@ Eigen::Matrix<double, 4, 9> MyExtendedKalmanFilter::calculateStateToXYZAJacobian
         yaw = car_yaw
 
         H = dh/dx =
-        [1, 0, 0, 0, 0, 0, -cos(car_yaw),  r*sin(car_yaw), 0]
-        [0, 1, 0, 0, 0, 0, -sin(car_yaw), -r*cos(car_yaw), 0]
-        [0, 0, 1, 0, 0, 0, 0,          0,           0]
-        [0, 0, 0, 0, 0, 0, 0,          1,           0]
+        [1, 0, 0, 0, 0, 0,  r*sin(car_yaw), 0, -cos(car_yaw)]
+        [0, 0, 1, 0, 0, 0, -r*cos(car_yaw), 0, -sin(car_yaw)]
+        [0, 0, 0, 0, 1, 0, 0,               0, 0]
+        [0, 0, 0, 0, 0, 0, 1,               0, 0]
     */
     Eigen::Matrix<double, 4, 9> xyza_state_jacobian;
-    double car_yaw = state[7] + armor_id * M_PI / 2;
+    double car_yaw = state[6] + armor_id * M_PI / 2;
     xyza_state_jacobian <<
-        1, 0, 0, 0, 0, 0, -std::cos(car_yaw),  state[6] * std::sin(car_yaw),  0,
-        0, 1, 0, 0, 0, 0, -std::sin(car_yaw), -state[6] * std::cos(car_yaw), 0,
-        0, 0, 1, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1, 0;
+        1, 0, 0, 0, 0, 0,  state[8] * std::sin(car_yaw),  0, -std::cos(car_yaw),
+        0, 0, 1, 0, 0, 0, -state[8] * std::cos(car_yaw), 0, -std::sin(car_yaw),
+        0, 0, 0, 0, 1, 0, 0,                             0, 0,
+        0, 0, 0, 0, 0, 0, 1,                             0, 0;
     return xyza_state_jacobian;
 }
 Eigen::Matrix4d MyExtendedKalmanFilter::calculateXYZAToYPDAJacobian(const Eigen::Vector<double, 4> & xyza)
 {
+    /* 
+        方程:
+        yaw = atan2(y, x)
+        pitch = atan2(z, sqrt(x^2 + y^2))
+        distance = sqrt(x^2 + y^2 + z^2)
+        求导:
+        d/dx = [dyaw/dx, dpitch/dx, ddistance/dx, 0]
+        d/dy = [dyaw/dy, dpitch/dy, ddistance/dy, 0]
+        d/dz = [dyaw/dz, dpitch/dz, ddistance/dz, 0] 
+        d/da = [0,       0,         0,            1]
+    */
     double x = xyza[0];
     double y = xyza[1];
     double z = xyza[2];
@@ -214,10 +246,10 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionStateToXYZA(
         yaw = car_yaw
     */
     double x_c = state[0];
-    double y_c = state[1];
-    double z_c = state[2];
-    double r = state[6];
-    double yaw = state[7];
+    double y_c = state[2];
+    double z_c = state[4];
+    double yaw = state[6];
+    double r = state[8];
     double car_yaw = yaw + armor_id * M_PI / 2;
 
     Eigen::Vector<double, 4> observation;

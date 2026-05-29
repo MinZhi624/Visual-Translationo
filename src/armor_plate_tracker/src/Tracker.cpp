@@ -90,10 +90,10 @@ void Tracker::init(const TrackerArmor & armor, double current_time)
     double y_c0 = xyz_world.y() + r_init * std::sin(armor_pose_yaw_world);
 
     Eigen::Vector<double, 9> init_state;
-    init_state << x_c0, y_c0, xyz_world.z(), 0.0, 0.0, 0.0, r_init, armor_pose_yaw_world, 0.0;
+    init_state << x_c0, 0.0, y_c0, 0.0, xyz_world.z(), 0.0, armor_pose_yaw_world, 0.0, r_init;
 
     Eigen::Matrix<double, 9, 9> init_P = Eigen::Matrix<double, 9, 9>::Identity();
-    init_P.diagonal() << 1.0, 1.0, 1.0, 10.0, 10.0, 10.0, 0.01, 0.1, 1.0;
+    init_P.diagonal() << 1.0, 10.0, 1.0, 10.0, 1.0, 10.0, 0.1, 1.0, 0.01;
 
     ekf_.initialize(init_state, init_P);
 
@@ -126,12 +126,12 @@ void Tracker::selectBestMatch(const std::vector<TrackerArmor> & armors, TrackerA
 
     // 用 EKF 预测装甲板世界位置
     Eigen::Vector<double, 9> state = ekf_.getStatePost();
-    double r = state[6];
-    double yaw = state[7];
+    double r = state[8];
+    double yaw = state[6];
     Eigen::Vector3d xyz_pred_world(
         state[0] - r * std::cos(yaw),
-        state[1] - r * std::sin(yaw),
-        state[2]);
+        state[2] - r * std::sin(yaw),
+        state[4]);
 
     float min_dist = std::numeric_limits<float>::max();
     size_t best_idx = 0;
@@ -178,6 +178,7 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
 
     double dt = calculateDt(current_time);
     transformer_.update(yaw_abs, pitch_abs);
+    ekf_.updateProcessNoiseCov(dt);
     ekf_.updateStateTransitionMatrix(dt);
 
     // 没有目标
@@ -220,19 +221,11 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     }
 
     float armor_pose_yaw_world = target.ypr_world_.x();
-    
-    // if (checkYawMutation(armor_pose_yaw_world)) reset();
 
     if (!initialized_) {
         init(target, current_time);
         return;
     }
-
-    // ===== TEST =====
-    // bool yaw_jump = checkYawMutation(armor_pose_yaw_world);
-    // if (yaw_jump) {
-    //     RCLCPP_INFO(rclcpp::get_logger("TRACKER_ID"), "突变");
-    // }
 
     auto armor_list = getTrackerArmorList();
     size_t far_idx = 0;
@@ -258,9 +251,9 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     updateFilteredValue(filtered);
 
     // 提取 EKF 状态
-    center_point_world_ = Eigen::Vector3d(state[0], state[1], state[2]);
-    center_velocity_ = Eigen::Vector3d(state[3], state[4], 0);
-    center_r_ = static_cast<float>(state[6]);
+    center_point_world_ = Eigen::Vector3d(state[0], state[2], state[4]);
+    center_velocity_ = Eigen::Vector3d(state[1], state[3], 0);
+    center_r_ = static_cast<float>(state[8]);
 
     auto t_end = std::chrono::steady_clock::now();
     time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
@@ -331,15 +324,15 @@ const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList()
     std::vector<Eigen::Vector<double, 4>> armor_list;
     armor_list.resize(4);
     Eigen::Vector<double, 9> state = ekf_.getStatePost();
-    double r = state[6];
-    double yaw = state[7];
+    double r = state[8];
+    double yaw = state[6];
     
     for (int i = 0; i < 4; ++i) {
         double angle = yaw + i * M_PI / 2;
         Eigen::Vector<double, 4> armor{
             state[0] - r * std::cos(angle),
-            state[1] - r * std::sin(angle),
-            state[2],
+            state[2] - r * std::sin(angle),
+            state[4],
             normalizeRadAngle(angle)
         };
         armor_list[i] = armor;

@@ -6,8 +6,8 @@ class MyExtendedKalmanFilter
 {
 private:
     // x 状态向量
-    //       0  1  2   3    4    5   6   7     8
-    // 包括： x, y, z, v_x, v_y, v_z, r, yaw, v_yaw, 
+    //       0   1    2   3    4   5    6     7     8
+    // 包括： x, v_x,  y, v_y,  z, v_z, yaw, omega,  r, 
     // 其中x，y代表的是旋转轴的位置， z则是装甲板高度
     Eigen::Vector<double, 9> state_pre_;
     Eigen::Vector<double, 9> state_post_;
@@ -45,7 +45,8 @@ public:
     void predict();
     Eigen::Vector<double, 4> correct(const Eigen::Vector<double, 4>& measurement, int armor_id);
     // 设置
-    void updateStateTransitionMatrix(const double& dt);
+    void updateProcessNoiseCov(const double & dt);
+    void updateStateTransitionMatrix(const double & dt);
     void setStatePre(Eigen::Vector<double, 9> state_pre) { state_pre_ = state_pre; }
     void setStatePost(Eigen::Vector<double, 9> state_post) { state_post_ = state_post; }
     void setErrorCovPre(Eigen::Matrix<double, 9, 9> error_cov_pre) { error_cov_pre_ = error_cov_pre; }

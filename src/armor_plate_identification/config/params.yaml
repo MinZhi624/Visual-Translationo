@@ -18,12 +18,12 @@ test_node_cpp:
     debug_base: true
     debug_preprocessing: false
     debug_identification: true
-    debug_number_classification: true
-    # 正常
+    debug_number_classification: false
+    # === 正常 ===
     debug_frame: false
     debug_frame_count: 0
-    delay_time: 20
-    # 数字记录
+    delay_time: 0
+    # === 数字记录 ===
     # debug_frame: true
     # debug_frame_count: 600
     # delay_time: 0
