@@ -6,6 +6,14 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # ======================
+# ROS
+# ======================
+rclcpp_components_register_node(${PROJECT_NAME}
+  PLUGIN rm_auto_aim::ArmorTrackerNode
+  EXECUTABLE ${PROJECT_NAME}_node
+)
+
+# ======================
 # 打包
 # ======================
 set(  ArmorPlateIdentification
@@ -16,6 +24,7 @@ set(  ArmorPlateIdentification
   src/Detector.cpp
   src/DebugBase.cpp
   src/NumberClassifier.cpp
+  src/GuiWorker.cpp
 )
 set( Test
   src/Test.cpp
@@ -25,6 +34,7 @@ set( Test
   src/DebugBase.cpp
   src/DebugTest.cpp
   src/NumberClassifier.cpp
+  src/GuiWorker.cpp
 )
 # ======================
 # 依赖
@@ -36,6 +46,7 @@ find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(OpenVINO REQUIRED)
 # ======================
 # 库文件
@@ -103,12 +114,14 @@ ament_target_dependencies(
   "sensor_msgs"
   "camera_info_manager"
   "armor_plate_interfaces"
+  "ament_index_cpp"
 )
 ament_target_dependencies(
   Test
   "rclcpp"
   "OpenCV"
   "armor_plate_interfaces"
+  "ament_index_cpp"
 )
   
 # ======================

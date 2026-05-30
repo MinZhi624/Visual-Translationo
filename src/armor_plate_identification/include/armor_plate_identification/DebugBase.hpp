@@ -1,13 +1,12 @@
 #pragma once
 #include "armor_plate_identification/DetectorArmor.hpp"
+#include "armor_plate_identification/GuiWorker.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include <rclcpp/logging.hpp>
 #include <opencv2/core.hpp>
 #include <map>
 #include <chrono>
 #include <vector>
-
-enum class KeyAction { None, Processed, Pause, Exit };
 
 void drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors);
 void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
@@ -33,10 +32,10 @@ public:
     DebugBase(const DebugBaseParams& params);
 
     // 生命周期
-    void onFrameStart();                        // 开始计时
-    void mark(const std::string& label);        // 路标：记录 label 对应阶段耗时
-    void onFrameEnd();                          // 结束帧：自动算总时间，可能打印统计
-    virtual bool shouldShow() const { return true; } // 用于控制是否显示 -- 适配无针头模式
+    void onFrameStart();
+    void mark(const std::string& label);
+    void onFrameEnd();
+    virtual bool shouldShow() const { return true; }
 
     // 信息收集（无条件调，内部判开关）
     void debugLights(const std::vector<Light>& lights);
@@ -46,8 +45,13 @@ public:
     void draw(cv::Mat& target_img);
     void show();
 
-    KeyAction handleKey(int key);
+    // 取走本帧准备好的显示图像，调用后内部缓存清空
+    std::vector<std::pair<std::string, cv::Mat>> getDisplayFrames();
+
     void save();
+
+    // 按键处理（debug 相关：+/- 调延迟、S 录制 ROI）
+    void control(const KeyEvent& event);
 
     // 查询
     bool isDebugTimeControl() const { return params_.debug_timecontrol_; }
@@ -87,6 +91,9 @@ protected:
 
     // 性能统计
     float process_time_sum_ = 0.0f;
+
+    // 本帧准备好的显示图像缓存
+    std::vector<std::pair<std::string, cv::Mat>> display_frames_;
 
 private:
     void printStats();

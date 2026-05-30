@@ -1,6 +1,5 @@
 #pragma once
 #include <Eigen/Core>
-#include "Eigen/src/Core/Matrix.h"
 
 class MyExtendedKalmanFilter
 {

@@ -224,15 +224,12 @@ private:
         serial_driver_->port()->open();
         RCLCPP_INFO(this->get_logger(), "Serial打开成功: %s @ %d", device_name.c_str(), baud_rate);
         // ===== 接受信息 =====
-        auto qos = rclcpp::QoS(rclcpp::KeepLast(1))
-             .best_effort()
-             .durability_volatile();
         aim_command_sub_ = this->create_subscription<AimCommand>(
-            "aim_command", qos,
+            "aim_command", rclcpp::SensorDataQoS(),
             std::bind(&SerialDriver::sendData, this, std::placeholders::_1)
         );
         // ===== 启动接收线程 =====
-        gimbal_angle_pub_ = this->gimbal_angle_pub_ = this->create_publisher<GimbalAngle>("gimbal_angle", qos);
+        gimbal_angle_pub_ = this->create_publisher<GimbalAngle>("gimbal_angle", rclcpp::SensorDataQoS());
         recv_thread_ = std::thread(&SerialDriver::recvLoop, this);
     }
 

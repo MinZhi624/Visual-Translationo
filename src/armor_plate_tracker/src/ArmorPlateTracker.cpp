@@ -42,15 +42,12 @@ private:
         max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
         mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
         // ===== ROS 相关 ===== //
-        auto qos = rclcpp::QoS(rclcpp::KeepLast(1))
-             .best_effort()
-             .durability_volatile();
         armor_plates_sub_ = this->create_subscription<ArmorPlates>(
-            "armor_plates", 
-            qos,
+            "armor_plates",
+            rclcpp::SensorDataQoS(),
             std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
         );
-        aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", qos);
+        aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", rclcpp::SensorDataQoS());
         tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
         marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
         // ===== DEBUG ===== //
@@ -155,7 +152,6 @@ private:
     {
         const auto & measured = tracker_.getMeasuredArmor();
         const auto & filtered = tracker_.getFilterArmor();
-
         // AimCommand 和 TrackerData 仅在跟踪成功时发送
         if (!tracker_.isLost()) {
             AimCommand aim_command;

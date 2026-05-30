@@ -43,7 +43,6 @@ void DebugBase::printStats()
 {
     float avg_total = process_time_sum_ / params_.stats_interval;
 
-    // 识别时间
     float avg_id = 0.0f;
     if (mark_sums_.contains("preprocess")) {
         avg_id += mark_sums_.at("preprocess") / params_.stats_interval;
@@ -52,14 +51,13 @@ void DebugBase::printStats()
         avg_id += mark_sums_.at("detectArmors") / params_.stats_interval;
     }
 
-    // 构建路标字符串
     std::stringstream marks_ss;
     for (const auto& [name, sum] : mark_sums_) {
         float avg = sum / params_.stats_interval;
         marks_ss << name << ":" << std::fixed << std::setprecision(1) << avg << "ms ";
     }
     std::string marks_str = marks_ss.str();
-    if (!marks_str.empty()) marks_str.pop_back();  // 去掉末尾空格
+    if (!marks_str.empty()) marks_str.pop_back();
 
     if (avg_id > 0.0f) {
         RCLCPP_INFO(rclcpp::get_logger("DEBUG_BASE"),
@@ -111,6 +109,7 @@ void DebugBase::draw(cv::Mat& target_img)
 void DebugBase::show()
 {
     if (!shouldShow()) return;
+    display_frames_.clear();
     if (params_.debug_preprocessing_) {
         showPreprocessWindow();
     }
@@ -120,38 +119,11 @@ void DebugBase::show()
     }
 }
 
-KeyAction DebugBase::handleKey(int key)
+std::vector<std::pair<std::string, cv::Mat>> DebugBase::getDisplayFrames()
 {
-    if (key == 27 || key == 'q' || key == 'Q') {
-        cv::destroyAllWindows();
-        return KeyAction::Exit;
-    }
-    if (key == 'p' || key == 'P') {
-        return KeyAction::Pause;
-    }
-    if (key == 's' || key == 'S') {
-        recording_ = !recording_;
-        if (recording_) {
-            collected_.clear();
-            RCLCPP_INFO(rclcpp::get_logger("DEBUG_NUMBER"), "开始录制 rejected ROI");
-        } else {
-            RCLCPP_INFO(rclcpp::get_logger("DEBUG_NUMBER"), "停止录制，共收集 %lu 张", collected_.size());
-        }
-        return KeyAction::Processed;
-    }
-    if (params_.debug_timecontrol_) {
-        if (key == '+' || key == '=') {
-            params_.delay_time = std::max(params_.delay_time - 10, 0);
-            RCLCPP_INFO(rclcpp::get_logger("DEBUG_TIME_CONTROL"), "播放延迟: %d ms", params_.delay_time);
-            return KeyAction::Processed;
-        }
-        if (key == '-' || key == '_') {
-            params_.delay_time += 10;
-            RCLCPP_INFO(rclcpp::get_logger("DEBUG_TIME_CONTROL"), "播放延迟: %d ms", params_.delay_time);
-            return KeyAction::Processed;
-        }
-    }
-    return KeyAction::None;
+    auto frames = std::move(display_frames_);
+    display_frames_.clear();
+    return frames;
 }
 
 void DebugBase::save()
@@ -177,6 +149,31 @@ void DebugBase::feedRejected(const std::vector<cv::Mat>& rois)
     }
 }
 
+void DebugBase::control(const KeyEvent& event)
+{
+    if (event.action != KeyAction::Processed) return;
+
+    if (params_.debug_timecontrol_) {
+        if (event.raw_key == '+' || event.raw_key == '=') {
+            params_.delay_time = std::max(params_.delay_time - 10, 0);
+            RCLCPP_INFO(rclcpp::get_logger("DEBUG_TIME_CONTROL"), "播放延迟: %d ms", params_.delay_time);
+        } else if (event.raw_key == '-' || event.raw_key == '_') {
+            params_.delay_time += 10;
+            RCLCPP_INFO(rclcpp::get_logger("DEBUG_TIME_CONTROL"), "播放延迟: %d ms", params_.delay_time);
+        }
+    }
+
+    if (event.raw_key == 's' || event.raw_key == 'S') {
+        recording_ = !recording_;
+        if (recording_) {
+            collected_.clear();
+            RCLCPP_INFO(rclcpp::get_logger("DEBUG_NUMBER"), "开始录制 rejected ROI");
+        } else {
+            RCLCPP_INFO(rclcpp::get_logger("DEBUG_NUMBER"), "停止录制，共收集 %lu 张", collected_.size());
+        }
+    }
+}
+
 // ========== 私有绘制辅助 ==========
 
 void DebugBase::drawLights(cv::Mat& img)
@@ -197,7 +194,7 @@ void DebugBase::drawNumbers(cv::Mat& img)
     }
 }
 
-void DebugBase::drawProcessTime(cv::Mat& img) 
+void DebugBase::drawProcessTime(cv::Mat& img)
 {
     if (last_process_time_ms_ < 0.0f) return;
     std::string text = "Process: " + std::to_string(last_process_time_ms_) + " ms";
@@ -232,7 +229,6 @@ void DebugBase::showPreprocessWindow()
         preprocess_debug_.gray_thre, preprocess_debug_.merged_thre
     };
     std::vector<std::string> labels = {"Original", "BLUE_dim (fragments)", "GRAY_thre", "Merged"};
-    // showMultiImages 内联实现
     {
         const int grid_cols = 2;
         const int grid_rows = 2;
@@ -269,7 +265,7 @@ void DebugBase::showPreprocessWindow()
                         cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
         }
 
-        cv::imshow("PreProcessions-View", canvas);
+        display_frames_.emplace_back("preprocess", canvas);
     }
 }
 
@@ -278,7 +274,7 @@ void DebugBase::showRoiCollector()
     if (collected_.empty()) return;
     cv::Mat concat_img;
     cv::hconcat(collected_, concat_img);
-    cv::imshow("Number ROIs", concat_img);
+    display_frames_.emplace_back("rejected_rois", concat_img);
 }
 
 /////////////////// 全局绘制函数 //////////////////////////
@@ -319,7 +315,7 @@ void DebugBase::showNumberRois()
     if (rois.empty()) return;
     cv::Mat canvas;
     cv::hconcat(rois, canvas);
-    cv::imshow("number_rois", canvas);
+    display_frames_.emplace_back("number_rois", canvas);
 }
 
 void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug& msg)

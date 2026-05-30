@@ -153,7 +153,7 @@ std::vector<DetectorArmor> Detector::matchLights(std::vector<Light>& all_lights,
             // 数字判读
             armor.number_roi_ = NumberClassifier::getNumberROI(img_bgr, armor);
             armor.pattern_ = getArmorPattern(img_bgr, armor);
-            classifier_.classifyFromOpenVino(armor);
+            classifier_.classify(armor);
             if(!classifier_.checkArmorName(armor)) {
                 rejected_armors_.push_back(armor);
                 continue;

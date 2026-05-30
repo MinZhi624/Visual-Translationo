@@ -2,8 +2,8 @@
 #include <opencv2/core.hpp>
 #include <builtin_interfaces/msg/time.hpp>
 #include <Eigen/Geometry>
-#include "Eigen/src/Core/Matrix.h"
 #include <vector>
+#include <armor_plate_interfaces/ArmorTypes.hpp>
 
 /** @brief 预处理调试图像数据 */
 struct PreprocessDebug {
@@ -12,65 +12,6 @@ struct PreprocessDebug {
     cv::Mat merged_thre;     // 合并后二值图
     std::vector<std::pair<cv::Rect, int>> fragment_info;  // 每个 color 区域的碎片数
 };
-
-/*  enum class
-	这里采用enum class，这是个更现代的方法：
-	1. 作用域
-	2. 安全，防止隐式转换
-*/
-
-enum class ArmorType
-{
-	SMALL,
-	LARGE
-};
-
-enum class Color
-{
-	RED,
-	BLUE,
-	NONE
-};
-
-enum class ArmorName : int
-{
-	ONE = 1,
-	TWO = 2,
-	THREE = 3,
-	FOUR = 4,
-	FIVE = 5,
-	NONE = 0
-};
-
-inline Color stringToColor(const std::string& s)
-{
-	if (s == "RED") return Color::RED;
-	if (s == "BLUE") return Color::BLUE;
-	return Color::NONE;
-}
-// 临时映射：label_id → ArmorName（按 label_cnn.txt 顺序）
-inline ArmorName intToArmorName(int id)
-{
-	switch (id) {
-		case 1: return ArmorName::ONE;
-		case 2: return ArmorName::TWO;
-		case 3: return ArmorName::THREE;
-		case 4: return ArmorName::FOUR;
-		case 5: return ArmorName::FIVE;
-		default: return ArmorName::NONE;
-	}
-}
-inline std::string armorNameToString(const ArmorName& name)
-{
-	switch (name) {
-		case ArmorName::ONE: return "1";
-		case ArmorName::TWO: return "2";
-		case ArmorName::THREE: return "3";
-		case ArmorName::FOUR: return "4";
-		case ArmorName::FIVE: return "5";
-		default: return "NONE";
-	}
-}
 
 
 /** @brief 灯条类 */

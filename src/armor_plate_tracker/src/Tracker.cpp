@@ -1,5 +1,5 @@
 #include "armor_plate_tracker/Tracker.hpp"
-#include "Eigen/src/Core/Matrix.h"
+
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/logging.hpp"
 #include <chrono>

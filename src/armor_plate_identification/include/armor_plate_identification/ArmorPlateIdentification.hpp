@@ -16,6 +16,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
+#include "armor_plate_identification/GuiWorker.hpp"
 
 #include <iostream>
 #include <thread>
@@ -55,6 +56,9 @@ private:
     std::mutex tracker_debug_mutex_;
     std::deque<ImageSave> img_buffs_;
 
+    GuiWorker gui_worker_;
+    bool headless_ = false;
+
     void init();
     void identification(cv::Mat& img_bgr);
     void solvePose();
@@ -62,6 +66,7 @@ private:
     void save();
     void show();
     void trackerDebugCallBack(const TrackerDebug::SharedPtr msg);
+    bool control(const KeyEvent& event);
 
     void initDebug();
     void initDetector();

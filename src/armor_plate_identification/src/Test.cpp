@@ -4,11 +4,16 @@
 
 void Test::run()
 {
+    if (!headless_) {
+        gui_worker_.start();
+    }
+
     cv::Mat frame;
     while (rclcpp::ok()) {
         c_ >> frame;
         if (frame.empty()) {
             RCLCPP_INFO(this->get_logger(), "视频播放结束");
+            gui_worker_.stop();
             return;
         }
         img_show_ = frame.clone();
@@ -16,31 +21,51 @@ void Test::run()
 
         identification(frame);
         solvePose();
+        debug_test_.mark("solvePose");
         publish();
+        debug_test_.mark("publish");
         save();
+        debug_test_.mark("save");
         show();
-
-        auto action = debug_test_.handleKey(cv::waitKey(1));
-        if (action == KeyAction::Exit) break;
-        if (action == KeyAction::Pause) {
-            RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
-            cv::waitKey(0);
-        }
+        debug_test_.mark("show");
 
         debug_test_.onFrameEnd();
 
-        if (debug_test_.isDebugTimeControl()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(debug_test_.getDelayTimeMs()));
-        }
+        KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
+        if (control(event)) break;
 
         if (debug_test_.shouldExit()) {
             RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_test_.getDebugFrameCount());
-            cv::destroyAllWindows();
+            gui_worker_.stop();
             return;
         }
     }
     RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
-    cv::destroyAllWindows();
+    gui_worker_.stop();
+}
+
+bool Test::control(const KeyEvent& event)
+{
+    debug_test_.control(event);
+
+    if (event.action == KeyAction::Exit) {
+        return true;
+    }
+
+    if (event.action == KeyAction::Pause && !headless_) {
+        RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
+        while (rclcpp::ok()) {
+            auto pause_event = gui_worker_.consumeKey();
+            if (pause_event.action != KeyAction::None) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    if (debug_test_.isDebugTimeControl()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(debug_test_.getDelayTimeMs()));
+    }
+
+    return false;
 }
 
 void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
@@ -51,7 +76,6 @@ void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
         if (img_buffs_.empty()) return;
         images_buffs = img_buffs_;
     }
-    // 寻找时间头最接近的帧（容差 1ms）
     auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
     auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg, &to_ns](const ImageSave& image_save) {
         return std::abs(to_ns(image_save.img_stamp) - to_ns(msg->header.stamp)) < 1000000;
@@ -77,14 +101,12 @@ void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
     if (filtered_px.x >= 0) {
         drawCross(debug_img, filtered_px, cv::Scalar(0, 255, 0), 12);
     }
-    if (debug_test_.shouldShow()) {
+    if (!headless_ && debug_test_.shouldShow()) {
         cv::Mat show_img;
         cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
-        cv::imshow("Tracker Debug", show_img);
-        cv::waitKey(1);
+        gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, show_img);
     }
 
-    // 输出 TrackerDebug 数据（仅在 debug_frame 模式下记录）
     if (debug_test_.isDebugFrameMode()) {
         std::string log_dir = "Debug/Tracker/" + test_name_ + "/ekf/temp";
         debug_test_.saveTrackerDebug(log_dir, *msg);
@@ -97,7 +119,6 @@ void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 
 void Test::init(const std::string& video_path)
 {
-    // ===== 相机初始化 ==== //
     c_.open(video_path);
     if (!c_.isOpened()) {
         RCLCPP_ERROR(this->get_logger(), "无法打开视频: %s", video_path.c_str());
@@ -118,10 +139,7 @@ void Test::init(const std::string& video_path)
 
     initDetector();
     initPoseSolver();
-    auto qos = rclcpp::QoS(rclcpp::KeepLast(1))
-             .best_effort()
-             .durability_volatile();
-    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", qos);
+    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", rclcpp::SensorDataQoS());
 
     initDebug();
     if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
@@ -139,7 +157,6 @@ void Test::identification(cv::Mat& img_bgr)
 
     armors_ = lights_.getArmors();
 
-    // 收集 rejected ROI（录制模式）
     if (debug_test_.isRecordingRois()) {
         debug_test_.feedRejected(lights_.getRejectedNumberRois());
     }
@@ -176,7 +193,6 @@ void Test::publish()
     stamp.sec = static_cast<int32_t>(time_sec);
     stamp.nanosec = static_cast<uint32_t>((time_sec - stamp.sec) * 1e9);
 
-    // 发布装甲板数据
     ArmorPlates armor_plates_msg;
     armor_plates_msg.header.stamp = stamp;
     armor_plates_msg.header.frame_id = "camera_link";
@@ -202,20 +218,24 @@ void Test::show()
 {
     debug_test_.draw(img_show_);
 
-    if (debug_test_.shouldShow()) {
+    if (!headless_ && debug_test_.shouldShow()) {
         cv::Mat show_img;
         cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
-        cv::imshow("Identification", show_img);
+        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, show_img);
     }
 
     debug_test_.show();
+    auto frames = debug_test_.getDisplayFrames();
+    for (const auto& [name, img] : frames) {
+        gui_worker_.pushFrame(name, img);
+    }
+    debug_test_.mark("show");
 }
 
 void Test::closeTrackerDebugFile()
 {
     debug_test_.closeTrackerDebugFile();
 }
-
 
 Test::Test(std::string video_path) : Node("test_node_cpp")
 {
@@ -250,19 +270,20 @@ void Test::initDebug()
     test_params.debug_frame = this->declare_parameter<bool>("debug_frame", false);
     test_params.debug_frame_count = this->declare_parameter<int>("debug_frame_count", 100);
 
+    headless_ = test_params.headless;
     debug_test_ = DebugTest(base_params, test_params);
 
     tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
         "tracker_debug", 10,
         std::bind(&Test::trackerDebugCallBack, this, std::placeholders::_1)
     );
-
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
     if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
     if (base_params.debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");
     if (test_params.debug_frame) RCLCPP_INFO(this->get_logger(), "帧调试模式开启，将在第 %d 帧结束", test_params.debug_frame_count);
     if (test_params.headless) RCLCPP_INFO(this->get_logger(), "无头模式：跳过所有 GUI 窗口");
 }
+
 void Test::initDetector()
 {
     std::string package_share_dir = ament_index_cpp::get_package_share_directory("armor_plate_identification");
@@ -286,6 +307,7 @@ void Test::initDetector()
                        this->declare_parameter<int>("threshold_value", 160),
                        this->declare_parameter<int>("color_threshold", 100));
 }
+
 void Test::initPoseSolver()
 {
     cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) <<

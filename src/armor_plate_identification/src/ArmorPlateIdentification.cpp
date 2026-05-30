@@ -2,6 +2,10 @@
 
 void ArmorPlateIdentification::run()
 {
+    if (!headless_) {
+        gui_worker_.start();
+    }
+
     RCLCPP_INFO(this->get_logger(), "开始图像处理循环");
     int fail_count = 0;
     while (rclcpp::ok()) {
@@ -11,6 +15,7 @@ void ArmorPlateIdentification::run()
             fail_count++;
             if (fail_count > 5) {
                 RCLCPP_FATAL(this->get_logger(), "Camera read failed!");
+                gui_worker_.stop();
                 rclcpp::shutdown();
             }
             continue;
@@ -26,18 +31,36 @@ void ArmorPlateIdentification::run()
         save();
         show();
 
-        auto action = debug_base_.handleKey(cv::waitKey(1));
-        if (action == KeyAction::Exit) break;
-        if (action == KeyAction::Pause) {
-            RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
-            cv::waitKey(0);
-        }
         debug_base_.onFrameEnd();
-        
-        if (debug_base_.isDebugTimeControl()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(debug_base_.getDelayTimeMs()));
+
+        KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
+        if (control(event)) break;
+    }
+    gui_worker_.stop();
+}
+
+bool ArmorPlateIdentification::control(const KeyEvent& event)
+{
+    debug_base_.control(event);
+
+    if (event.action == KeyAction::Exit) {
+        return true;
+    }
+
+    if (event.action == KeyAction::Pause && !headless_) {
+        RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
+        while (rclcpp::ok()) {
+            auto pause_event = gui_worker_.consumeKey();
+            if (pause_event.action != KeyAction::None) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
+
+    if (debug_base_.isDebugTimeControl()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(debug_base_.getDelayTimeMs()));
+    }
+
+    return false;
 }
 
 void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
@@ -48,7 +71,6 @@ void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPt
         if (img_buffs_.empty()) return;
         images_buffs = img_buffs_;
     }
-    // 寻找时间头最接近的帧（容差 1ms）
     auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
     auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg, &to_ns](const ImageSave& image_save) {
         return std::abs(to_ns(image_save.img_stamp) - to_ns(msg->header.stamp)) < 1000000;
@@ -74,10 +96,11 @@ void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPt
     if (filtered_px.x >= 0) {
         drawCross(debug_img, filtered_px, cv::Scalar(0, 255, 0), 12);
     }
-    cv::Mat show_img;
-    cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
-    cv::imshow("Tracker Debug", show_img);
-    cv::waitKey(1);
+    if (!headless_) {
+        cv::Mat show_img;
+        cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
+        gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, show_img);
+    }
 }
 
 void ArmorPlateIdentification::init()
@@ -86,9 +109,9 @@ void ArmorPlateIdentification::init()
 
     initDetector();
 
-    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", 10);
+    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", rclcpp::SensorDataQoS());
     gimbal_angle_sub_ = this->create_subscription<GimbalAngle>(
-        "gimbal_angle", 10,
+        "gimbal_angle", rclcpp::SensorDataQoS(),
         [this](const GimbalAngle::SharedPtr msg) {
             std::lock_guard<std::mutex> lock(gimbal_mutex_);
             gimbal_data_.yaw_abs = msg->yaw_abs;
@@ -130,7 +153,6 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
 
     armors_ = lights_.getArmors();
 
-    // 收集 rejected ROI（录制模式）
     if (debug_base_.isRecordingRois()) {
         debug_base_.feedRejected(lights_.getRejectedNumberRois());
     }
@@ -169,7 +191,6 @@ void ArmorPlateIdentification::solvePose()
 
 void ArmorPlateIdentification::publish()
 {
-    // 发布装甲板数据
     ArmorPlates armor_plates_msg;
     armor_plates_msg.header.stamp = read_stamp_;
     armor_plates_msg.header.frame_id = "camera_link";
@@ -197,11 +218,17 @@ void ArmorPlateIdentification::show()
 {
     debug_base_.draw(img_show_);
 
-    cv::Mat show_img;
-    cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
-    cv::imshow("Identification", show_img);
+    if (!headless_) {
+        cv::Mat show_img;
+        cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
+        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, show_img);
+    }
 
     debug_base_.show();
+    auto frames = debug_base_.getDisplayFrames();
+    for (const auto& [name, img] : frames) {
+        gui_worker_.pushFrame(name, img);
+    }
 }
 
 ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identification_node"), camera_driver_(this)
@@ -212,7 +239,7 @@ ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identif
 ArmorPlateIdentification::~ArmorPlateIdentification()
 {
     camera_driver_.close();
-    cv::destroyAllWindows();
+    gui_worker_.stop();
 }
 
 int main(int argc, char** argv)
@@ -236,6 +263,7 @@ void ArmorPlateIdentification::initDebug()
     base_params.delay_time = this->declare_parameter<int>("delay_time", 0);
     base_params.stats_interval = this->declare_parameter<int>("stats_interval", 50);
 
+    headless_ = this->declare_parameter<bool>("headless", false);
     debug_base_ = DebugBase(base_params);
 
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");

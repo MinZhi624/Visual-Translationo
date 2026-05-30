@@ -9,6 +9,7 @@
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
+#include "armor_plate_identification/GuiWorker.hpp"
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -47,12 +48,17 @@ private:
     std::deque<ImageSave> img_buffs_;
     int tracker_debug_count_ = 0;
 
+    GuiWorker gui_worker_;
+    bool headless_ = false;
+
     void init(const std::string& video_path);
     void identification(cv::Mat& img_bgr);
     void solvePose();
     void publish();
     void save();
     void show();
+    bool control(const KeyEvent& event);
+    
     void trackerDebugCallBack(const TrackerDebug::SharedPtr msg);
 
     void initDebug();

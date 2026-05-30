@@ -29,6 +29,13 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 
 # ========================================
+# 安装公共 C++ 头文件
+# ========================================
+install(DIRECTORY include/
+  DESTINATION include/${PROJECT_NAME}
+)
+
+# ========================================
 # 测试相关（可选）
 # ========================================
 if(BUILD_TESTING)
