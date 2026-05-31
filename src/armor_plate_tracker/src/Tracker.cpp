@@ -65,8 +65,8 @@ Tracker::Tracker() = default;
 void Tracker::reset()
 {
     RCLCPP_WARN(rclcpp::get_logger("TRACKER"), "reset tracker");
-    Eigen::Vector<double, 9> zero_state = Eigen::Vector<double, 9>::Zero();
-    Eigen::Matrix<double, 9, 9> identity_P = Eigen::Matrix<double, 9, 9>::Identity();
+    Eigen::Vector<double, 11> zero_state = Eigen::Vector<double, 11>::Zero();
+    Eigen::Matrix<double, 11, 11> identity_P = Eigen::Matrix<double, 11, 11>::Identity();
     ekf_.initialize(zero_state, identity_P);
 
     initialized_ = false;
@@ -85,15 +85,28 @@ void Tracker::init(const TrackerArmor & armor, double current_time)
     float armor_pose_yaw_world = armor.ypr_world_.x();
     const Eigen::Vector3d & xyz_world = armor.xyz_world_;
 
-    const double r_init = 0.26;
+    /*
+        初始化时由当前装甲板反推旋转中心:
+        armor_x = x_c - r * cos(yaw)
+        armor_y = y_c - r * sin(yaw)
+        x_c = armor_x + r * cos(yaw)
+        y_c = armor_y + r * sin(yaw)
+        z_c = armor_z
+        yaw = armor_yaw
+        omega = 0
+        l = 0
+        h = 0
+    */
+    const double r_init = 0.20;
     double x_c0 = xyz_world.x() + r_init * std::cos(armor_pose_yaw_world);
     double y_c0 = xyz_world.y() + r_init * std::sin(armor_pose_yaw_world);
 
-    Eigen::Vector<double, 9> init_state;
-    init_state << x_c0, 0.0, y_c0, 0.0, xyz_world.z(), 0.0, armor_pose_yaw_world, 0.0, r_init;
+    Eigen::Vector<double, 11> init_state;
+    init_state << x_c0, 0.0, y_c0, 0.0, xyz_world.z(), 0.0, armor_pose_yaw_world, 0.0,
+                  r_init, 0.0, 0.0;
 
-    Eigen::Matrix<double, 9, 9> init_P = Eigen::Matrix<double, 9, 9>::Identity();
-    init_P.diagonal() << 1.0, 10.0, 1.0, 10.0, 1.0, 10.0, 0.1, 1.0, 0.01;
+    Eigen::Matrix<double, 11, 11> init_P = Eigen::Matrix<double, 11, 11>::Identity();
+    init_P.diagonal() << 1.0, 64.0, 1.0, 64.0, 1.0, 64.0, 0.4, 100.0, 1.0, 1.0, 1.0;
 
     ekf_.initialize(init_state, init_P);
 
@@ -125,7 +138,7 @@ void Tracker::selectBestMatch(const std::vector<TrackerArmor> & armors, TrackerA
     }
 
     // 用 EKF 预测装甲板世界位置
-    Eigen::Vector<double, 9> state = ekf_.getStatePost();
+    Eigen::Vector<double, 11> state = ekf_.getStatePost();
     double r = state[8];
     double yaw = state[6];
     Eigen::Vector3d xyz_pred_world(
@@ -163,7 +176,7 @@ double Tracker::calculateDt(double current_time)
     double dt = 0.01;
     if (last_update_time_ > 0.0) {
         dt = current_time - last_update_time_;
-        std::min(dt, 1.0);
+        dt = std::min(dt, 1.0);
     }
     last_update_time_ = current_time;
     return dt;
@@ -241,7 +254,7 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
                    target.ypd_world_.z(), armor_pose_yaw_world;
 
     Eigen::Vector<double, 4> filtered_obs = ekf_.correct(measurement, selected_armor_id_);
-    Eigen::Vector<double, 9> state = ekf_.getStatePost();
+    Eigen::Vector<double, 11> state = ekf_.getStatePost();
     solve_ok_ = true;
 
     // 滤波结果
@@ -323,16 +336,29 @@ const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList()
     // xyz, angle
     std::vector<Eigen::Vector<double, 4>> armor_list;
     armor_list.resize(4);
-    Eigen::Vector<double, 9> state = ekf_.getStatePost();
-    double r = state[8];
+    Eigen::Vector<double, 11> state = ekf_.getStatePost();
     double yaw = state[6];
-    
+
+    /*
+        根据 11 维状态生成四块预测装甲板:
+        angle_i = yaw + i * PI / 2
+        id = 0 或 id = 2 时 radius = r
+        id = 1 或 id = 3 时 radius = r + l
+        id = 0 或 id = 2 时 armor_z = z_c
+        id = 1 或 id = 3 时 armor_z = z_c + h
+        armor_x = x_c - radius * cos(angle_i)
+        armor_y = y_c - radius * sin(angle_i)
+        armor_angle = angle_i
+    */
     for (int i = 0; i < 4; ++i) {
         double angle = yaw + i * M_PI / 2;
+        bool use_l_h = (i == 1 || i == 3);
+        double radius = use_l_h ? state[8] + state[9] : state[8];
+        double z = use_l_h ? state[4] + state[10] : state[4];
         Eigen::Vector<double, 4> armor{
-            state[0] - r * std::cos(angle),
-            state[2] - r * std::sin(angle),
-            state[4],
+            state[0] - radius * std::cos(angle),
+            state[2] - radius * std::sin(angle),
+            z,
             normalizeRadAngle(angle)
         };
         armor_list[i] = armor;

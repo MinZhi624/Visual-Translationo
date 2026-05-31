@@ -1,6 +1,6 @@
 # RoboMaster 装甲板视觉识别系统
 
-基于 **ROS 2 Humble** + **OpenCV 4.x** + **ONNX Runtime** 的装甲板识别、跟踪与瞄准解算方案。
+基于 **ROS 2 Jazzy/Humble** + **OpenCV 4.x** + **OpenVINO Runtime** 的装甲板识别、跟踪与瞄准解算方案。当前开发环境为 **ROS 2 Jazzy**。
 
 ---
 
@@ -14,36 +14,14 @@
 
 ## 数据流
 
-```
-              [相机/视频]        [电控回传]
-                   │                 │
-                   │                 │ /gimbal_angle (GimbalAngle)
-                   ▼                 ▼
-                    ┌──────────────────────────────┐
-                    │  armor_plate_identification  │
-                    │  (识别 + PnP + 数字识别 + 云台数据打包) │
-                    └──────────────────────────────┘
-                                   │
-                                   │ ArmorPlates (含 gimbal_yaw_abs/pitch_abs)
-                                   ▼
-                    ┌──────────────────────────────┐
-                    │     armor_plate_tracker      │
-                    │     (世界坐标系 EKF)           │
-                    └──────────────────────────────┘
-                                   │
-              ┌────────────────────┼────────────────────┐
-              │                    │
-              ▼                    ▼
-   ┌─────────────────┐  ┌──────────────────────────┐
-   │  armor_plate_   │  │         RViz             │
-   │     serial      │  │                          │
-   │  (串口发送)      │  │  /filter_pose            │
-   │                 │  │  /measured_pose           │
-   │ AimCommand      │  │  Marker / TF              │
-   └─────────────────┘  └──────────────────────────┘
-              │
-              ▼
-           [电控]
+```mermaid
+flowchart TD
+    camera["相机/视频"] --> identification["armor_plate_identification<br/>识别 + PnP + 数字识别 + 云台数据打包"]
+    ec_feedback["电控回传"] -->|"/gimbal_angle<br/>GimbalAngle"| identification
+    identification -->|"/armor_plates<br/>ArmorPlates<br/>含 gimbal_yaw_abs / gimbal_pitch_abs"| tracker["armor_plate_tracker<br/>世界坐标系 11 维 EKF"]
+    tracker -->|"/aim_command<br/>AimCommand"| serial["armor_plate_serial<br/>串口发送"]
+    tracker -->|"/visualization_marker_array<br/>/tracker_debug<br/>/tracker_data"| visual["Foxglove / RViz"]
+    serial --> ec["电控"]
 ```
 
 **消息说明**
@@ -55,8 +33,7 @@
 | `/aim_command` | `AimCommand` | 控制指令（delta_yaw, delta_pitch，单位 rad） |
 | `/tracker_debug` | `TrackerDebug` | 相机系下测量点与滤波点（用于图像叠加绘制） |
 | `/tracker_data` | `TrackerData` | measurement/filter 的 yaw/pitch |
-| `/filter_pose` | `PoseStamped` | 滤波后世界坐标系位姿 |
-| `/measured_pose` | `PoseStamped` | PnP 原始测量世界坐标系位姿 |
+| `/visualization_marker_array` | `MarkerArray` | 旋转中心、速度、观测装甲板、滤波装甲板和四块预测装甲板 |
 
 ---
 
@@ -65,7 +42,7 @@
 | 功能包 | 职责 | 节点 | 订阅 | 发布 |
 |--------|------|------|------|------|
 | `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别、云台数据打包 | `ArmorPlateIdentification` (相机) / `Test` (视频) | `/gimbal_angle` | `/armor_plates`, TF |
-| `armor_plate_tracker` | 目标选择、世界坐标系 EKF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/filter_pose`, `/measured_pose`, TF |
+| `armor_plate_tracker` | 目标选择、世界坐标系 11 维 EKF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/visualization_marker_array` |
 | `armor_plate_serial` | 串口双向通信 | `serial_node` | `/aim_command` | `/gimbal_angle`, (串口) |
 | `armor_plate_interfaces` | 自定义消息定义 | — | — | — |
 | `armor_plate_bringup` | 一键启动组合 | `run.launch.py` / `test.launch.py` / `auto_test.launch.py` | — | — |
@@ -90,7 +67,7 @@
 ### 3. 数字识别
 
 - 装甲板中心 ROI 透视变换提取
-- **ONNX Runtime** 推理，输出 0-9 + negative
+- **OpenVINO Runtime** 推理，输出 0-9 + negative
 - 模型文件：`model/number_cnn.onnx`（另有 `mlp.onnx` 备选）
 - 训练工具链见 `DeepLearning/`
 
@@ -101,18 +78,28 @@
 
 ### 5. 目标跟踪（世界坐标系 EKF）
 
-- **云台数据**：Identification 订阅 `/gimbal_angle` 并打包进 `ArmorPlates` 消息（`gimbal_yaw_abs`、`gimbal_pitch_abs`），Tracker 直接读取，无需独立时间对齐
-- **坐标变换**：`CoordinateTransformer` 实现 camera → gimbal（固定旋转）→ world（动态 yaw/pitch）旋转链
-- **9 状态 EKF**：`[x, y, z, vx, vy, vz, r, yaw, v_yaw]`
-  - x, y：旋转中心位置
-  - z：装甲板高度
-  - r：装甲板旋转半径（硬约束 [0.12, 0.4] m）
-  - yaw：装甲板朝向角
-  - 量测方程：`x = x_c - r·cos(yaw)`，`y = y_c - r·sin(yaw)`，`z = z_c`，`obs_yaw = yaw`
-- **噪声参数**：`Q = diag(0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0005, 0.001, 0.01)`，`R = diag(0.004, 0.004, 0.001, 0.01)`
-- 目标选择：未初始化时选图像中心最近；已初始化时选世界系下与预测位置最近
-- 突变检测（装甲板姿态 yaw 突变 > 阈值时重置 KF）
-- 丢失处理（`max_lost_time=0.5s` 超时重置）
+- **云台数据**：Identification 订阅 `/gimbal_angle` 并打包进 `ArmorPlates` 消息（`gimbal_yaw_abs`、`gimbal_pitch_abs`），Tracker 直接读取，无需独立时间对齐。
+- **坐标变换**：`CoordinateTransformer` 实现 camera → gimbal（固定旋转）→ world（动态 yaw/pitch）旋转链。
+- **11 状态 EKF**：`[x_c, v_x, y_c, v_y, z_c, v_z, yaw, omega, r, l, h]`
+  - `x_c, y_c, z_c`：目标旋转中心位置。
+  - `yaw, omega`：目标自转角和自转角速度。
+  - `r`：`id=0/2` 装甲板半径。
+  - `r + l`：`id=1/3` 装甲板半径。
+  - `z_c + h`：`id=1/3` 装甲板高度。
+- **装甲板几何模型**：普通 `1-5` 目标统一按四装甲板模型处理。
+  - `angle_i = yaw + i * PI / 2`
+  - `id=0/2` 时 `radius = r`
+  - `id=1/3` 时 `radius = r + l`
+  - `id=0/2` 时 `armor_z = z_c`
+  - `id=1/3` 时 `armor_z = z_c + h`
+  - `armor_x = x_c - radius * cos(angle_i)`
+  - `armor_y = y_c - radius * sin(angle_i)`
+  - `armor_angle = angle_i`
+- **观测量**：`[yaw_to_armor, pitch_to_armor, distance_to_armor, armor_yaw]`，由预测装甲板 `xyza` 转为 `ypda` 后与 PnP 观测比较。
+- **过程噪声**：`x/v_x`、`y/v_y`、`z/v_z`、`yaw/omega` 使用分段白噪声加速度模型，`r/l/h` 当前视为静态几何参数。
+- **约束**：`yaw` 归一化到 `[-PI, PI]`；`r` 与 `r + l` 限制在 `[0.05, 0.5] m`。
+- **目标选择**：未初始化时选图像中心最近；已初始化时沿用当前世界系预测位置最近的简单匹配机制。
+- **丢失处理**：无目标时只预测；`max_lost_time=0.5s` 超时重置。
 
 ### 6. 串口双向通信
 
@@ -151,12 +138,45 @@ typedef struct {
 
 ### 环境依赖
 
-- Ubuntu 22.04
-- ROS 2 Humble
-- OpenCV 4.x
-- Eigen3
-- ONNX Runtime
-- MindVision / Galaxy 相机 SDK（已包含在 `third_parties/`）
+当前开发环境：Ubuntu 24.04 + ROS 2 Jazzy。项目也保留 Ubuntu 22.04 + ROS 2 Humble 的兼容说明；下面命令用 `$ROS_DISTRO` 适配当前已 source 的 ROS 发行版。
+
+基础工具：
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential cmake git \
+  python3-colcon-common-extensions python3-rosdep python3-vcstool \
+  libopencv-dev libeigen3-dev
+```
+
+ROS 依赖包：
+
+```bash
+# 如果没有 source ROS 环境，Jazzy 用户可先执行：source /opt/ros/jazzy/setup.bash
+# Humble 用户对应执行：source /opt/ros/humble/setup.bash
+sudo apt install -y \
+  ros-${ROS_DISTRO}-ament-cmake \
+  ros-${ROS_DISTRO}-rclcpp \
+  ros-${ROS_DISTRO}-rclcpp-components \
+  ros-${ROS_DISTRO}-sensor-msgs \
+  ros-${ROS_DISTRO}-geometry-msgs \
+  ros-${ROS_DISTRO}-builtin-interfaces \
+  ros-${ROS_DISTRO}-visualization-msgs \
+  ros-${ROS_DISTRO}-cv-bridge \
+  ros-${ROS_DISTRO}-image-transport \
+  ros-${ROS_DISTRO}-camera-info-manager \
+  ros-${ROS_DISTRO}-serial-driver \
+  ros-${ROS_DISTRO}-io-context \
+  ros-${ROS_DISTRO}-rosidl-default-generators \
+  ros-${ROS_DISTRO}-rosidl-default-runtime \
+  ros-${ROS_DISTRO}-foxglove-bridge
+```
+
+推理与相机 SDK：
+
+- OpenVINO Runtime：`armor_plate_identification` 使用 `find_package(OpenVINO REQUIRED)` 和 `openvino::runtime`，系统需要安装能提供 `OpenVINOConfig.cmake` 的 OpenVINO C++ 开发包。若 apt 源中提供，可安装 `openvino` 或 `libopenvino-dev`；否则按 Intel OpenVINO 官方方式安装并 source 对应 `setupvars.sh`。
+- MindVision / Galaxy 相机 SDK：仓库已内置于 `src/armor_plate_identification/third_parties/`，安装后环境钩子会配置 `LD_LIBRARY_PATH` 和 `GENICAM_GENTL64_PATH`。
 
 ### 编译
 
@@ -257,7 +277,7 @@ Visual-Translationo/
 │   │   ├── src/
 │   │   │   ├── CoordinateTransformer.cpp  # 坐标变换（camera↔world）
 │   │   │   ├── Tracker.cpp                # 目标选择 + 跟踪逻辑
-│   │   │   └── MyExtendedKalmanFilter.cpp # 9 状态 EKF
+│   │   │   └── MyExtendedKalmanFilter.cpp # 11 状态 EKF
 │   │   └── launch/
 │   ├── armor_plate_serial/            # 串口双向通信
 │   └── armor_plate_interfaces/        # 自定义消息
