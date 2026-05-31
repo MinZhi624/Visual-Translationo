@@ -68,7 +68,7 @@ public:
 };
 
 /** @brief 图像保存结构体 */
-struct ImageSave{
+struct Record{
 	builtin_interfaces::msg::Time img_stamp;
 	cv::Mat img;
 };

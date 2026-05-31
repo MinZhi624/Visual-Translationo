@@ -19,6 +19,11 @@ void Test::run()
         img_show_ = frame.clone();
         debug_test_.onFrameStart();
 
+        // Test 模式用视频相对时间
+        double video_time = debug_test_.getFrameCount() / fps_;
+        read_stamp_.sec = static_cast<int>(video_time);
+        read_stamp_.nanosec = static_cast<uint32_t>((video_time - read_stamp_.sec) * 1e9);
+
         identification(frame);
         solvePose();
         debug_test_.mark("solvePose");
@@ -70,17 +75,27 @@ bool Test::control(const KeyEvent& event)
 
 void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 {
-    std::deque<ImageSave> images_buffs;
+    std::deque<Record> images_buffs;
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
         if (img_buffs_.empty()) return;
         images_buffs = img_buffs_;
     }
     auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
-    auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg, &to_ns](const ImageSave& image_save) {
-        return std::abs(to_ns(image_save.img_stamp) - to_ns(msg->header.stamp)) < 1000000;
-    });
-    if (it == images_buffs.end()) return;
+    int64_t msg_ns = to_ns(msg->header.stamp);
+    // 最近邻匹配
+    auto it = images_buffs.begin();
+    int64_t best_diff = std::abs(to_ns(it->img_stamp) - msg_ns);
+    for (auto jt = std::next(it); jt != images_buffs.end(); ++jt) {
+        int64_t diff = std::abs(to_ns(jt->img_stamp) - msg_ns);
+        if (diff < best_diff) {
+            best_diff = diff;
+            it = jt;
+        }
+    }
+    if (best_diff > 50000000) return;  // 超过 50ms 放弃
+    
+    // infoTrackerDebugMsg(msg);
 
     cv::Mat debug_img = it->img.clone();
     cv::Point3f target_gambal(msg->target_point.x, msg->target_point.y, msg->target_point.z);
@@ -168,8 +183,15 @@ void Test::identification(cv::Mat& img_bgr)
 
 void Test::solvePose()
 {
-    std::vector<ArmorPlate> armor_plates;
     pose_solver_.solve(armors_);
+}
+
+void Test::publish()
+{
+    ArmorPlates armor_plates_msg;
+    armor_plates_msg.header.stamp = read_stamp_;
+    armor_plates_msg.header.frame_id = "camera_link";
+    armor_plates_msg.armor_plates.reserve(armors_.size());
     for (const auto& armor : armors_) {
         ArmorPlate armor_plate;
         armor_plate.pose.position.x = armor.xyz_camera_.x();
@@ -181,22 +203,8 @@ void Test::solvePose()
         armor_plate.pose.orientation.w = armor.q_camera_.w();
         armor_plate.number = static_cast<int>(armor.name_);
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
-        armor_plates.push_back(armor_plate);
+        armor_plates_msg.armor_plates.push_back(armor_plate);
     }
-    armor_plates_ = armor_plates;
-}
-
-void Test::publish()
-{
-    double time_sec = static_cast<double>(debug_test_.getFrameCount()) / fps_;
-    builtin_interfaces::msg::Time stamp;
-    stamp.sec = static_cast<int32_t>(time_sec);
-    stamp.nanosec = static_cast<uint32_t>((time_sec - stamp.sec) * 1e9);
-
-    ArmorPlates armor_plates_msg;
-    armor_plates_msg.header.stamp = stamp;
-    armor_plates_msg.header.frame_id = "camera_link";
-    armor_plates_msg.armor_plates = armor_plates_;
     armor_plates_pub_->publish(armor_plates_msg);
 }
 
@@ -205,12 +213,8 @@ void Test::save()
     debug_test_.save();
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        double time_sec = static_cast<double>(debug_test_.getFrameCount()) / fps_;
-        builtin_interfaces::msg::Time stamp;
-        stamp.sec = static_cast<int32_t>(time_sec);
-        stamp.nanosec = static_cast<uint32_t>((time_sec - stamp.sec) * 1e9);
-        img_buffs_.push_back({stamp, img_show_.clone()});
-        if (img_buffs_.size() > 10) img_buffs_.pop_front();
+        img_buffs_.push_back({read_stamp_, img_show_.clone()});
+        if (img_buffs_.size() > 50) img_buffs_.pop_front();
     }
 }
 
@@ -258,8 +262,8 @@ int main(int argc, char **argv)
 void Test::initDebug()
 {
     DebugBaseParams base_params;
-    base_params.debug_timecontrol_ = this->declare_parameter<bool>("debug_base", false);
-    base_params.debug_lights_ = this->declare_parameter<bool>("debug_identification", false);
+    base_params.debug_timecontrol_ = this->declare_parameter<bool>("debug_timecontrol", false);
+    base_params.debug_lights_ = this->declare_parameter<bool>("debug_lights", false);
     base_params.debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
     base_params.debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
     base_params.delay_time = this->declare_parameter<int>("delay_time", 20);
@@ -277,6 +281,7 @@ void Test::initDebug()
         "tracker_debug", 10,
         std::bind(&Test::trackerDebugCallBack, this, std::placeholders::_1)
     );
+    if (base_params.debug_timecontrol_) RCLCPP_INFO(this->get_logger(), "时间控制DEBUG模式开启");
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
     if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
     if (base_params.debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");

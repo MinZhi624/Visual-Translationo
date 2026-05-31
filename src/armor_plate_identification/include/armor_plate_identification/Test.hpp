@@ -15,11 +15,8 @@
 #include <opencv2/imgproc.hpp>
 
 #include <deque>
-#include <thread>
-#include <chrono>
 #include <mutex>
-#include <filesystem>
-#include <algorithm>
+
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -34,7 +31,7 @@ private:
     Detector lights_;
     PoseSolver pose_solver_;
     std::vector<DetectorArmor> armors_;
-    std::vector<ArmorPlate> armor_plates_;
+    builtin_interfaces::msg::Time read_stamp_;
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
 
     // Test 特有
@@ -45,7 +42,7 @@ private:
     // TrackerDebug
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
-    std::deque<ImageSave> img_buffs_;
+    std::deque<Record> img_buffs_;
     int tracker_debug_count_ = 0;
 
     GuiWorker gui_worker_;

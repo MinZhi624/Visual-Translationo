@@ -6,14 +6,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # ======================
-# ROS
-# ======================
-rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN rm_auto_aim::ArmorTrackerNode
-  EXECUTABLE ${PROJECT_NAME}_node
-)
-
-# ======================
 # 打包
 # ======================
 set(  ArmorPlateIdentification
@@ -41,6 +33,7 @@ set( Test
 # ======================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)

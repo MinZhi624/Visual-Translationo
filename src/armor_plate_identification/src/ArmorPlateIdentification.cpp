@@ -65,17 +65,25 @@ bool ArmorPlateIdentification::control(const KeyEvent& event)
 
 void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 {
-    std::deque<ImageSave> images_buffs;
+    std::deque<Record> images_buffs;
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
         if (img_buffs_.empty()) return;
         images_buffs = img_buffs_;
     }
     auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
-    auto it = std::find_if(images_buffs.begin(), images_buffs.end(), [msg, &to_ns](const ImageSave& image_save) {
-        return std::abs(to_ns(image_save.img_stamp) - to_ns(msg->header.stamp)) < 1000000;
-    });
-    if (it == images_buffs.end()) return;
+    int64_t msg_ns = to_ns(msg->header.stamp);
+    // 最近邻匹配
+    auto it = images_buffs.begin();
+    int64_t best_diff = std::abs(to_ns(it->img_stamp) - msg_ns);
+    for (auto jt = std::next(it); jt != images_buffs.end(); ++jt) {
+        int64_t diff = std::abs(to_ns(jt->img_stamp) - msg_ns);
+        if (diff < best_diff) {
+            best_diff = diff;
+            it = jt;
+        }
+    }
+    if (best_diff > 50000000) return;  // 超过 50ms 放弃
 
     cv::Mat debug_img = it->img.clone();
     cv::Point3f target_cam(msg->target_point.x, msg->target_point.y, msg->target_point.z);
@@ -110,12 +118,17 @@ void ArmorPlateIdentification::init()
     initDetector();
 
     armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", rclcpp::SensorDataQoS());
+
     gimbal_angle_sub_ = this->create_subscription<GimbalAngle>(
         "gimbal_angle", rclcpp::SensorDataQoS(),
         [this](const GimbalAngle::SharedPtr msg) {
             std::lock_guard<std::mutex> lock(gimbal_mutex_);
+            gimbal_data_.stamp = msg->stamp;
             gimbal_data_.yaw_abs = msg->yaw_abs;
             gimbal_data_.pitch_abs = msg->pitch_abs;
+            gimbal_history_.push_back(gimbal_data_);
+            // 保留最近 50 个
+            if (gimbal_history_.size() > 50) gimbal_history_.pop_front();
         }
     );
 
@@ -164,15 +177,42 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
 
 void ArmorPlateIdentification::solvePose()
 {
-    std::vector<ArmorPlate> armor_plates;
-    float yaw_abs = 0.0f;
-    float pitch_abs = 0.0f;
+    float yaw_abs = 0.0f, pitch_abs = 0.0f;
     {
         std::lock_guard<std::mutex> lock(gimbal_mutex_);
-        yaw_abs = gimbal_data_.yaw_abs;
-        pitch_abs = gimbal_data_.pitch_abs;
+        if (!gimbal_history_.empty()) {
+            // 按图像时间戳在 gimbal history 中找最近值
+            auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
+            int64_t image_ns = to_ns(read_stamp_);
+            auto it = gimbal_history_.begin();
+            int64_t best_diff = std::abs(to_ns(it->stamp) - image_ns);
+            for (auto jt = std::next(it); jt != gimbal_history_.end(); ++jt) {
+                int64_t diff = std::abs(to_ns(jt->stamp) - image_ns);
+                if (diff < best_diff) {
+                    best_diff = diff;
+                    it = jt;
+                }
+            }
+            yaw_abs = it->yaw_abs;
+            pitch_abs = it->pitch_abs;
+        } else {
+            // fallback：用最新值
+            yaw_abs = gimbal_data_.yaw_abs;
+            pitch_abs = gimbal_data_.pitch_abs;
+        }
     }
-    pose_solver_.solve(armors_, yaw_abs, pitch_abs);
+    matched_yaw_ = yaw_abs;
+    matched_pitch_ = pitch_abs;
+
+    pose_solver_.solve(armors_, matched_yaw_, matched_pitch_);
+}
+
+void ArmorPlateIdentification::publish()
+{
+    ArmorPlates armor_plates_msg;
+    armor_plates_msg.header.stamp = read_stamp_;
+    armor_plates_msg.header.frame_id = "camera_link";
+    armor_plates_msg.armor_plates.reserve(armors_.size());
     for (const auto& armor : armors_) {
         ArmorPlate armor_plate;
         armor_plate.pose.position.x = armor.xyz_camera_.x();
@@ -184,22 +224,10 @@ void ArmorPlateIdentification::solvePose()
         armor_plate.pose.orientation.w = armor.q_camera_.w();
         armor_plate.number = static_cast<int>(armor.name_);
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
-        armor_plates.push_back(armor_plate);
+        armor_plates_msg.armor_plates.push_back(armor_plate);
     }
-    armor_plates_ = armor_plates;
-}
-
-void ArmorPlateIdentification::publish()
-{
-    ArmorPlates armor_plates_msg;
-    armor_plates_msg.header.stamp = read_stamp_;
-    armor_plates_msg.header.frame_id = "camera_link";
-    armor_plates_msg.armor_plates = armor_plates_;
-    {
-        std::lock_guard<std::mutex> lock(gimbal_mutex_);
-        armor_plates_msg.gimbal_yaw_abs = gimbal_data_.yaw_abs;
-        armor_plates_msg.gimbal_pitch_abs = gimbal_data_.pitch_abs;
-    }
+    armor_plates_msg.gimbal_yaw_abs = matched_yaw_;
+    armor_plates_msg.gimbal_pitch_abs = matched_pitch_;
     armor_plates_pub_->publish(armor_plates_msg);
 }
 
@@ -210,7 +238,7 @@ void ArmorPlateIdentification::save()
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
         img_buffs_.push_back({read_stamp_ ,img_show_.clone()});
-        if (img_buffs_.size() > 10) img_buffs_.pop_front();
+        if (img_buffs_.size() > 50) img_buffs_.pop_front();
     }
 }
 
@@ -256,8 +284,8 @@ int main(int argc, char** argv)
 void ArmorPlateIdentification::initDebug()
 {
     DebugBaseParams base_params;
-    base_params.debug_timecontrol_ = this->declare_parameter<bool>("debug_base", false);
-    base_params.debug_lights_ = this->declare_parameter<bool>("debug_identification", false);
+    base_params.debug_timecontrol_ = this->declare_parameter<bool>("debug_timecontrol", false);
+    base_params.debug_lights_ = this->declare_parameter<bool>("debug_lights", false);
     base_params.debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
     base_params.debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
     base_params.delay_time = this->declare_parameter<int>("delay_time", 0);

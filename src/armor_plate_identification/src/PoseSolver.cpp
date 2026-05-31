@@ -80,7 +80,6 @@ PoseSolver::PoseSolver(
 {
 }
 
-
 void PoseSolver::solve(std::vector<DetectorArmor> & armors, float yaw_abs, float pitch_abs)
 {
     std::unordered_map<int, std::vector<LastArmorYawRecord>> new_record;

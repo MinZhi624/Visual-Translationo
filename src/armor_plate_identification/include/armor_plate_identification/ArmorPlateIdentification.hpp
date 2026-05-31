@@ -3,25 +3,23 @@
 #include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/DebugBase.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
-#include "armor_plate_identification/NumberClassifier.hpp"
+
 #include "armor_plate_identification/CameraDriver.hpp"
 
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "armor_plate_interfaces/msg/gimbal_angle.hpp"
+#include <rclcpp/rclcpp.hpp>
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
-#include "rclcpp/rclcpp.hpp"
+
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include "armor_plate_identification/GuiWorker.hpp"
 
-#include <iostream>
-#include <thread>
 #include <mutex>
-#include <chrono>
 #include <deque>
 
 using armor_plate_interfaces::msg::ArmorPlate;
@@ -30,6 +28,7 @@ using armor_plate_interfaces::msg::TrackerDebug;
 using armor_plate_interfaces::msg::GimbalAngle;
 
 struct GimbalData {
+    builtin_interfaces::msg::Time stamp;
     float yaw_abs = 0.0f;
     float pitch_abs = 0.0f;
 };
@@ -46,15 +45,17 @@ private:
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_angle_sub_;
     GimbalData gimbal_data_;
+    std::deque<GimbalData> gimbal_history_;
     std::mutex gimbal_mutex_;
+    float matched_yaw_ = 0.0f;
+    float matched_pitch_ = 0.0f;
     builtin_interfaces::msg::Time read_stamp_;
     std::vector<DetectorArmor> armors_;
-    std::vector<ArmorPlate> armor_plates_;
     DebugBase debug_base_;
     sensor_msgs::msg::CameraInfo camera_info_msg_;
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
     std::mutex tracker_debug_mutex_;
-    std::deque<ImageSave> img_buffs_;
+    std::deque<Record> img_buffs_;
 
     GuiWorker gui_worker_;
     bool headless_ = false;
@@ -77,3 +78,4 @@ public:
     ~ArmorPlateIdentification();
     void run();
 };
+

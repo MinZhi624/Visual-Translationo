@@ -52,6 +52,7 @@ private:
         marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
         // ===== DEBUG ===== //
         debug_ = this->declare_parameter<bool>("debug", false);
+        RCLCPP_WARN(this->get_logger(), "tracker debug_ = %s", debug_ ? "true" : "false");
         if(debug_) {
             tracker_debug_pub_ = this->create_publisher<TrackerDebug>("tracker_debug", 10);
         }
@@ -59,7 +60,7 @@ private:
         tracker_.setMaxLostTime(max_lost_time_);
         tracker_.setMutationThreshold(mutation_yaw_threshold_);
         tracker_.reset();
-        
+
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
     }
     void ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)

@@ -2,18 +2,13 @@
 #include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 #include "armor_plate_serial/packet.hpp"
 
-#include <armor_plate_interfaces/msg/detail/aim_command__struct.hpp>
-#include <armor_plate_interfaces/msg/detail/gimbal_angle__struct.hpp>
-#include <chrono>
 #include <cstdint>
+#include <rclcpp/logging.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <serial_driver/serial_driver.hpp>
 
-#include <atomic>
 #include <thread>
 #include <mutex>
-#include <sstream>
-#include <iomanip>
 
 using armor_plate_interfaces::msg::AimCommand;
 using armor_plate_interfaces::msg::GimbalAngle;
@@ -55,115 +50,74 @@ private:
     std::unique_ptr<drivers::serial_driver::SerialPortConfig> device_config_;
     std::unique_ptr<drivers::serial_driver::SerialDriver> serial_driver_;
     // 接受相关
+    rclcpp::Publisher<GimbalAngle>::SharedPtr gimbal_angle_pub_;
     std::atomic<bool> running_{true};
     std::thread recv_thread_;
-    enum class ParseState { WAIT_SOF1, WAIT_SOF2, READ_PAYLOAD };
-    ParseState parse_state_ = ParseState::WAIT_SOF1;
     std::vector<uint8_t> recv_payload_;
-    rclcpp::Publisher<GimbalAngle>::SharedPtr gimbal_angle_pub_;
     // 缓存
     std::vector<uint8_t> recv_temp_buf_;
-    /////// DEBUG ///////
-    uint64_t debug_total_frames_ = 0;
-    uint64_t debug_crc_failures_ = 0;
-    uint64_t debug_header_syncs_ = 0;
+    // 时间补偿
+    double timestamp_offset_ = 0.0;
     
-    // 接受
-    void parseByte(uint8_t byte)
+    void publishFrame(const std::array<uint8_t, 13> & frame)
     {
-        switch(parse_state_) {
-        case ParseState::WAIT_SOF1:
-            if (byte == 0x5A) {
-                parse_state_ = ParseState::WAIT_SOF2;
-            }
-            break;
-        case ParseState::WAIT_SOF2:
-            if (byte == 0xA5) {
-                parse_state_ = ParseState::READ_PAYLOAD;
-                recv_payload_.clear(); // 准备读取
-                /////// DEBUG ///////
-                debug_header_syncs_++;
-            } else if(byte == 0x5A) {
-                parse_state_ = ParseState::WAIT_SOF2;
-            } else {
-                parse_state_ = ParseState::WAIT_SOF1;
-            }
-            break;
-        case ParseState::READ_PAYLOAD:
-            recv_payload_.push_back(byte);
-            if (recv_payload_.size() == 11) {
-                // 填充数据
-                processFrame();
-                parse_state_ = ParseState::WAIT_SOF1;
-            }
-            break;
-
-        }
-    }
-    void processFrame()
-    {
-        uint8_t crc_input[11] = {
-            0X5A, 0XA5, recv_payload_[0],
-            recv_payload_[1], recv_payload_[2], recv_payload_[3], recv_payload_[4],
-            recv_payload_[5], recv_payload_[6], recv_payload_[7], recv_payload_[8]
-        };
-        uint16_t calc_crc = crc16_modbus_bit(crc_input, 11);
-        uint16_t recv_crc = static_cast<uint16_t>(recv_payload_[9] | 
-                            static_cast<uint16_t>(recv_payload_[10]) << 8);
-        /////// DEBUG ///////
-        debug_total_frames_++;
-        if(calc_crc != recv_crc) {
-            debug_crc_failures_++;
-            std::ostringstream oss;
-            oss << std::hex << std::uppercase << std::setfill('0');
-            oss << "RX raw:";
-            oss << " 5A A5";
-            for (size_t i = 0; i < recv_payload_.size(); ++i) {
-                oss << " " << std::setw(2) << static_cast<int>(recv_payload_[i]);
-            }
-            oss << " | calc=0x" << std::setw(4) << calc_crc
-                << " recv=0x" << std::setw(4) << recv_crc;
-            double fail_rate = (debug_total_frames_ > 0)
-                                   ? (100.0 * static_cast<double>(debug_crc_failures_) / static_cast<double>(debug_total_frames_))
-                                   : 0.0;
-            RCLCPP_WARN(
-                this->get_logger(),
-                "%s | [STATS] total=%llu, fail=%llu, sync=%llu, fail_rate=%.2f%%",
-                oss.str().c_str(),
-                static_cast<unsigned long long>(debug_total_frames_),
-                static_cast<unsigned long long>(debug_crc_failures_),
-                static_cast<unsigned long long>(debug_header_syncs_),
-                fail_rate);
-            return;
-        }
-        // 提取数据
-        int32_t yaw_raw, pitch_raw;
-        std::memcpy(&yaw_raw, recv_payload_.data() + 1, sizeof(yaw_raw));
-        std::memcpy(&pitch_raw, recv_payload_.data() + 5, sizeof(pitch_raw));
-        float yaw_abs = static_cast<float>(yaw_raw) / 10000.0f;
-        float pitch_abs = static_cast<float>(pitch_raw) / 10000.0f;
+        const auto * packet = reinterpret_cast<const EcToVisionFrame_t *>(frame.data());
         GimbalAngle msg;
-        msg.stamp = this->now();
-        msg.pitch_abs = pitch_abs;
-        msg.yaw_abs = yaw_abs;
+        // 补偿串口通信延迟：把时间戳往前推
+        msg.stamp = this->now() - rclcpp::Duration::from_seconds(timestamp_offset_);
+        msg.yaw_abs   = static_cast<float>(packet->yaw_actual_1e4rad) / 10000.0f;
+        msg.pitch_abs = static_cast<float>(packet->pitch_actual_1e4rad) / 10000.0f;
         gimbal_angle_pub_->publish(msg);
-        
-        // RCLCPP_INFO(this->get_logger(), "收到数据: yaw=%4f, pitch=%4f", yaw_abs, pitch_abs);
     }
+
     void recvLoop()
     {
-        recv_temp_buf_.resize(64);
-        while(running_.load() && rclcpp::ok()) {
+        std::vector<uint8_t> header(1);
+        std::array<uint8_t, 13> frame;
+
+        while (rclcpp::ok()) {
             try {
-                size_t n = serial_driver_->port()->receive(recv_temp_buf_);
-                for (size_t i = 0; i < n; ++i) {
-                    parseByte(recv_temp_buf_[i]);
+                // 等 SOF1
+                serial_driver_->port()->receive(header);
+                if (header[0] != 0x5A) continue;
+
+                //等 SOF2
+                while (true) {
+                    serial_driver_->port()->receive(header);
+                    if (header[0] == 0xA5) {
+                        break;                 // 找到完整帧头
+                    } else if (header[0] == 0x5A) {
+                        continue;              // 5A 5A A5：继续等 SOF2
+                    } else {
+                        break;                 // 帧头断裂，回到外层
+                    }
                 }
-            } catch (const std::exception& e) {
-                RCLCPP_ERROR(this->get_logger(), "接收错误: %s", e.what());
+                if (header[0] != 0xA5) continue;
+
+                size_t received = 0;
+                while (received < 11) {
+                    std::vector<uint8_t> tmp(11 - received);
+                    size_t n = serial_driver_->port()->receive(tmp);
+                    std::copy(tmp.begin(), tmp.begin() + n, frame.begin() + 2 + received);
+                    received += n;
+                }
+                frame[0] = 0x5A;
+                frame[1] = 0xA5;
+
+                // CRC 校验
+                uint16_t calc_crc = crc16_modbus_bit(frame.data(), 11);
+                uint16_t recv_crc = static_cast<uint16_t>(frame[11]) |
+                                (static_cast<uint16_t>(frame[12]) << 8);
+                if (calc_crc != recv_crc) {
+                    RCLCPP_WARN(this->get_logger(), "CRC校验失败");
+                    continue;
+                }
+
+                publishFrame(frame);
+
+            } catch (const std::exception & ex) {
+                RCLCPP_ERROR(this->get_logger(), "接收异常: %s", ex.what());
             }
-            // 避免过度占用CPU资源
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
     // 发送
@@ -211,6 +165,7 @@ private:
         // ===== 串口初始化 =====
         std::string device_name = this->declare_parameter<std::string>("device_name", "/dev/ttyACM0");
         uint32_t baud_rate = static_cast<uint32_t>(this->declare_parameter<int>("baud_rate", 115200));
+        timestamp_offset_ = this->declare_parameter<double>("timestamp_offset", 0.0);
 
         using FC = drivers::serial_driver::FlowControl;
         using PT = drivers::serial_driver::Parity;

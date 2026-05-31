@@ -13,20 +13,21 @@ test_node_cpp:
     max_distance_ratio: 0.8
     min_distance_ratio: 0.3
     # === 数字分类器参数 ===
-    number_threshold: 0.2
+    number_threshold: 0.5
     # === DEBUG ===
-    debug_base: true
+    debug_timecontrol: true
+    debug_lights: false
     debug_preprocessing: false
-    debug_identification: true
     debug_number_classification: false
-    # === 正常 ===
+    stats_interval: 50
+    # === 帧调试 ===
     debug_frame: false
+    delay_time: 20 
     debug_frame_count: 0
-    delay_time: 0
-    # === 数字记录 ===
+    # === 记录模式 ===
     # debug_frame: true
-    # debug_frame_count: 600
-    # delay_time: 0
+    # delay_time: 0 
+    # debug_frame_count: 500
 
 armor_plate_identification_node:
   ros__parameters:
@@ -52,10 +53,11 @@ armor_plate_identification_node:
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
     # === 数字分类器参数 ===
-    number_threshold: 0.2
+    number_threshold: 0.5
     # === DEBUG ===
-    debug_base: true
-    debug_identification: false
+    debug_timecontrol: true
+    debug_lights: false
     debug_preprocessing: false
-    debug_number_classification: true
+    debug_number_classification: false
     delay_time: 0
+    stats_interval: 50

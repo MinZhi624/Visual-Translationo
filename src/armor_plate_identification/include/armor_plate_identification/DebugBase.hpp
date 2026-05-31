@@ -105,3 +105,5 @@ private:
     void showRoiCollector();
     void showNumberRois();
 };
+
+void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug::SharedPtr msg);

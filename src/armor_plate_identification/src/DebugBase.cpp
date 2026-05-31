@@ -318,7 +318,7 @@ void DebugBase::showNumberRois()
     display_frames_.emplace_back("number_rois", canvas);
 }
 
-void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug& msg)
+void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug::SharedPtr msg)
 {
     RCLCPP_INFO(rclcpp::get_logger("DEBUG_TRACKER"),
         "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
@@ -326,12 +326,12 @@ void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug& msg)
         "yaw:%.4f->%.4f "
         "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
         "%s solve:%d %.1fms",
-        msg.target_point.x, msg.target_point.y, msg.target_point.z,
-        msg.filtered_point.x, msg.filtered_point.y, msg.filtered_point.z,
-        msg.target_point_world.x, msg.target_point_world.y, msg.target_point_world.z,
-        msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z,
-        msg.raw_yaw, msg.filter_yaw,
-        msg.center_x, msg.center_y, msg.center_r,
-        msg.center_v_x, msg.center_v_y,
-        msg.method.c_str(), msg.solve_ok, msg.time_cost);
+        msg->target_point.x, msg->target_point.y, msg->target_point.z,
+        msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z,
+        msg->target_point_world.x, msg->target_point_world.y, msg->target_point_world.z,
+        msg->filtered_point_world.x, msg->filtered_point_world.y, msg->filtered_point_world.z,
+        msg->raw_yaw, msg->filter_yaw,
+        msg->center_x, msg->center_y, msg->center_r,
+        msg->center_v_x, msg->center_v_y,
+        msg->method.c_str(), msg->solve_ok, msg->time_cost);
 }
