@@ -1,5 +1,6 @@
 #include "armor_plate_interfaces/msg/aim_command.hpp"
 #include "armor_plate_interfaces/msg/gimbal_angle.hpp"
+#include "armor_plate_serial/crc16.hpp"
 #include "armor_plate_serial/packet.hpp"
 
 #include <cstdint>
@@ -105,10 +106,7 @@ private:
                 frame[1] = 0xA5;
 
                 // CRC 校验
-                uint16_t calc_crc = crc16_modbus_bit(frame.data(), 11);
-                uint16_t recv_crc = static_cast<uint16_t>(frame[11]) |
-                                (static_cast<uint16_t>(frame[12]) << 8);
-                if (calc_crc != recv_crc) {
+                if (!crc16::checkCrc16(frame)) {
                     RCLCPP_WARN(this->get_logger(), "CRC校验失败");
                     continue;
                 }
@@ -146,7 +144,7 @@ private:
         frame.target_valid = 1;
         frame.delta_yaw_1e4rad = static_cast<int16_t>(latest_yaw_ * 10000.0f);
         frame.delta_pitch_1e4rad = static_cast<int16_t>(latest_pitch_ * 10000.0f);
-        frame.crc16 = crc16_modbus_bit(reinterpret_cast<uint8_t *>(&frame), 8);
+        crc16::appendCrc16(frame);
         std::vector<uint8_t> data(
             reinterpret_cast<uint8_t *>(&frame),
             reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
