@@ -36,8 +36,8 @@ void DebugTest::saveTrackerDebug(const std::string& log_dir,
                 << "target_world_x target_world_y target_world_z "
                 << "filtered_world_x filtered_world_y filtered_world_z "
                 << "raw_yaw filter_yaw "
-                << "center_x center_y center_z center_r center_vx center_vy "
-                << "method solve_ok time_cost" << std::endl;
+                << "center_x center_y center_z center_r center_vx center_vy"
+                << std::endl;
             RCLCPP_INFO(rclcpp::get_logger("TRACKER_DEBUG"), "日志保存到: %s", log_path.c_str());
         }
     }
@@ -48,8 +48,7 @@ void DebugTest::saveTrackerDebug(const std::string& log_dir,
             << msg.filtered_point_world.x << " " << msg.filtered_point_world.y << " " << msg.filtered_point_world.z << " "
             << msg.raw_yaw << " " << msg.filter_yaw << " "
             << msg.center_x << " " << msg.center_y << " " << msg.center_z << " " << msg.center_r << " "
-            << msg.center_v_x << " " << msg.center_v_y << " "
-            << msg.method << " " << msg.solve_ok << " " << msg.time_cost << std::endl;
+            << msg.center_v_x << " " << msg.center_v_y << std::endl;
     }
 }
 

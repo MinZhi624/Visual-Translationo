@@ -90,14 +90,13 @@ void DebugTracker::infoTrackerDebugMsg(const armor_plate_interfaces::msg::Tracke
         "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
         "yaw:%.4f->%.4f "
         "center:(%.4f,%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
-        "lost:%d %s solve:%d %.1fms",
+        "lost:%d",
         msg.target_point_world.x, msg.target_point_world.y, msg.target_point_world.z,
         msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z,
         msg.raw_yaw, msg.filter_yaw,
         msg.center_x, msg.center_y, msg.center_z, msg.center_r,
         msg.center_v_x, msg.center_v_y,
-        msg.is_lost ? 1 : 0,
-        msg.method.c_str(), msg.solve_ok, msg.time_cost);
+        msg.is_lost ? 1 : 0);
 }
 
 void DebugTracker::infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug::SharedPtr msg)

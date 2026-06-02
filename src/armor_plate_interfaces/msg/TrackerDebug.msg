@@ -8,8 +8,6 @@ geometry_msgs/Vector3 target_point_world
 geometry_msgs/Vector3 filtered_point_world
 # 目标耗时ms
 float32 time_cost
-# 方法
-string method
 bool solve_ok
 # 中心点的数据
 float32 center_x

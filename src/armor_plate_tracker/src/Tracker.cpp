@@ -3,7 +3,6 @@
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/logging.hpp"
 #include <chrono>
-#include <limits>
 #include <rclcpp/logger.hpp>
 #include <vector>
 
@@ -24,17 +23,14 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
                      double current_time,
                      const GimbalData & gimbal)
 {
-    auto t_start = std::chrono::steady_clock::now();
-    solve_ok_ = false;
-
     double dt = calculateDt(current_time);
 
     transformer_.update(gimbal);
 
     // 没有目标
     if (armor_plates.empty()) {
-        is_lost_ = true;
-        if (isLostTooLong(current_time))
+        updateState(false, current_time);
+        if (state_ == TrackerState::LOST)
             reset();
         else if (traget_.isInitialized())
             traget_.predict(dt);
@@ -70,8 +66,10 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
 
     // 没有同 id 的装甲板，按丢失处理
     if (selected_armors.empty()) {
-        is_lost_ = true;
-        if (traget_.isInitialized())
+        updateState(false, current_time);
+        if (state_ == TrackerState::LOST)
+            reset();
+        else if (traget_.isInitialized())
             traget_.predict(dt);
         return;
     }
@@ -87,6 +85,7 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
 
         traget_.init(target);
         updateMeasurement(target, current_time);
+        updateState(true, current_time);
         return;
     }
 
@@ -99,8 +98,7 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     center_velocity_ = traget_.getCenterVelocity();
     center_r_ = static_cast<float>(traget_.getRadius());
     selected_armor_id_ = static_cast<int>(traget_.getSelectedArmorId());
-    solve_ok_ = true;
-
+    
     // TODO： 升级火控系统
     // 寻找目标 -- 以离图像中心最近的装甲板为基准
     TrackerArmor target = selected_armors[0];
@@ -114,11 +112,63 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     Eigen::Vector<double, 4> filtered_obs = traget_.getFilteredObservation();
     TrackerArmor filtered(filtered_obs);
     transformer_.updateTrackerArmor(filtered);
+    
     updateMeasurement(target, current_time);
     updateFilteredValue(filtered);
+    updateState(true, current_time);
+}
 
-    auto t_end = std::chrono::steady_clock::now();
-    time_cost_ = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+void Tracker::updateState(const bool & is_found, double current_time)
+{
+    // 时间维护 + 更新状态
+    /* 流程图
+        没找到 --> 如果之前找到过 --> 在TRACKING       -->TEMPLOST
+        |         |--------------> 在DETECTING      -->LOST
+        |         |--------------> 在TEAMP_LOST太久  -->LOST
+        | --> 之前没有找到过 --> LOST
+
+        找到了 --> 如果之前找到过 --> 次数 >= 5 --> TRACKING
+        | --> 之前没有找到过 --> DETECTING
+    */
+    if (!is_found) {
+        switch(state_) {
+            case TrackerState::DETECTING:
+                state_ = TrackerState::LOST;
+                detect_count_ = 0; // 重置检测次数
+                break;
+            case TrackerState::TRACKING:
+                state_ = TrackerState::TEMP_LOST;
+                break;
+            case TrackerState::TEMP_LOST:
+                if (isLostTooLong(current_time)) {
+                    state_ = TrackerState::LOST;
+                    detect_count_ = 0; // 重置检测次数
+                }
+                break;
+            default:
+                break;
+        }
+    } else {
+        last_detection_time_ = current_time;
+        switch(state_) {
+            case TrackerState::LOST:
+                state_ = TrackerState::DETECTING;
+                detect_count_++;
+                break;
+            case TrackerState::TEMP_LOST:
+                state_ = TrackerState::TRACKING;
+                break;
+            case TrackerState::DETECTING:
+                detect_count_++;
+                if (detect_count_ >= 5) {
+                    state_ = TrackerState::TRACKING;
+                    detect_count_ = 0;
+                }
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 void Tracker::reset()
@@ -126,6 +176,8 @@ void Tracker::reset()
     RCLCPP_WARN(rclcpp::get_logger("TRACKER"), "reset tracker");
     traget_.reset();
 
+    state_ = TrackerState::LOST;
+    detect_count_ = 0;
     last_update_time_ = 0.0;
     last_detection_time_ = 0.0;
     last_armor_pose_yaw_world_ = 0.0f;
@@ -174,7 +226,6 @@ void Tracker::updateMeasurement(const TrackerArmor & armor, double current_time)
     last_armor_pose_yaw_world_ = armor.ypr_world_.x();
     last_armor_number_ = armor.id;
     last_detection_time_ = current_time;
-    is_lost_ = false;
 }
 
 void Tracker::updateFilteredValue(const TrackerArmor & armor)
@@ -195,10 +246,10 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
         return vec;
     };
 
-    msg.is_lost = is_lost_;
+    msg.is_lost = isLost();
     msg.target_point_world = toVec3(measured_armor_.xyz_world_);
 
-    if (!is_lost_) {
+    if (!isLost()) {
         msg.filtered_point_world = toVec3(filter_armor_.xyz_world_);
     } else if (traget_.isInitialized()) {
         auto armor_list = getTrackerArmorList();
@@ -215,7 +266,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
     msg.selected_armor_id = selected_armor_id_;
     msg.predicted_armor_points_world.clear();
     msg.predicted_armor_yaws_world.clear();
-    if (traget_.isInitialized() && !is_lost_) {
+    if (traget_.isInitialized() && !isLost()) {
         auto armor_list = getTrackerArmorList();
         msg.predicted_armor_points_world.reserve(armor_list.size());
         msg.predicted_armor_yaws_world.reserve(armor_list.size());
@@ -234,10 +285,6 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
     msg.center_r = center_r_;
     msg.center_v_x = static_cast<float>(center_velocity_.x());
     msg.center_v_y = static_cast<float>(center_velocity_.y());
-
-    msg.time_cost = time_cost_;
-    msg.method = "ekf";
-    msg.solve_ok = solve_ok_;
 
     return msg;
 }
