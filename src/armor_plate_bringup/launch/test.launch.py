@@ -17,9 +17,9 @@ def generate_launch_description():
     video_path_arg = DeclareLaunchArgument(
         name="video_path",
         # default_value= video_default_path 
-        # default_value = video_blue_fast_rotated_and_move
+        default_value = video_blue_fast_rotated_and_move
         # default_value = video_fast
-        default_value = video_blue_slow
+        # default_value = video_blue_slow
     )
 
     identification_node_params_file = os.path.join(
@@ -67,15 +67,6 @@ def generate_launch_description():
         output='screen',
         emulate_tty=True,
         parameters=[tracker_node_params_file]
-    )
-
-    serial_node = Node(
-        package='armor_plate_serial',
-        executable='serial_node',
-        name='armor_plate_serial_node',
-        output='screen',
-        emulate_tty=True,
-        parameters=[serial_node_params_file]
     )
 
     foxglove_bridge_node = Node(

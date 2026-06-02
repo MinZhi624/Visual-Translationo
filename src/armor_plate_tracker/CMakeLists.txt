@@ -22,6 +22,7 @@ add_executable(armor_plate_tracker_node
   src/ArmorPlateTracker.cpp
   src/MyExtendedKalmanFilter.cpp
   src/Tracker.cpp
+  src/Traget.cpp
   src/DebugTracker.cpp
   src/CoordinateTransformer.cpp
 )

@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
+#include "armor_plate_tracker/Traget.hpp"
 #include "armor_plate_tracker/CoordinateTransformer.hpp"
 
 #include <armor_plate_interfaces/GimbalData.hpp>
@@ -13,11 +13,13 @@
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
 
+/** 状态管理 + 目标选择 */
 class Tracker
 {
 private:
-    // EKF 滤波器
-    MyExtendedKalmanFilter ekf_;
+    static constexpr float MIN_VALID_ARMOR_PITCH_WORLD = -0.05f;
+    // 目标跟踪器（封装 EKF + 装甲板列表）
+    Traget traget_;
 
     // 坐标变换器
     CoordinateTransformer transformer_;
@@ -38,7 +40,6 @@ private:
     double last_detection_time_ = 0.0;
 
     // 跟踪状态
-    bool initialized_ = false;
     double max_lost_time_ = 0.1;
     bool is_lost_ = true;
 
@@ -51,7 +52,6 @@ private:
     float time_cost_ = 0.0f;
     bool solve_ok_ = false;
 
-    void selectBestMatch(const std::vector<TrackerArmor> & armors, TrackerArmor & target);
     bool checkYawMutation(float armor_pose_yaw);
     bool isLostTooLong(double current_time) const;
     double calculateDt(double current_time);
@@ -81,7 +81,7 @@ public:
     float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }
 
     bool isLost() const { return is_lost_; }
-    bool isInitialized() const { return initialized_; }
+    bool isInitialized() const { return traget_.isInitialized(); }
     double getLastUpdateTime() const { return last_update_time_; }
 
     // EKF 中心点
