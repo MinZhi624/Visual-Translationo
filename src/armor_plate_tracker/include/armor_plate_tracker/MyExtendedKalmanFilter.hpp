@@ -1,5 +1,6 @@
 #pragma once
 #include <Eigen/Core>
+#include <deque>
 
 class MyExtendedKalmanFilter
 {
@@ -26,6 +27,9 @@ private:
     // Z 观测值、滤波值
     Eigen::Vector<double, 4> origin_observation_;    
     Eigen::Vector<double, 4> filtered_observation_;  
+    // 状态评估
+    std::deque<int> nis_failures_; // 这里采用int是为了方便统计
+    static constexpr double NIS_THRESHOLD = 0.711; // 95%置信度下，NIS阈值
     int armor_id_ = 0;
     
     Eigen::Matrix<double, 4, 11> calculateObservationJacobian();
@@ -35,9 +39,9 @@ private:
     Eigen::Vector<double, 4> measurementFunction(const Eigen::Vector<double, 11>& state);
     Eigen::Vector<double, 4> measurementFunctionStateToXYZA(const Eigen::Vector<double, 11>& state, int armor_id);
     Eigen::Vector<double, 4> measurementFunctionXYZAToYPDA(const Eigen::Vector<double, 4>& xyza);
-    
-    void checkValue();
 public:
+    static constexpr size_t NIS_WINDOW_SIZE = 100;
+
     MyExtendedKalmanFilter();
     void initialize(const Eigen::Vector<double, 11>& state_pre, const Eigen::Matrix<double, 11, 11>& error_cov_pre);
     // 核心
@@ -51,6 +55,7 @@ public:
     void setErrorCovPre(Eigen::Matrix<double, 11, 11> error_cov_pre) { error_cov_pre_ = error_cov_pre; }
     void setErrorCovPost(Eigen::Matrix<double, 11, 11> error_cov_post) { error_cov_post_ = error_cov_post; }
 
+    std::deque<int> getNISFailures() const { return nis_failures_; }
     Eigen::Vector<double, 11> getStatePre() const { return state_pre_; }
     Eigen::Vector<double, 11> getStatePost() const { return state_post_; }
     Eigen::Vector<double, 4> getFilteredObservation() const { return filtered_observation_; }

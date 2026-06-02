@@ -3,7 +3,6 @@
 #include "armor_plate_tracker/TrackerArmor.hpp"
 
 #include <array>
-#include <vector>
 
 /** @brief 用于跟踪装甲板状态的目标类 */
 class Traget
@@ -12,9 +11,13 @@ private:
     MyExtendedKalmanFilter ekf_;
     std::array<Eigen::Vector<double, 4>, 4> armor_list_;
 
-    bool initialized_ = false;
-    size_t selected_armor_id_ = 0;
+    bool is_initialized_;
+    bool is_divergent_;
+    bool is_converged_;
+    size_t selected_armor_id_;
 
+    bool checkDivergence();
+    bool checkConverge();
     void updateArmorList();
     size_t findArmorIdx(const TrackerArmor & armor);
 
@@ -30,7 +33,9 @@ public:
     void reset();
     void init(const TrackerArmor & armor);
 
-    bool isInitialized() const { return initialized_; }
+    bool isDivergent() const { return is_divergent_; }
+    bool isConverged() const { return is_converged_; }
+    bool isInitialized() const { return is_initialized_; }
     size_t getSelectedArmorId() const { return selected_armor_id_; }
 
     std::array<Eigen::Vector<double, 4>, 4> getTrackerArmorList() const { return armor_list_; }

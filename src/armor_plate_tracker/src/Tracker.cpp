@@ -1,17 +1,18 @@
 #include "armor_plate_tracker/Tracker.hpp"
 
-#include "armor_plate_interfaces/msg/tracker_debug.hpp"
-#include "rclcpp/logging.hpp"
 #include <chrono>
 #include <rclcpp/logger.hpp>
 #include <vector>
+#include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "rclcpp/logging.hpp"
 
 using armor_plate_interfaces::msg::TrackerDebug;
 
-static double normalizeRadAngle(double rad)
-{
-    while (rad > M_PI) rad -= 2.0f * M_PI;
-    while (rad < -M_PI) rad += 2.0f * M_PI;
+static double normalizeRadAngle(double rad) {
+    while (rad > M_PI)
+        rad -= 2.0f * M_PI;
+    while (rad < -M_PI)
+        rad += 2.0f * M_PI;
     return rad;
 }
 
@@ -19,12 +20,9 @@ static double normalizeRadAngle(double rad)
 
 Tracker::Tracker() = default;
 
-void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
-                     double current_time,
-                     const GimbalData & gimbal)
+void Tracker::Update(const std::vector<ArmorPlate> &armor_plates, double current_time, const GimbalData &gimbal) 
 {
     double dt = calculateDt(current_time);
-
     transformer_.update(gimbal);
 
     // 没有目标
@@ -38,26 +36,16 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     }
 
     // ArmorPlate → TrackerArmor（一进来就转换，后续不再用 ArmorPlate）
-    std::vector<TrackerArmor> armors;
-    armors.reserve(armor_plates.size());
-    for (const auto & plate : armor_plates) {
-        TrackerArmor a(
-            Eigen::Vector3d(plate.pose.position.x, plate.pose.position.y, plate.pose.position.z),
-            Eigen::Quaterniond(plate.pose.orientation.w, plate.pose.orientation.x,
-                               plate.pose.orientation.y, plate.pose.orientation.z));
-        a.id = plate.number;
-        a.image_distance_to_center = plate.image_distance_to_center;
-        transformer_.updateTrackerArmor(a);
-        armors.push_back(a);
-    }
+    auto armors = ArmorPlateToTrackerArmor(armor_plates);
 
     // 只要和目标相同数字的车
     // 未初始化时不过滤 id，使用全部装甲板来选择初始化目标
     std::vector<TrackerArmor> selected_armors;
     if (!traget_.isInitialized()) {
         selected_armors = armors;
-    } else {
-        for (const auto & armor : armors) {
+    }
+    else {
+        for (const auto &armor : armors) {
             if (armor.id == last_armor_number_) {
                 selected_armors.push_back(armor);
             }
@@ -98,43 +86,45 @@ void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
     center_velocity_ = traget_.getCenterVelocity();
     center_r_ = static_cast<float>(traget_.getRadius());
     selected_armor_id_ = static_cast<int>(traget_.getSelectedArmorId());
-    
+
     // TODO： 升级火控系统
     // 寻找目标 -- 以离图像中心最近的装甲板为基准
-    TrackerArmor target = selected_armors[0];
+    TrackerArmor target_armor = selected_armors[0];
     for (size_t i = 1; i < selected_armors.size(); ++i) {
-        if (selected_armors[i].image_distance_to_center < target.image_distance_to_center) {
-            target = selected_armors[i];
+        if (selected_armors[i].image_distance_to_center < target_armor.image_distance_to_center) {
+            target_armor = selected_armors[i];
         }
     }
+    if (traget_.isConverged() || traget_.isDivergent())
+        RCLCPP_WARN(rclcpp::get_logger("TRACKER"),
+                    "Converged = %d; Divergent = %d",
+                    traget_.isConverged(),
+                    traget_.isDivergent());
 
     // 滤波结果
     Eigen::Vector<double, 4> filtered_obs = traget_.getFilteredObservation();
     TrackerArmor filtered(filtered_obs);
     transformer_.updateTrackerArmor(filtered);
-    
-    updateMeasurement(target, current_time);
+
+    updateMeasurement(target_armor, current_time);
     updateFilteredValue(filtered);
     updateState(true, current_time);
 }
 
-void Tracker::updateState(const bool & is_found, double current_time)
-{
+void Tracker::updateState(const bool &is_found, double current_time) {
     // 时间维护 + 更新状态
-    /* 流程图
-        没找到 --> 如果之前找到过 --> 在TRACKING       -->TEMPLOST
-        |         |--------------> 在DETECTING      -->LOST
-        |         |--------------> 在TEAMP_LOST太久  -->LOST
-        | --> 之前没有找到过 --> LOST
-
-        找到了 --> 如果之前找到过 --> 次数 >= 5 --> TRACKING
-        | --> 之前没有找到过 --> DETECTING
-    */
+    if (traget_.isConverged() || traget_.isDivergent()) {
+        RCLCPP_WARN(rclcpp::get_logger("TRACKER"), "EKF状态异常,is_converged = %d, is_divergent = %d",
+                   traget_.isConverged(),traget_.isDivergent());
+        state_ = TrackerState::LOST;
+        detect_count_ = 0; 
+        return;
+    } 
     if (!is_found) {
-        switch(state_) {
+        switch (state_) {
             case TrackerState::DETECTING:
                 state_ = TrackerState::LOST;
-                detect_count_ = 0; // 重置检测次数
+                detect_count_ = 0; 
                 break;
             case TrackerState::TRACKING:
                 state_ = TrackerState::TEMP_LOST;
@@ -142,15 +132,16 @@ void Tracker::updateState(const bool & is_found, double current_time)
             case TrackerState::TEMP_LOST:
                 if (isLostTooLong(current_time)) {
                     state_ = TrackerState::LOST;
-                    detect_count_ = 0; // 重置检测次数
+                    detect_count_ = 0; 
                 }
                 break;
             default:
                 break;
         }
-    } else {
+    }
+    else {
         last_detection_time_ = current_time;
-        switch(state_) {
+        switch (state_) {
             case TrackerState::LOST:
                 state_ = TrackerState::DETECTING;
                 detect_count_++;
@@ -171,8 +162,7 @@ void Tracker::updateState(const bool & is_found, double current_time)
     }
 }
 
-void Tracker::reset()
-{
+void Tracker::reset() {
     RCLCPP_WARN(rclcpp::get_logger("TRACKER"), "reset tracker");
     traget_.reset();
 
@@ -188,29 +178,18 @@ void Tracker::reset()
     filter_armor_ = TrackerArmor();
 }
 
-void Tracker::init(const TrackerArmor & armor, double current_time)
-{
+void Tracker::init(const TrackerArmor &armor, double current_time) {
     traget_.init(armor);
 
     updateMeasurement(armor, current_time);
     updateFilteredValue(armor);
 }
 
-bool Tracker::checkYawMutation(float armor_pose_yaw)
-{
-    if (!traget_.isInitialized()) return false;
-    float dy = armor_pose_yaw - last_armor_pose_yaw_world_;
-    dy = normalizeRadAngle(dy);
-    return std::abs(dy) > yaw_mutation_threshold_;
-}
-
-bool Tracker::isLostTooLong(double current_time) const
-{
+bool Tracker::isLostTooLong(double current_time) const {
     return (current_time - last_detection_time_) > max_lost_time_;
 }
 
-double Tracker::calculateDt(double current_time)
-{
+double Tracker::calculateDt(double current_time) {
     double dt = 0.01;
     if (last_update_time_ > 0.0) {
         dt = current_time - last_update_time_;
@@ -220,25 +199,22 @@ double Tracker::calculateDt(double current_time)
     return dt;
 }
 
-void Tracker::updateMeasurement(const TrackerArmor & armor, double current_time)
-{
+void Tracker::updateMeasurement(const TrackerArmor &armor, double current_time) {
     measured_armor_ = armor;
     last_armor_pose_yaw_world_ = armor.ypr_world_.x();
     last_armor_number_ = armor.id;
     last_detection_time_ = current_time;
 }
 
-void Tracker::updateFilteredValue(const TrackerArmor & armor)
-{
+void Tracker::updateFilteredValue(const TrackerArmor &armor) {
     filter_armor_ = armor;
 }
 
-TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp) const
-{
+TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp) const {
     TrackerDebug msg;
     msg.header.stamp = stamp;
 
-    auto toVec3 = [](const Eigen::Vector3d & v) {
+    auto toVec3 = [](const Eigen::Vector3d &v) {
         geometry_msgs::msg::Vector3 vec;
         vec.x = v.x();
         vec.y = v.y();
@@ -251,11 +227,13 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
 
     if (!isLost()) {
         msg.filtered_point_world = toVec3(filter_armor_.xyz_world_);
-    } else if (traget_.isInitialized()) {
+    }
+    else if (traget_.isInitialized()) {
         auto armor_list = getTrackerArmorList();
         int idx = selected_armor_id_ >= 0 ? selected_armor_id_ : 0;
         msg.filtered_point_world = toVec3(Eigen::Vector3d(armor_list[idx][0], armor_list[idx][1], armor_list[idx][2]));
-    } else {
+    }
+    else {
         geometry_msgs::msg::Vector3 center;
         center.x = 0.0;
         center.y = 0.0;
@@ -270,7 +248,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
         auto armor_list = getTrackerArmorList();
         msg.predicted_armor_points_world.reserve(armor_list.size());
         msg.predicted_armor_yaws_world.reserve(armor_list.size());
-        for (const auto & armor : armor_list) {
+        for (const auto &armor : armor_list) {
             msg.predicted_armor_points_world.push_back(toVec3(Eigen::Vector3d(armor[0], armor[1], armor[2])));
             msg.predicted_armor_yaws_world.push_back(static_cast<float>(armor[3]));
         }
@@ -289,9 +267,30 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
     return msg;
 }
 
-const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList() const
-{
+const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList() const {
     auto arr = traget_.getTrackerArmorList();
     std::vector<Eigen::Vector<double, 4>> armor_list(arr.begin(), arr.end());
     return armor_list;
+}
+
+TrackerArmor Tracker::ArmorPlateToTrackerArmor(const ArmorPlate &armor_plate) {
+    TrackerArmor armor(
+        Eigen::Vector3d(armor_plate.pose.position.x, armor_plate.pose.position.y, armor_plate.pose.position.z),
+        Eigen::Quaterniond(armor_plate.pose.orientation.w,
+                           armor_plate.pose.orientation.x,
+                           armor_plate.pose.orientation.y,
+                           armor_plate.pose.orientation.z));
+    armor.id = armor_plate.number;
+    armor.image_distance_to_center = armor_plate.image_distance_to_center;
+    transformer_.updateTrackerArmor(armor);
+    return armor;
+}
+std::vector<TrackerArmor> Tracker::ArmorPlateToTrackerArmor(const std::vector<ArmorPlate> &armor_plates) {
+    std::vector<TrackerArmor> armors;
+    armors.reserve(armor_plates.size());
+    for (const auto &plate : armor_plates) {
+        TrackerArmor armor = ArmorPlateToTrackerArmor(plate);
+        armors.push_back(armor);
+    }
+    return armors;
 }

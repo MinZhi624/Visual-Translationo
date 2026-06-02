@@ -44,11 +44,11 @@ private:
     float last_armor_pose_yaw_world_ = 0.0f;
     int32_t last_armor_number_ = 0;
 
-    // 调试信息
-
-    bool checkYawMutation(float armor_pose_yaw);
     bool isLostTooLong(double current_time) const;
     double calculateDt(double current_time);
+
+    TrackerArmor ArmorPlateToTrackerArmor(const ArmorPlate & armor_plate);
+    std::vector<TrackerArmor> ArmorPlateToTrackerArmor(const std::vector<ArmorPlate> & armor_plates);
 
     void updateMeasurement(const TrackerArmor & armor, double current_time);
     void updateFilteredValue(const TrackerArmor & armor);

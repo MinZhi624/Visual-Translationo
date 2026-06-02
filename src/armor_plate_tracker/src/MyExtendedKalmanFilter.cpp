@@ -130,19 +130,34 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     kalman_gain_ = error_cov_pre_ * observation_jacobian_.transpose() * innovation_cov.inverse();
 
     Eigen::Vector<double, 4> residual = measurement - predicted_obs;
-    // yaw 与 armor_yaw 是角度量，残差必须落回 [-pi, pi]，避免跨 pi 时跳变。
+    // yaw pitch与 armor_yaw 是角度量，残差必须落回 [-pi, pi]，避免跨 pi 时跳变。
     residual[0] = normalizeRadAngle(residual[0]);
+    residual[1] = normalizeRadAngle(residual[1]);
     residual[3] = normalizeRadAngle(residual[3]);
 
     state_post_ = state_pre_ + kalman_gain_ * residual;
-    checkValue();
 
+    /*
+        Joseph stabilized covariance update。
+        原本的 P = (I - K * H) * P
+        
+        容易 P 浮点数计算不稳定，可能会破坏对称性
+        但是 APA^T 更新方法更容易保持对称性
+    */
     Eigen::Matrix<double, 11, 11> identity = Eigen::Matrix<double, 11, 11>::Identity();
     Eigen::Matrix<double, 11, 11> temp = identity - kalman_gain_ * observation_jacobian_;
     error_cov_post_ = temp * error_cov_pre_ * temp.transpose()
                     + kalman_gain_ * observation_noise_cov_ * kalman_gain_.transpose();
 
     filtered_observation_ = measurementFunction(state_post_);
+    // 卡方检验
+    // NIS=y^T * S^-1 * y
+    double nis = residual.transpose() * innovation_cov.inverse() * residual;
+    if (nis > NIS_THRESHOLD) nis_failures_.push_back(1);
+    else nis_failures_.push_back(0);
+
+    if (nis_failures_.size() > NIS_WINDOW_SIZE) nis_failures_.pop_front();
+
     return filtered_observation_;
 }
 
@@ -231,25 +246,6 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunction(const Eigen
     auto xyza_state = measurementFunctionStateToXYZA(state, armor_id_);
     auto ypda_xyza = measurementFunctionXYZAToYPDA(xyza_state);
     return ypda_xyza;
-}
-
-void MyExtendedKalmanFilter::checkValue()
-{
-    /*
-        约束如下:
-        yaw = normalize(yaw)
-        0.05 <= r <= 0.5
-        0.05 <= r + l <= 0.5
-    */
-    state_post_[6] = normalizeRadAngle(state_post_[6]);
-
-    state_post_[8] = std::max(0.05, state_post_[8]);
-    state_post_[8] = std::min(0.5, state_post_[8]);
-
-    double second_radius = state_post_[8] + state_post_[9];
-    second_radius = std::max(0.05, second_radius);
-    second_radius = std::min(0.5, second_radius);
-    state_post_[9] = second_radius - state_post_[8];
 }
 
 Eigen::Matrix<double, 4, 11> MyExtendedKalmanFilter::calculateStateToXYZAJacobian(

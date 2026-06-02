@@ -1,7 +1,6 @@
 #include "armor_plate_tracker/Traget.hpp"
 
-#include <cmath>
-#include <limits>
+#include <numeric>
 
 double Traget::normalizeRadAngle(double rad)
 {
@@ -75,6 +74,8 @@ void Traget::update(const TrackerArmor & armor)
                    armor.ypd_world_.z(), armor.ypr_world_.x();
     ekf_.correct(measurement, armor_index);
     selected_armor_id_ = armor_index;
+    checkConverge();
+    checkDivergence();
 }
 
 void Traget::update(const std::vector<TrackerArmor> & armors)
@@ -85,13 +86,38 @@ void Traget::update(const std::vector<TrackerArmor> & armors)
     }
 }
 
+bool Traget::checkConverge()
+{
+    const std::deque<int> & nis_failures = ekf_.getNISFailures();
+    // 这里用WindowSize是为了防止一开始数字太小导致判断错误
+    is_converged_ = std::accumulate(nis_failures.begin(), nis_failures.end(), 0) >= (0.4 * MyExtendedKalmanFilter::NIS_WINDOW_SIZE);
+    return is_converged_;
+}
+
+
+bool Traget::checkDivergence()
+{
+    /*
+        TODO:
+        1. 未来考虑v_z的情况
+    */
+    const double r = ekf_.getStatePost()[8];
+    const double l = ekf_.getStatePost()[9];
+    // 判断半径是否在 0.05 ~ 0.5 之间
+    bool is_r_vaild = (r >= 0.05 && r <= 0.5);
+    bool is_l_vaild = (r + l >= 0.05 && r + l <= 0.5);
+    if (is_r_vaild && is_l_vaild) is_divergent_ = false;
+    else is_divergent_ = true; 
+    return is_divergent_;
+}
+
 void Traget::reset()
 {
     Eigen::Vector<double, 11> zero_state = Eigen::Vector<double, 11>::Zero();
     Eigen::Matrix<double, 11, 11> identity_P = Eigen::Matrix<double, 11, 11>::Identity();
     ekf_.initialize(zero_state, identity_P);
 
-    initialized_ = false;
+    is_initialized_ = false;
     selected_armor_id_ = 0;
     armor_list_.fill(Eigen::Vector<double, 4>::Zero());
 }
@@ -125,7 +151,7 @@ void Traget::init(const TrackerArmor & armor)
     init_P.diagonal() << 1.0, 64.0, 1.0, 64.0, 1.0, 64.0, 0.4, 100.0, 1.0, 1.0, 1.0;
 
     ekf_.initialize(init_state, init_P);
-    initialized_ = true;
+    is_initialized_ = true;
     selected_armor_id_ = 0;
 }
 
