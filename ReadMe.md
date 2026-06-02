@@ -31,7 +31,7 @@ flowchart TD
 | `/armor_plates` | `ArmorPlates` | 检测到的装甲板数组（含位姿、数字、图像中心距、云台绝对角） |
 | `/gimbal_angle` | `GimbalAngle` | 电控回传的绝对 yaw/pitch（带时间戳） |
 | `/aim_command` | `AimCommand` | 控制指令（delta_yaw, delta_pitch，单位 rad） |
-| `/tracker_debug` | `TrackerDebug` | 相机系下测量点与滤波点（用于图像叠加绘制） |
+| `/tracker_debug` | `TrackerDebug` | 相机系测量/滤波点 + 世界系四个预测装甲板 `xyza` 与 selected id（Identification/Test 侧按装甲板 pitch=15° 重投影） |
 | `/tracker_data` | `TrackerData` | measurement/filter 的 yaw/pitch |
 | `/visualization_marker_array` | `MarkerArray` | 旋转中心、速度、观测装甲板、滤波装甲板和四块预测装甲板 |
 
@@ -100,6 +100,7 @@ flowchart TD
 - **约束**：`yaw` 归一化到 `[-PI, PI]`；`r` 与 `r + l` 限制在 `[0.05, 0.5] m`。
 - **目标选择**：未初始化时选图像中心最近；已初始化时沿用当前世界系预测位置最近的简单匹配机制。
 - **丢失处理**：无目标时只预测；`max_lost_time=0.5s` 超时重置。
+- **Debug 重投影**：`TrackerDebug` 回传四个预测装甲板 `xyza`（世界系中心点 + 世界系 yaw）和 `selected_armor_id`；Identification/Test 侧用图像缓存同步到的 `gimbal_yaw_abs/gimbal_pitch_abs`，并按参考工程假设普通装甲板自身 `pitch=15°`，重建 `135mm x 55mm` 矩形投影到 `tracker_debug` 图像窗口。Test 视频模式默认虚拟云台 `pitch=0°`，需要模拟云台姿态时通过参数覆盖。
 
 ### 6. 串口双向通信
 

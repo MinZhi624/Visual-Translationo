@@ -69,7 +69,8 @@ private:
         image_stamp_ = msg->header.stamp;
         current_time_ = image_stamp_.sec + image_stamp_.nanosec * 1e-9;
         const auto& armor_plates = msg->armor_plates;
-        tracker_.Update(armor_plates, current_time_, msg->gimbal_yaw_abs, msg->gimbal_pitch_abs);
+        GimbalData gimbal{msg->gimbal_yaw_abs, msg->gimbal_pitch_abs};
+        tracker_.Update(armor_plates, current_time_, gimbal);
         publish(msg);
     }
     void publishMarkerArray(const rclcpp::Time& now)

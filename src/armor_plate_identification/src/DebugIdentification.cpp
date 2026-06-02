@@ -1,4 +1,4 @@
-#include "armor_plate_identification/DebugBase.hpp"
+#include "armor_plate_identification/DebugIdentification.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
@@ -6,19 +6,19 @@
 #include <sstream>
 #include <iomanip>
 
-int DebugBase::global_counter_ = 0;
-int DebugBase::batch_counter_ = 0;
+int DebugIdentification::global_counter_ = 0;
+int DebugIdentification::batch_counter_ = 0;
 
-DebugBase::DebugBase(const DebugBaseParams& params) : params_(params) {}
+DebugIdentification::DebugIdentification(const DebugBaseParams& params) : params_(params) {}
 
-void DebugBase::onFrameStart()
+void DebugIdentification::onFrameStart()
 {
     frame_count_++;
     start_mark_ = std::chrono::steady_clock::now();
     last_mark_ = start_mark_;
 }
 
-void DebugBase::mark(const std::string& label)
+void DebugIdentification::mark(const std::string& label)
 {
     auto t = std::chrono::steady_clock::now();
     float dt = std::chrono::duration<float, std::milli>(t - last_mark_).count();
@@ -26,7 +26,7 @@ void DebugBase::mark(const std::string& label)
     last_mark_ = t;
 }
 
-void DebugBase::onFrameEnd()
+void DebugIdentification::onFrameEnd()
 {
     auto t = std::chrono::steady_clock::now();
     last_process_time_ms_ = std::chrono::duration<float, std::milli>(t - start_mark_).count();
@@ -39,7 +39,7 @@ void DebugBase::onFrameEnd()
     }
 }
 
-void DebugBase::printStats()
+void DebugIdentification::printStats()
 {
     float avg_total = process_time_sum_ / params_.stats_interval;
 
@@ -69,21 +69,21 @@ void DebugBase::printStats()
     }
 }
 
-void DebugBase::debugLights(const std::vector<Light>& lights)
+void DebugIdentification::debugLights(const std::vector<Light>& lights)
 {
     if (params_.debug_lights_) {
         cached_lights_ = lights;
     }
 }
 
-void DebugBase::debugNumberClassification(const std::vector<DetectorArmor>& armors)
+void DebugIdentification::debugNumberClassification(const std::vector<DetectorArmor>& armors)
 {
     if (params_.debug_number_classification_) {
         cached_armors_ = armors;
     }
 }
 
-void DebugBase::debugPreprocessing(const cv::Mat& img_bgr, const PreprocessDebug& prep)
+void DebugIdentification::debugPreprocessing(const cv::Mat& img_bgr, const PreprocessDebug& prep)
 {
     if (params_.debug_preprocessing_) {
         cached_img_bgr_ = img_bgr.clone();
@@ -91,7 +91,7 @@ void DebugBase::debugPreprocessing(const cv::Mat& img_bgr, const PreprocessDebug
     }
 }
 
-void DebugBase::draw(cv::Mat& target_img)
+void DebugIdentification::draw(cv::Mat& target_img)
 {
     if (params_.debug_lights_) {
         drawLights(target_img);
@@ -106,7 +106,7 @@ void DebugBase::draw(cv::Mat& target_img)
     }
 }
 
-void DebugBase::show()
+void DebugIdentification::show()
 {
     if (!shouldShow()) return;
     display_frames_.clear();
@@ -119,14 +119,14 @@ void DebugBase::show()
     }
 }
 
-std::vector<std::pair<std::string, cv::Mat>> DebugBase::getDisplayFrames()
+std::vector<std::pair<std::string, cv::Mat>> DebugIdentification::getDisplayFrames()
 {
     auto frames = std::move(display_frames_);
     display_frames_.clear();
     return frames;
 }
 
-void DebugBase::save()
+void DebugIdentification::save()
 {
     if (!recording_ && !collected_.empty()) {
         std::string dir = "Debug/NumberROI/rejected/batch_" + std::to_string(++batch_counter_);
@@ -142,14 +142,14 @@ void DebugBase::save()
     }
 }
 
-void DebugBase::feedRejected(const std::vector<cv::Mat>& rois)
+void DebugIdentification::feedRejected(const std::vector<cv::Mat>& rois)
 {
     if (recording_ && !rois.empty()) {
         collected_.insert(collected_.end(), rois.begin(), rois.end());
     }
 }
 
-void DebugBase::control(const KeyEvent& event)
+void DebugIdentification::control(const KeyEvent& event)
 {
     if (event.action != KeyAction::Processed) return;
 
@@ -176,14 +176,14 @@ void DebugBase::control(const KeyEvent& event)
 
 // ========== 私有绘制辅助 ==========
 
-void DebugBase::drawLights(cv::Mat& img)
+void DebugIdentification::drawLights(cv::Mat& img)
 {
     for (const auto& light : cached_lights_) {
-        drawRotatedRect(img, light.rect_);
+        GuiWorker::drawRotatedRect(img, light.rect_);
     }
 }
 
-void DebugBase::drawNumbers(cv::Mat& img)
+void DebugIdentification::drawNumbers(cv::Mat& img)
 {
     for (const auto& armor : cached_armors_) {
         if (armor.name_ == ArmorName::NONE) continue;
@@ -194,7 +194,7 @@ void DebugBase::drawNumbers(cv::Mat& img)
     }
 }
 
-void DebugBase::drawProcessTime(cv::Mat& img)
+void DebugIdentification::drawProcessTime(cv::Mat& img)
 {
     if (last_process_time_ms_ < 0.0f) return;
     std::string text = "Process: " + std::to_string(last_process_time_ms_) + " ms";
@@ -203,14 +203,14 @@ void DebugBase::drawProcessTime(cv::Mat& img)
                 cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 165, 255), 2);
 }
 
-void DebugBase::drawDelayTime(cv::Mat& img)
+void DebugIdentification::drawDelayTime(cv::Mat& img)
 {
     std::string text = "Delay: " + std::to_string(params_.delay_time) + " ms";
     cv::putText(img, text, cv::Point(10, 55),
                 cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
 }
 
-void DebugBase::showPreprocessWindow()
+void DebugIdentification::showPreprocessWindow()
 {
     if (cached_img_bgr_.empty() || preprocess_debug_.blue_dim_thre.empty()) return;
 
@@ -269,7 +269,7 @@ void DebugBase::showPreprocessWindow()
     }
 }
 
-void DebugBase::showRoiCollector()
+void DebugIdentification::showRoiCollector()
 {
     if (collected_.empty()) return;
     cv::Mat concat_img;
@@ -277,34 +277,7 @@ void DebugBase::showRoiCollector()
     display_frames_.emplace_back("rejected_rois", concat_img);
 }
 
-/////////////////// 全局绘制函数 //////////////////////////
-
-void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness)
-{
-    cv::Point2f vertices[4];
-    rect.points(vertices);
-    for (int i = 0; i < 4; i++) {
-        cv::line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
-    }
-}
-
-void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color, int thickness)
-{
-    cv::line(img, p1, p2, color, thickness);
-    cv::line(img, p2, p3, color, thickness);
-    cv::line(img, p3, p4, color, thickness);
-    cv::line(img, p4, p1, color, thickness);
-}
-
-void drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors)
-{
-    for (const auto& armor : armors) {
-        cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
-        cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
-    }
-}
-
-void DebugBase::showNumberRois()
+void DebugIdentification::showNumberRois()
 {
     std::vector<cv::Mat> rois;
     for (const auto& armor : cached_armors_) {
@@ -318,20 +291,3 @@ void DebugBase::showNumberRois()
     display_frames_.emplace_back("number_rois", canvas);
 }
 
-void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug::SharedPtr msg)
-{
-    RCLCPP_INFO(rclcpp::get_logger("DEBUG_TRACKER"),
-        "cam:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-        "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-        "yaw:%.4f->%.4f "
-        "center:(%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
-        "%s solve:%d %.1fms",
-        msg->target_point.x, msg->target_point.y, msg->target_point.z,
-        msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z,
-        msg->target_point_world.x, msg->target_point_world.y, msg->target_point_world.z,
-        msg->filtered_point_world.x, msg->filtered_point_world.y, msg->filtered_point_world.z,
-        msg->raw_yaw, msg->filter_yaw,
-        msg->center_x, msg->center_y, msg->center_r,
-        msg->center_v_x, msg->center_v_y,
-        msg->method.c_str(), msg->solve_ok, msg->time_cost);
-}

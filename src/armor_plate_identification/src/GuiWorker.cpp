@@ -1,4 +1,32 @@
 #include "armor_plate_identification/GuiWorker.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
+
+#include <opencv2/imgproc.hpp>
+
+void GuiWorker::drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors)
+{
+    for (const auto& armor : armors) {
+        cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
+        cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
+    }
+}
+
+void GuiWorker::drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness)
+{
+    cv::Point2f vertices[4];
+    rect.points(vertices);
+    for (int i = 0; i < 4; i++) {
+        cv::line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
+    }
+}
+
+void GuiWorker::drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color, int thickness)
+{
+    cv::line(img, p1, p2, color, thickness);
+    cv::line(img, p2, p3, color, thickness);
+    cv::line(img, p3, p4, color, thickness);
+    cv::line(img, p4, p1, color, thickness);
+}
 
 void GuiWorker::start()
 {

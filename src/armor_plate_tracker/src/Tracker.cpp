@@ -184,13 +184,13 @@ double Tracker::calculateDt(double current_time)
 
 void Tracker::Update(const std::vector<ArmorPlate> & armor_plates,
                      double current_time,
-                     float yaw_abs, float pitch_abs)
+                     const GimbalData & gimbal)
 {
     auto t_start = std::chrono::steady_clock::now();
     solve_ok_ = false;
 
     double dt = calculateDt(current_time);
-    transformer_.update(yaw_abs, pitch_abs);
+    transformer_.update(gimbal);
     ekf_.updateProcessNoiseCov(dt);
     ekf_.updateStateTransitionMatrix(dt);
 
@@ -299,20 +299,34 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
         return vec;
     };
 
+    msg.is_lost = is_lost_;
+    msg.target_point_world = toVec3(measured_armor_.xyz_world_);
+
     if (!is_lost_) {
-        msg.target_point = toVec3(measured_armor_.xyz_camera_);
-        msg.filtered_point = toVec3(filter_armor_.xyz_camera_);
-        msg.target_point_world = toVec3(measured_armor_.xyz_world_);
         msg.filtered_point_world = toVec3(filter_armor_.xyz_world_);
+    } else if (initialized_) {
+        auto armor_list = getTrackerArmorList();
+        int idx = selected_armor_id_ >= 0 ? selected_armor_id_ : 0;
+        msg.filtered_point_world = toVec3(Eigen::Vector3d(armor_list[idx][0], armor_list[idx][1], armor_list[idx][2]));
     } else {
         geometry_msgs::msg::Vector3 center;
         center.x = 0.0;
         center.y = 0.0;
         center.z = 1.0;
-        msg.target_point = center;
-        msg.filtered_point = center;
-        msg.target_point_world = center;
         msg.filtered_point_world = center;
+    }
+
+    msg.selected_armor_id = selected_armor_id_;
+    msg.predicted_armor_points_world.clear();
+    msg.predicted_armor_yaws_world.clear();
+    if (initialized_ && !is_lost_) {
+        auto armor_list = getTrackerArmorList();
+        msg.predicted_armor_points_world.reserve(armor_list.size());
+        msg.predicted_armor_yaws_world.reserve(armor_list.size());
+        for (const auto & armor : armor_list) {
+            msg.predicted_armor_points_world.push_back(toVec3(Eigen::Vector3d(armor[0], armor[1], armor[2])));
+            msg.predicted_armor_yaws_world.push_back(static_cast<float>(armor[3]));
+        }
     }
 
     msg.raw_yaw = last_armor_pose_yaw_world_;
@@ -320,6 +334,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
 
     msg.center_x = static_cast<float>(center_point_world_.x());
     msg.center_y = static_cast<float>(center_point_world_.y());
+    msg.center_z = static_cast<float>(center_point_world_.z());
     msg.center_r = center_r_;
     msg.center_v_x = static_cast<float>(center_velocity_.x());
     msg.center_v_y = static_cast<float>(center_velocity_.y());
@@ -331,7 +346,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time & stamp
     return msg;
 }
 
-const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList()
+const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList() const
 {
     // xyz, angle
     std::vector<Eigen::Vector<double, 4>> armor_list;

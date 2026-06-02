@@ -14,7 +14,8 @@ set(  ArmorPlateIdentification
   src/CameraDriver.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
-  src/DebugBase.cpp
+  src/DebugIdentification.cpp
+  src/DebugTracker.cpp
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
 )
@@ -23,10 +24,11 @@ set( Test
   src/DetectorArmor.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
-  src/DebugBase.cpp
+  src/DebugIdentification.cpp
   src/DebugTest.cpp
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
+  src/DebugTracker.cpp
 )
 # ======================
 # 依赖

@@ -8,12 +8,6 @@
 #include <chrono>
 #include <vector>
 
-void drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors);
-void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
-void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
-
-void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug& msg);
-
 struct DebugBaseParams
 {
     bool debug_timecontrol_ = false;
@@ -25,11 +19,11 @@ struct DebugBaseParams
 };
 
 
-class DebugBase
+class DebugIdentification
 {
 public:
-    DebugBase() = default;
-    DebugBase(const DebugBaseParams& params);
+    DebugIdentification() = default;
+    DebugIdentification(const DebugBaseParams& params);
 
     // 生命周期
     void onFrameStart();
@@ -106,4 +100,4 @@ private:
     void showNumberRois();
 };
 
-void infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug::SharedPtr msg);
+

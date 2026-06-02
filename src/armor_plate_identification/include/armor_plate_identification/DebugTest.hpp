@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_identification/DebugBase.hpp"
+#include "armor_plate_identification/DebugIdentification.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 struct DebugTestParams
@@ -9,7 +9,7 @@ struct DebugTestParams
     int debug_frame_count = 100;
 };
 
-class DebugTest : public DebugBase
+class DebugTest : public DebugIdentification
 {
 public:
     DebugTest() = default;

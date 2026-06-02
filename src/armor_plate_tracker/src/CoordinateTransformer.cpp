@@ -9,16 +9,16 @@ const Eigen::Matrix3d CoordinateTransformer::R_gimbal_camera_ =
 
 const Eigen::Matrix3d CoordinateTransformer::R_camera_gimbal_ = R_gimbal_camera_.transpose();
 
-Eigen::Matrix3d CoordinateTransformer::calcR_world_gimbal(double yaw, double pitch)
+Eigen::Matrix3d CoordinateTransformer::calculateRWorldGimbal(double yaw, double pitch)
 {
     Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
     Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(-pitch, Eigen::Vector3d::UnitY()).toRotationMatrix();
     return R_yaw * R_pitch;
 }
 
-void CoordinateTransformer::update(double yaw_abs, double pitch_abs)
+void CoordinateTransformer::update(const GimbalData & gimbal)
 {
-    R_world_gimbal_ = calcR_world_gimbal(yaw_abs, pitch_abs);
+    R_world_gimbal_ = calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
     R_gimbal_world_ = R_world_gimbal_.transpose();
 
     R_world_camera_ = R_world_gimbal_ * R_gimbal_camera_;
@@ -52,7 +52,7 @@ Eigen::Quaterniond CoordinateTransformer::worldToCamera(const Eigen::Quaterniond
 
 // ========== 角度计算 ==========
 
-Eigen::Vector3d CoordinateTransformer::calcYPR(const Eigen::Quaterniond & q)
+Eigen::Vector3d CoordinateTransformer::calculateYPR(const Eigen::Quaterniond & q)
 {
     // 提取 yaw (Z), pitch (Y), roll (X)
     double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
@@ -69,7 +69,7 @@ Eigen::Vector3d CoordinateTransformer::calcYPR(const Eigen::Quaterniond & q)
     return {yaw, pitch, roll};
 }
 
-Eigen::Vector3d CoordinateTransformer::calcYPD(const Eigen::Vector3d & xyz)
+Eigen::Vector3d CoordinateTransformer::calculateYPD(const Eigen::Vector3d & xyz)
 {
     /*
         云台 、 世界坐标系下
@@ -92,8 +92,8 @@ void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
         armor.xyz_camera_ = worldToCamera(armor.xyz_world_);
         armor.q_camera_armor_ = worldToCamera(armor.q_world_armor_);
     }
-    armor.ypr_camera_ = calcYPR(armor.q_camera_armor_);
-    armor.ypr_world_ = calcYPR(armor.q_world_armor_);
-    armor.ypd_gimbal_ = calcYPD(R_gimbal_camera_ * armor.xyz_camera_);
-    armor.ypd_world_ = calcYPD(armor.xyz_world_);
+    armor.ypr_camera_ = calculateYPR(armor.q_camera_armor_);
+    armor.ypr_world_ = calculateYPR(armor.q_world_armor_);
+    armor.ypd_gimbal_ = calculateYPD(R_gimbal_camera_ * armor.xyz_camera_);
+    armor.ypd_world_ = calculateYPD(armor.xyz_world_);
 }

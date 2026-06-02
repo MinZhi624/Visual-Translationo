@@ -161,8 +161,8 @@ void MyExtendedKalmanFilter::updateProcessNoiseCov(const double & dt)
         yaw/omega 使用角加速度方差 yaw_a_var。
     */
     const double safe_dt = std::max(0.0, dt);
-    const double a_var = 100.0;
-    const double yaw_a_var = 400.0;
+    const double a_var = 400.0;
+    const double yaw_a_var = 1600.0;
 
     const double Q11 = safe_dt * safe_dt * safe_dt * safe_dt / 4.0;
     const double Q12 = safe_dt * safe_dt * safe_dt / 2.0;

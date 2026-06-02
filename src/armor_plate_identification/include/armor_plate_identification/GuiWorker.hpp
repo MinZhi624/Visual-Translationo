@@ -8,6 +8,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace DebugWindow {
     constexpr const char* IDENTIFICATION = "identification";
@@ -51,5 +52,8 @@ public:
 
     bool isRunning() const { return running_.load(); }
 
-
+    // 绘制工具
+    static void drawArmors(cv::Mat& img, const std::vector<struct DetectorArmor>& armors);
+    static void drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
+    static void drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color = cv::Scalar(207, 216, 129), int thickness = 2);
 };

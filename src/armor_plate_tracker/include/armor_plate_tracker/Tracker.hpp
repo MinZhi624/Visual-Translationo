@@ -2,6 +2,7 @@
 #include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
 #include "armor_plate_tracker/CoordinateTransformer.hpp"
 
+#include <armor_plate_interfaces/GimbalData.hpp>
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
@@ -69,12 +70,12 @@ public:
 
     void Update(const std::vector<ArmorPlate> & armor_plates,
                 double current_time,
-                float yaw_abs, float pitch_abs);
+                const GimbalData & gimbal);
 
     // 获取装甲板数据
     const TrackerArmor & getMeasuredArmor() const { return measured_armor_; }
     const TrackerArmor & getFilterArmor() const { return filter_armor_; }
-    const std::vector<Eigen::Vector<double, 4>> getTrackerArmorList();
+    const std::vector<Eigen::Vector<double, 4>> getTrackerArmorList() const;
     // 增量角（从 filter_armor_ 的 ypd_gimbal_ 获取）
     float getYaw() const { return filter_armor_.ypd_gimbal_.x(); }
     float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }

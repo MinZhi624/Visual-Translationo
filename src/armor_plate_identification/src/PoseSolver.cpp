@@ -11,39 +11,6 @@
 #include <cmath>
 #include <limits>
 
-// 装甲板单位是mm
-static constexpr float SMALL_ARMOR_WIDTH = 135;
-static constexpr float SMALL_ARMOR_HEIGHT = 55;
-static constexpr float LARGE_ARMOR_WIDTH = 225;
-static constexpr float LARGE_ARMOR_HEIGHT = 55;
-
-// PNP解算的单位是m
-static constexpr double SMALL_HALF_WIDTH = SMALL_ARMOR_WIDTH / 2.0 / 1000.0;
-static constexpr double SMALL_HALF_HEIGHT = SMALL_ARMOR_HEIGHT / 2.0 / 1000.0;
-static constexpr double LARGE_HALF_WIDTH = LARGE_ARMOR_WIDTH / 2.0 / 1000.0;
-static constexpr double LARGE_HALF_HEIGHT = LARGE_ARMOR_HEIGHT / 2.0 / 1000.0;
-
-
-// 顺时针左上角是0，以X轴为法向量。x向前，y向左，z向上.
-static const std::vector<cv::Point3f> SMALL_ARMOR_POINTS = {
-    cv::Point3f(0, SMALL_HALF_WIDTH, SMALL_HALF_HEIGHT),    // 左上
-    cv::Point3f(0, -SMALL_HALF_WIDTH, SMALL_HALF_HEIGHT),   // 右上
-    cv::Point3f(0, -SMALL_HALF_WIDTH, -SMALL_HALF_HEIGHT),  // 右下
-    cv::Point3f(0, SMALL_HALF_WIDTH, -SMALL_HALF_HEIGHT)    // 左下
-};
-
-static const std::vector<cv::Point3f> LARGE_ARMOR_POINTS = {
-    cv::Point3f(0, LARGE_HALF_WIDTH, LARGE_HALF_HEIGHT),    // 左上
-    cv::Point3f(0, -LARGE_HALF_WIDTH, LARGE_HALF_HEIGHT),   // 右上
-    cv::Point3f(0, -LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT),  // 右下
-    cv::Point3f(0, LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT)    // 左下
-};
-
-// camera: X右 Y下 Z前
-// gimbal/world base: X前 Y左 Z上
-static const Eigen::Matrix3d R_GIMBAL_CAMERA =
-    (Eigen::Matrix3d() << 0, 0, 1, -1, 0, 0, 0, -1, 0).finished();
-
 static constexpr double SAME_ARMOR_CENTER_THRESH = 30.0;
 static constexpr double YAW_MUTATION_THRESH = M_PI_2;
 static constexpr double REPROJECTION_ERROR_MARGIN = 3.0;
@@ -80,7 +47,7 @@ PoseSolver::PoseSolver(
 {
 }
 
-void PoseSolver::solve(std::vector<DetectorArmor> & armors, float yaw_abs, float pitch_abs)
+void PoseSolver::solve(std::vector<DetectorArmor> & armors, const GimbalData & gimbal)
 {
     std::unordered_map<int, std::vector<LastArmorYawRecord>> new_record;
     for (auto & armor : armors) {
@@ -90,7 +57,7 @@ void PoseSolver::solve(std::vector<DetectorArmor> & armors, float yaw_abs, float
         cv::Point2f target_center = (armor.points_[0] + armor.points_[1] + armor.points_[2] + armor.points_[3]) / 4;
 
         const int armor_name_key = static_cast<int>(armor.name_);
-        std::vector<PnPCandidate> candidates = createPnPCandidates(world_points, armor.points_, yaw_abs, pitch_abs);
+        std::vector<PnPCandidate> candidates = createPnPCandidates(world_points, armor.points_, gimbal);
         size_t best_id = selectBestCandidate(candidates, armor_name_key, target_center);
 
         cv::Mat rmat;
@@ -125,6 +92,16 @@ cv::Point2f PoseSolver::xyzCameraToPixel(cv::Point3f point3D) const
     double v = fy * point3D.y * inv_z + cy;
     return cv::Point2f(static_cast<float>(u), static_cast<float>(v));
 }
+cv::Point2f PoseSolver::xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const
+{
+    const Eigen::Matrix3d R_world_gimbal = calculateRWorldGimbal(gimbal);
+    const Eigen::Matrix3d R_world_camera = R_world_gimbal * R_GIMBAL_CAMERA;
+    const Eigen::Matrix3d R_camera_world = R_world_camera.transpose();
+    Eigen::Vector3d point_camrea = R_camera_world * point3D;
+    cv::Point3d point_camrea_cv = {point_camrea.x(), point_camrea.y(), point_camrea.z()};
+    return xyzCameraToPixel(point_camrea_cv);
+}
+
 float PoseSolver::calculateImageDistanceToCenter(const cv::Point2f & target_center_point)
 {
     double cx = camera_matrix_.at<double>(0, 2);
@@ -136,8 +113,7 @@ float PoseSolver::calculateImageDistanceToCenter(const cv::Point2f & target_cent
 std::vector<PoseSolver::PnPCandidate> PoseSolver::createPnPCandidates(
     const std::vector<cv::Point3f> & object_points,
     const std::vector<cv::Point2f> & image_points,
-    double yaw_abs,
-    double pitch_abs) const
+    const GimbalData & gimbal) const
 {
     std::vector<cv::Mat> ippe_rvecs;
     std::vector<cv::Mat> ippe_tvecs;
@@ -150,9 +126,9 @@ std::vector<PoseSolver::PnPCandidate> PoseSolver::createPnPCandidates(
         PnPCandidate candidate;
         candidate.rvec = ippe_rvecs[i];
         candidate.tvec = ippe_tvecs[i];
-        candidate.yaw = calcYawFromRvec(candidate.rvec);
-        candidate.world_pitch = calcWorldPitchFromRvec(candidate.rvec, yaw_abs, pitch_abs);
-        candidate.reprojection_error = calcReprojectionError(
+        candidate.yaw = calculateYawFromRvec(candidate.rvec);
+        candidate.world_pitch = calculateWorldPitchFromRvec(candidate.rvec, gimbal);
+        candidate.reprojection_error = calculateReprojectionError(
             object_points, image_points, camera_matrix_, distortion_coefficients_,
             candidate.rvec, candidate.tvec);
         candidates.push_back(candidate);
@@ -162,9 +138,9 @@ std::vector<PoseSolver::PnPCandidate> PoseSolver::createPnPCandidates(
         PnPCandidate candidate;
         cv::solvePnP(object_points, image_points, camera_matrix_, distortion_coefficients_,
                      candidate.rvec, candidate.tvec, false, cv::SOLVEPNP_ITERATIVE);
-        candidate.yaw = calcYawFromRvec(candidate.rvec);
-        candidate.world_pitch = calcWorldPitchFromRvec(candidate.rvec, yaw_abs, pitch_abs);
-        candidate.reprojection_error = calcReprojectionError(
+        candidate.yaw = calculateYawFromRvec(candidate.rvec);
+        candidate.world_pitch = calculateWorldPitchFromRvec(candidate.rvec, gimbal);
+        candidate.reprojection_error = calculateReprojectionError(
             object_points, image_points, camera_matrix_, distortion_coefficients_,
             candidate.rvec, candidate.tvec);
         candidates.push_back(candidate);
@@ -268,7 +244,7 @@ double PoseSolver::normalizeRadAngle(double rad)
     return rad;
 }
 
-double PoseSolver::calcYawFromRvec(const cv::Mat & rvec)
+double PoseSolver::calculateYawFromRvec(const cv::Mat & rvec)
 {
     cv::Mat rmat;
     cv::Rodrigues(rvec, rmat);
@@ -282,21 +258,21 @@ double PoseSolver::calcYawFromRvec(const cv::Mat & rvec)
     return std::atan2(siny_cosp, cosy_cosp);
 }
 
-double PoseSolver::calcPitchFromRotation(const Eigen::Matrix3d & R)
+double PoseSolver::calculatePitchFromRotation(const Eigen::Matrix3d & R)
 {
     Eigen::Quaterniond q(R);
     const double sinp = 2.0 * (q.w() * q.y() - q.z() * q.x());
     return (std::abs(sinp) >= 1.0) ? std::copysign(M_PI / 2.0, sinp) : std::asin(sinp);
 }
 
-Eigen::Matrix3d PoseSolver::calcRWorldGimbal(double yaw_abs, double pitch_abs)
+Eigen::Matrix3d PoseSolver::calculateRWorldGimbal(const GimbalData & gimbal)
 {
-    Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(yaw_abs, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(-pitch_abs, Eigen::Vector3d::UnitY()).toRotationMatrix();
+    Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(gimbal.yaw_abs, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(-gimbal.pitch_abs, Eigen::Vector3d::UnitY()).toRotationMatrix();
     return R_yaw * R_pitch;
 }
 
-double PoseSolver::calcWorldPitchFromRvec(const cv::Mat & rvec, double yaw_abs, double pitch_abs)
+double PoseSolver::calculateWorldPitchFromRvec(const cv::Mat & rvec, const GimbalData & gimbal)
 {
     cv::Mat rmat;
     cv::Rodrigues(rvec, rmat);
@@ -304,11 +280,11 @@ double PoseSolver::calcWorldPitchFromRvec(const cv::Mat & rvec, double yaw_abs, 
     Eigen::Matrix3d R_camera_armor;
     cv::cv2eigen(rmat, R_camera_armor);
 
-    Eigen::Matrix3d R_world_armor = calcRWorldGimbal(yaw_abs, pitch_abs) * R_GIMBAL_CAMERA * R_camera_armor;
-    return calcPitchFromRotation(R_world_armor);
+    Eigen::Matrix3d R_world_armor = calculateRWorldGimbal(gimbal) * R_GIMBAL_CAMERA * R_camera_armor;
+    return calculatePitchFromRotation(R_world_armor);
 }
 
-double PoseSolver::calcReprojectionError(
+double PoseSolver::calculateReprojectionError(
     const std::vector<cv::Point3f> & object_points,
     const std::vector<cv::Point2f> & image_points,
     const cv::Mat & camera_matrix,

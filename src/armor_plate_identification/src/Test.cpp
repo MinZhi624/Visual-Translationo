@@ -2,6 +2,8 @@
 #include "armor_plate_identification/Test.hpp"
 #include <rclcpp/logging.hpp>
 
+#include <cmath>
+
 void Test::run()
 {
     if (!headless_) {
@@ -75,6 +77,16 @@ bool Test::control(const KeyEvent& event)
 
 void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 {
+    {
+        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
+        tracker_debug_msgs_.clear();
+        tracker_debug_msgs_.push_back(msg);
+    }
+    tracker_debug_cv_.notify_one();
+}
+
+void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
+{
     std::deque<Record> images_buffs;
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
@@ -94,32 +106,16 @@ void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
         }
     }
     if (best_diff > 50000000) return;  // 超过 50ms 放弃
-    
+
     // infoTrackerDebugMsg(msg);
 
     cv::Mat debug_img = it->img.clone();
-    cv::Point3f target_gambal(msg->target_point.x, msg->target_point.y, msg->target_point.z);
-    cv::Point3f filtered_gambal(msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z);
 
-    cv::Point2f target_px = pose_solver_.xyzCameraToPixel(target_gambal);
-    cv::Point2f filtered_px = pose_solver_.xyzCameraToPixel(filtered_gambal);
+    debug_tracker_.drawTragetPoints(debug_img, *msg, it->gimbal);
+    debug_tracker_.drawPredictedCar(debug_img, *msg, it->gimbal);
 
-    auto drawCross = [](cv::Mat& img, const cv::Point2f& center, const cv::Scalar& color, int radius = 12) {
-        cv::circle(img, center, radius, color, 2, cv::LINE_AA);
-        cv::line(img, center + cv::Point2f(-radius, 0), center + cv::Point2f(radius, 0), color, 2, cv::LINE_AA);
-        cv::line(img, center + cv::Point2f(0, -radius), center + cv::Point2f(0, radius), color, 2, cv::LINE_AA);
-    };
-
-    if (target_px.x >= 0) {
-        drawCross(debug_img, target_px, cv::Scalar(0, 0, 255), 12);
-    }
-    if (filtered_px.x >= 0) {
-        drawCross(debug_img, filtered_px, cv::Scalar(0, 255, 0), 12);
-    }
     if (!headless_ && debug_test_.shouldShow()) {
-        cv::Mat show_img;
-        cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
-        gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, show_img);
+        debug_tracker_.pushTrackerDebugFrame(debug_img);
     }
 
     if (debug_test_.isDebugFrameMode()) {
@@ -130,6 +126,35 @@ void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
             rclcpp::shutdown();
         }
     }
+}
+
+void Test::trackerDebugWorker()
+{
+    while (rclcpp::ok()) {
+        TrackerDebug::SharedPtr msg;
+        {
+            std::unique_lock<std::mutex> lock(tracker_debug_queue_mutex_);
+            tracker_debug_cv_.wait(lock, [this]() {
+                return !tracker_debug_worker_running_ || !tracker_debug_msgs_.empty();
+            });
+            // 防止虚假唤醒
+            if (!tracker_debug_worker_running_ && tracker_debug_msgs_.empty()) return;
+            msg = tracker_debug_msgs_.back();
+            tracker_debug_msgs_.clear();
+        }
+        if (msg) processTrackerDebug(msg);
+    }
+}
+
+void Test::stopTrackerDebugWorker()
+{
+    {
+        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
+        tracker_debug_worker_running_ = false;
+        tracker_debug_msgs_.clear();
+    }
+    tracker_debug_cv_.notify_all();
+    if (tracker_debug_thread_.joinable()) tracker_debug_thread_.join();
 }
 
 void Test::init(const std::string& video_path)
@@ -143,6 +168,12 @@ void Test::init(const std::string& video_path)
     std::filesystem::path vp(video_path);
     test_name_ = vp.stem().string();
     RCLCPP_INFO(this->get_logger(), "测试名称: %s", test_name_.c_str());
+
+    double test_gimbal_yaw_deg = 0.0f;
+    double test_gimbal_pitch_deg = 0.0f;
+    test_gimbal_.yaw_abs = static_cast<float>(test_gimbal_yaw_deg * M_PI / 180.0);
+    test_gimbal_.pitch_abs = static_cast<float>(test_gimbal_pitch_deg * M_PI / 180.0);
+
     double fps = c_.get(cv::CAP_PROP_FPS);
     if (fps <= 0) {
         RCLCPP_WARN(this->get_logger(), "无法获取视频FPS，使用默认值: 50.0");
@@ -167,11 +198,11 @@ void Test::identification(cv::Mat& img_bgr)
     debug_test_.mark("preprocess");
 
     lights_.detectArmors(img_thre, img_bgr);
-    drawArmors(img_show_, lights_.getArmors());
+    GuiWorker::drawArmors(img_show_, lights_.getArmors());
     debug_test_.mark("detectArmors");
 
     armors_ = lights_.getArmors();
-
+    /////// DEBUG /////
     if (debug_test_.isRecordingRois()) {
         debug_test_.feedRejected(lights_.getRejectedNumberRois());
     }
@@ -205,6 +236,8 @@ void Test::publish()
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
         armor_plates_msg.armor_plates.push_back(armor_plate);
     }
+    armor_plates_msg.gimbal_yaw_abs = test_gimbal_.yaw_abs;
+    armor_plates_msg.gimbal_pitch_abs = test_gimbal_.pitch_abs;
     armor_plates_pub_->publish(armor_plates_msg);
 }
 
@@ -213,7 +246,7 @@ void Test::save()
     debug_test_.save();
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        img_buffs_.push_back({read_stamp_, img_show_.clone()});
+        img_buffs_.push_back({read_stamp_, img_show_.clone(), test_gimbal_});
         if (img_buffs_.size() > 50) img_buffs_.pop_front();
     }
 }
@@ -223,9 +256,7 @@ void Test::show()
     debug_test_.draw(img_show_);
 
     if (!headless_ && debug_test_.shouldShow()) {
-        cv::Mat show_img;
-        cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
-        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, show_img);
+        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, img_show_);
     }
 
     debug_test_.show();
@@ -238,6 +269,7 @@ void Test::show()
 
 void Test::closeTrackerDebugFile()
 {
+    stopTrackerDebugWorker();
     debug_test_.closeTrackerDebugFile();
 }
 
@@ -245,6 +277,11 @@ Test::Test(std::string video_path) : Node("test_node_cpp")
 {
     RCLCPP_INFO(this->get_logger(), "测试节点已经启动");
     init(video_path);
+}
+
+Test::~Test()
+{
+    stopTrackerDebugWorker();
 }
 
 int main(int argc, char **argv)
@@ -281,6 +318,8 @@ void Test::initDebug()
         "tracker_debug", 10,
         std::bind(&Test::trackerDebugCallBack, this, std::placeholders::_1)
     );
+    tracker_debug_worker_running_ = true;
+    tracker_debug_thread_ = std::thread(&Test::trackerDebugWorker, this);
     if (base_params.debug_timecontrol_) RCLCPP_INFO(this->get_logger(), "时间控制DEBUG模式开启");
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
     if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");

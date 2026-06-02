@@ -65,6 +65,16 @@ bool ArmorPlateIdentification::control(const KeyEvent& event)
 
 void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 {
+    {
+        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
+        tracker_debug_msgs_.clear();
+        tracker_debug_msgs_.push_back(msg);
+    }
+    tracker_debug_cv_.notify_one();
+}
+
+void ArmorPlateIdentification::processTrackerDebug(const TrackerDebug::SharedPtr msg)
+{
     std::deque<Record> images_buffs;
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
@@ -86,29 +96,41 @@ void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPt
     if (best_diff > 50000000) return;  // 超过 50ms 放弃
 
     cv::Mat debug_img = it->img.clone();
-    cv::Point3f target_cam(msg->target_point.x, msg->target_point.y, msg->target_point.z);
-    cv::Point3f filtered_cam(msg->filtered_point.x, msg->filtered_point.y, msg->filtered_point.z);
 
-    cv::Point2f target_px = pose_solver_.xyzCameraToPixel(target_cam);
-    cv::Point2f filtered_px = pose_solver_.xyzCameraToPixel(filtered_cam);
+    debug_tracker_.drawTragetPoints(debug_img, *msg, it->gimbal);
+    debug_tracker_.drawPredictedCar(debug_img, *msg, it->gimbal);
 
-    auto drawCross = [](cv::Mat& img, const cv::Point2f& center, const cv::Scalar& color, int radius = 12) {
-        cv::circle(img, center, radius, color, 2, cv::LINE_AA);
-        cv::line(img, center + cv::Point2f(-radius, 0), center + cv::Point2f(radius, 0), color, 2, cv::LINE_AA);
-        cv::line(img, center + cv::Point2f(0, -radius), center + cv::Point2f(0, radius), color, 2, cv::LINE_AA);
-    };
-
-    if (target_px.x >= 0) {
-        drawCross(debug_img, target_px, cv::Scalar(0, 0, 255), 12);
-    }
-    if (filtered_px.x >= 0) {
-        drawCross(debug_img, filtered_px, cv::Scalar(0, 255, 0), 12);
-    }
     if (!headless_) {
-        cv::Mat show_img;
-        cv::resize(debug_img, show_img, cv::Size(), 0.5, 0.5);
-        gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, show_img);
+        debug_tracker_.pushTrackerDebugFrame(debug_img);
     }
+}
+
+void ArmorPlateIdentification::trackerDebugWorker()
+{
+    while (rclcpp::ok()) {
+        TrackerDebug::SharedPtr msg;
+        {
+            std::unique_lock<std::mutex> lock(tracker_debug_queue_mutex_);
+            tracker_debug_cv_.wait(lock, [this]() {
+                return !tracker_debug_worker_running_ || !tracker_debug_msgs_.empty();
+            });
+            if (!tracker_debug_worker_running_ && tracker_debug_msgs_.empty()) return;
+            msg = tracker_debug_msgs_.back();
+            tracker_debug_msgs_.clear();
+        }
+        if (msg) processTrackerDebug(msg);
+    }
+}
+
+void ArmorPlateIdentification::stopTrackerDebugWorker()
+{
+    {
+        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
+        tracker_debug_worker_running_ = false;
+        tracker_debug_msgs_.clear();
+    }
+    tracker_debug_cv_.notify_all();
+    if (tracker_debug_thread_.joinable()) tracker_debug_thread_.join();
 }
 
 void ArmorPlateIdentification::init()
@@ -126,6 +148,9 @@ void ArmorPlateIdentification::init()
             gimbal_data_.stamp = msg->stamp;
             gimbal_data_.yaw_abs = msg->yaw_abs;
             gimbal_data_.pitch_abs = msg->pitch_abs;
+            // 同步更新 GimbalData 用于后续传递
+            matched_gimbal_.yaw_abs = msg->yaw_abs;
+            matched_gimbal_.pitch_abs = msg->pitch_abs;
             gimbal_history_.push_back(gimbal_data_);
             // 保留最近 50 个
             if (gimbal_history_.size() > 50) gimbal_history_.pop_front();
@@ -148,6 +173,8 @@ void ArmorPlateIdentification::init()
         "tracker_debug", 10,
         std::bind(&ArmorPlateIdentification::trackerDebugCallBack, this, std::placeholders::_1)
     );
+    tracker_debug_worker_running_ = true;
+    tracker_debug_thread_ = std::thread(&ArmorPlateIdentification::trackerDebugWorker, this);
 
     RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s", camera_type_.c_str());
     RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
@@ -161,7 +188,7 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
     debug_base_.mark("preprocess");
 
     lights_.detectArmors(img_thre, img_bgr);
-    drawArmors(img_show_, lights_.getArmors());
+    GuiWorker::drawArmors(img_show_, lights_.getArmors());
     debug_base_.mark("detectArmors");
 
     armors_ = lights_.getArmors();
@@ -177,7 +204,7 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
 
 void ArmorPlateIdentification::solvePose()
 {
-    float yaw_abs = 0.0f, pitch_abs = 0.0f;
+    GimbalData gimbal;
     {
         std::lock_guard<std::mutex> lock(gimbal_mutex_);
         if (!gimbal_history_.empty()) {
@@ -193,18 +220,17 @@ void ArmorPlateIdentification::solvePose()
                     it = jt;
                 }
             }
-            yaw_abs = it->yaw_abs;
-            pitch_abs = it->pitch_abs;
+            gimbal.yaw_abs = it->yaw_abs;
+            gimbal.pitch_abs = it->pitch_abs;
         } else {
-            // fallback：用最新值
-            yaw_abs = gimbal_data_.yaw_abs;
-            pitch_abs = gimbal_data_.pitch_abs;
+            // 用最新值
+            gimbal.yaw_abs = gimbal_data_.yaw_abs;
+            gimbal.pitch_abs = gimbal_data_.pitch_abs;
         }
     }
-    matched_yaw_ = yaw_abs;
-    matched_pitch_ = pitch_abs;
+    matched_gimbal_ = gimbal;
 
-    pose_solver_.solve(armors_, matched_yaw_, matched_pitch_);
+    pose_solver_.solve(armors_, matched_gimbal_);
 }
 
 void ArmorPlateIdentification::publish()
@@ -226,8 +252,8 @@ void ArmorPlateIdentification::publish()
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
         armor_plates_msg.armor_plates.push_back(armor_plate);
     }
-    armor_plates_msg.gimbal_yaw_abs = matched_yaw_;
-    armor_plates_msg.gimbal_pitch_abs = matched_pitch_;
+    armor_plates_msg.gimbal_yaw_abs = matched_gimbal_.yaw_abs;
+    armor_plates_msg.gimbal_pitch_abs = matched_gimbal_.pitch_abs;
     armor_plates_pub_->publish(armor_plates_msg);
 }
 
@@ -237,7 +263,7 @@ void ArmorPlateIdentification::save()
 
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        img_buffs_.push_back({read_stamp_ ,img_show_.clone()});
+        img_buffs_.push_back({read_stamp_, img_show_.clone(), matched_gimbal_});
         if (img_buffs_.size() > 50) img_buffs_.pop_front();
     }
 }
@@ -266,6 +292,7 @@ ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identif
 
 ArmorPlateIdentification::~ArmorPlateIdentification()
 {
+    stopTrackerDebugWorker();
     camera_driver_.close();
     gui_worker_.stop();
 }
@@ -292,7 +319,7 @@ void ArmorPlateIdentification::initDebug()
     base_params.stats_interval = this->declare_parameter<int>("stats_interval", 50);
 
     headless_ = this->declare_parameter<bool>("headless", false);
-    debug_base_ = DebugBase(base_params);
+    debug_base_ = DebugIdentification(base_params);
 
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
     if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");

@@ -4,6 +4,7 @@
 #include <Eigen/Geometry>
 #include <vector>
 #include <armor_plate_interfaces/ArmorTypes.hpp>
+#include <armor_plate_interfaces/GimbalData.hpp>
 
 /** @brief 预处理调试图像数据 */
 struct PreprocessDebug {
@@ -44,17 +45,20 @@ private:
 	static constexpr float DIST_RATIO_THRESH = 2.8f;  // 大/小装甲板分界阈值
 public:
 	// 基本信息
-	std::array<Light, 2> paired_lights_; // 按x轴从左到右排列的两个灯条
-	std::vector<cv::Point2f> points_; // 按照顺时针顺序排列的四个点
-	Eigen::Vector3d xyz_camera_; 	// 相机坐标系下的装甲板位置
-	Eigen::Quaterniond q_camera_; // 相机坐标系下的装甲板姿态
+	std::array<Light, 2> paired_lights_; 	// 按x轴从左到右排列的两个灯条
+	std::vector<cv::Point2f> points_; 		// 按照顺时针顺序排列的四个点
+	Eigen::Vector3d xyz_camera_; 			// 相机坐标系下的装甲板位置
+	Eigen::Quaterniond q_camera_; 			// 相机坐标系下的装甲板姿态
 	float image_distance_to_center_;
 	// 数字识别信息
 	ArmorType type_;
 	ArmorName name_;
-    cv::Mat number_roi_; //数字识别
-    cv::Mat pattern_;  // 去重
+    cv::Mat number_roi_; 	// 数字识别区域
+    cv::Mat pattern_;		// 去重
 	float confidence_;
+
+	// 云台数据
+	GimbalData gimbal;
 
 	// 匹配信息
 	double angle_diff_;
@@ -71,4 +75,5 @@ public:
 struct Record{
 	builtin_interfaces::msg::Time img_stamp;
 	cv::Mat img;
+	GimbalData gimbal;
 };
