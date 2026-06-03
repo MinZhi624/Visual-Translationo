@@ -56,7 +56,6 @@ private:
         }
         // ===== 装甲板跟踪器 ===== //
         tracker_.setMaxLostTime(max_lost_time_);
-        tracker_.setMutationThreshold(mutation_yaw_threshold_);
         tracker_.reset();
 
         if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
@@ -120,7 +119,7 @@ private:
             0.0f, 1.0f, 0.0f, 1.0f
         ));
         // 四个预测装甲板（绿色，id 5-8）+ 文字标签（id 9-12）
-        if (tracker_.isInitialized()) {
+        if (!tracker_.isLost()) {
             auto armor_list = tracker_.getTrackerArmorList();
             for (int i = 0; i < 4; ++i) {
                 double angle = armor_list[i][3];

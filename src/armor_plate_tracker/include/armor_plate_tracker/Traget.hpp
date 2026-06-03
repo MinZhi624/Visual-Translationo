@@ -3,6 +3,7 @@
 #include "armor_plate_tracker/TrackerArmor.hpp"
 
 #include <array>
+#include <vector>
 
 /** @brief 用于跟踪装甲板状态的目标类 */
 class Traget
@@ -19,7 +20,6 @@ private:
     bool checkDivergence();
     bool checkConverge();
     void updateArmorList();
-    size_t findArmorIdx(const TrackerArmor & armor);
 
     static double normalizeRadAngle(double rad);
 
@@ -35,10 +35,11 @@ public:
 
     bool isDivergent() const { return is_divergent_; }
     bool isConverged() const { return is_converged_; }
-    bool isInitialized() const { return is_initialized_; }
     size_t getSelectedArmorId() const { return selected_armor_id_; }
 
+    size_t findArmorIdx(const TrackerArmor & armor);
     std::array<Eigen::Vector<double, 4>, 4> getTrackerArmorList() const { return armor_list_; }
+    Eigen::Vector<double, 4> getArmorObservation(size_t armor_id);
     Eigen::Vector<double, 11> getEKFState() const { return ekf_.getState(); }
     Eigen::Vector<double, 4> getFilteredObservation() const { return ekf_.getFilteredObservation(); }
 
@@ -46,4 +47,6 @@ public:
     Eigen::Vector3d getCenterPointWorld() const;
     Eigen::Vector3d getCenterVelocity() const;
     double getRadius() const;
+    double getL() const;
+    double getH() const;
 };

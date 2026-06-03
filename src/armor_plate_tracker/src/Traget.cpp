@@ -1,5 +1,6 @@
 #include "armor_plate_tracker/Traget.hpp"
 
+#include <algorithm>
 #include <numeric>
 
 double Traget::normalizeRadAngle(double rad)
@@ -31,18 +32,16 @@ void Traget::updateArmorList()
 size_t Traget::findArmorIdx(const TrackerArmor & armor)
 {
     updateArmorList();
-    // 找距离观测点最远的预测装甲板（对面那块），后续关联时排除。
-    size_t far_idx = 0;
-    double max_dist = 0.0;
+
+    // 按预测装甲板到世界原点的距离排序，只取最近的 3 块参与匹配。
+    // 不要按照观测点的到各个装甲板的距离来排序，因为pnp解算不准可能删掉排掉正确解导致id失效。
+    std::array<std::pair<double, size_t>, 4> distance_index_list;
     for (size_t i = 0; i < 4; ++i) {
-        double dx = armor_list_[i].x() - armor.xyz_world_.x();
-        double dy = armor_list_[i].y() - armor.xyz_world_.y();
-        double dist = std::sqrt(dx * dx + dy * dy);
-        if (dist > max_dist) {
-            max_dist = dist;
-            far_idx = i;
-        }
+        const Eigen::Vector3d & armor = armor_list_[i].head<3>();
+        double predicted_distance = armor.norm();
+        distance_index_list[i] = {predicted_distance, i};
     }
+    std::sort(distance_index_list.begin(), distance_index_list.end());
 
     /*  不用距离差的原因：
         1. 天然Pose的yaw 和 World中的yaw 单位统一
@@ -51,23 +50,59 @@ size_t Traget::findArmorIdx(const TrackerArmor & armor)
     const double armor_pose_yaw_world = armor.ypr_world_.x();
     const double armor_yaw_world = armor.ypd_world_.x();
 
-    size_t best_idx = (far_idx == 0) ? 1 : 0;
+    size_t best_idx = distance_index_list[0].second;
     double min_score = 1e10;
-    for (size_t i = 0; i < 4; ++i) {
-        if (i == far_idx) continue;
+    for (size_t candidate_idx = 0; candidate_idx < 3; ++candidate_idx) {
+        size_t i = distance_index_list[candidate_idx].second;
 
-        double predicted_armor_yaw = armor_list_[i].w();
-        double predicted_bearing_yaw = std::atan2(armor_list_[i].y(), armor_list_[i].x());
-        double armor_pose_yaw_diff = std::abs(normalizeRadAngle(armor_pose_yaw_world - predicted_armor_yaw));
-        double armor_yaw_diff = std::abs(normalizeRadAngle(armor_yaw_world - predicted_bearing_yaw));
+        double predicted_armor_pose_yaw = armor_list_[i].w();
+        double predicted_armor_yaw = std::atan2(armor_list_[i].y(), armor_list_[i].x());
+        double armor_pose_yaw_diff = std::abs(normalizeRadAngle(armor_pose_yaw_world - predicted_armor_pose_yaw));
+        double armor_yaw_diff = std::abs(normalizeRadAngle(armor_yaw_world - predicted_armor_yaw));
         double score = armor_pose_yaw_diff + armor_yaw_diff;
-
         if (score < min_score) {
             min_score = score;
             best_idx = i;
         }
     }
+
     return best_idx;
+}
+
+
+
+Eigen::Vector<double, 4> Traget::getArmorObservation(size_t armor_id)
+{
+    updateArmorList();
+    if (armor_id >= armor_list_.size()) {
+        armor_id = 0;
+    }
+
+    const Eigen::Vector<double, 4> & armor = armor_list_[armor_id];
+
+    /*
+        由 EKF 预测装甲板 xyza 转成观测 ypda:
+        yaw_to_armor = atan2(armor_y, armor_x)
+        pitch_to_armor = atan2(armor_z, sqrt(armor_x * armor_x + armor_y * armor_y))
+        distance_to_armor = sqrt(armor_x * armor_x + armor_y * armor_y + armor_z * armor_z)
+        armor_yaw = armor_angle
+    */
+    double armor_x = armor.x();
+    double armor_y = armor.y();
+    double armor_z = armor.z();
+    double armor_angle = armor.w();
+
+    double yaw_to_armor = std::atan2(armor_y, armor_x);
+    double pitch_to_armor = std::atan2(armor_z, std::sqrt(armor_x * armor_x + armor_y * armor_y));
+    double distance_to_armor = std::sqrt(armor_x * armor_x + armor_y * armor_y + armor_z * armor_z);
+    double armor_yaw = armor_angle;
+
+    Eigen::Vector<double, 4> observation;
+    observation << yaw_to_armor,
+                   pitch_to_armor,
+                   distance_to_armor,
+                   armor_yaw;
+    return observation;
 }
 
 void Traget::predict(double dt)
@@ -83,7 +118,7 @@ void Traget::update(const TrackerArmor & armor)
     Eigen::Vector<double, 4> measurement;
     measurement << armor.ypd_world_.x(), armor.ypd_world_.y(),
                    armor.ypd_world_.z(), armor.ypr_world_.x();
-    ekf_.correct(measurement, armor_index);
+    ekf_.correct(measurement, static_cast<int>(armor_index));
     selected_armor_id_ = armor_index;
     updateArmorList();
     checkConverge();
@@ -109,17 +144,13 @@ bool Traget::checkConverge()
 
 bool Traget::checkDivergence()
 {
-    /*
-        TODO:
-        1. 未来考虑v_z的情况
-    */
+    is_divergent_ = false;
     const double r = ekf_.getState()[8];
     const double l = ekf_.getState()[9];
     // 判断半径是否在 0.05 ~ 0.5 之间
     bool is_r_vaild = (r >= 0.05 && r <= 0.5);
     bool is_l_vaild = (r + l >= 0.05 && r + l <= 0.5);
-    if (is_r_vaild && is_l_vaild) is_divergent_ = false;
-    else is_divergent_ = true; 
+    if (!(is_r_vaild && is_l_vaild)) is_divergent_ = true;
     return is_divergent_;
 }
 
@@ -177,10 +208,20 @@ Eigen::Vector3d Traget::getCenterPointWorld() const
 Eigen::Vector3d Traget::getCenterVelocity() const
 {
     Eigen::Vector<double, 11> state = ekf_.getState();
-    return Eigen::Vector3d(state[1], state[3], 0);
+    return Eigen::Vector3d(state[1], state[3], state[5]);
 }
 
 double Traget::getRadius() const
 {
     return ekf_.getState()[8];
+}
+
+double Traget::getL() const
+{
+    return ekf_.getState()[9];
+}
+
+double Traget::getH() const
+{
+    return ekf_.getState()[10];
 }

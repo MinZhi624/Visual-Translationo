@@ -1,4 +1,5 @@
 #pragma once
+#include <armor_plate_interfaces/ArmorTypes.hpp>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
@@ -7,7 +8,7 @@ class TrackerArmor
 public:
     enum class Source { CAMERA, WORLD };
     Source source_;
-    int id = -1;
+    ArmorName armor_name = ArmorName::NONE;
     float image_distance_to_center = 0.0f;
 
     Eigen::Vector3d xyz_camera_{0, 0, 0};

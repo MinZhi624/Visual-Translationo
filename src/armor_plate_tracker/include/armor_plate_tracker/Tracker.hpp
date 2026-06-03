@@ -2,6 +2,7 @@
 #include "armor_plate_tracker/Traget.hpp"
 #include "armor_plate_tracker/CoordinateTransformer.hpp"
 
+#include <armor_plate_interfaces/ArmorTypes.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
@@ -9,6 +10,8 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <map>
+#include <vector>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -39,10 +42,7 @@ private:
     int detect_count_ = 0;
     double max_lost_time_ = 0.1;
 
-    // 突变检测
-    float yaw_mutation_threshold_ = 0.05f;
-    float last_armor_pose_yaw_world_ = 0.0f;
-    int32_t last_armor_number_ = 0;
+    ArmorName last_armor_name_ = ArmorName::NONE;
 
     bool isLostTooLong(double current_time) const;
     double calculateDt(double current_time);
@@ -50,10 +50,16 @@ private:
     TrackerArmor ArmorPlateToTrackerArmor(const ArmorPlate & armor_plate);
     std::vector<TrackerArmor> ArmorPlateToTrackerArmor(const std::vector<ArmorPlate> & armor_plates);
 
+    static std::map<ArmorName, std::vector<TrackerArmor>> groupByArmorName(
+        const std::vector<TrackerArmor> & armors);
+    static TrackerArmor selectRepresentative(
+        const std::vector<TrackerArmor> & armors);
+
     void updateMeasurement(const TrackerArmor & armor, double current_time);
     void updateFilteredValue(const TrackerArmor & armor);
+    void extractFilteredResult();
 
-    void updateState(const bool & is_found, double current_time);
+    void updateState(bool is_found, double current_time);
 public:
     Tracker();
 
@@ -61,7 +67,6 @@ public:
     void init(const TrackerArmor & armor, double current_time);
 
     void setMaxLostTime(double seconds) { max_lost_time_ = seconds; }
-    void setMutationThreshold(float yaw_thresh) { yaw_mutation_threshold_ = yaw_thresh; }
 
     void Update(const std::vector<ArmorPlate> & armor_plates,
                 double current_time,
@@ -76,7 +81,6 @@ public:
     float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }
 
     bool isLost() const { return state_ == TrackerState::LOST; }
-    bool isInitialized() const { return traget_.isInitialized(); }
     double getLastUpdateTime() const { return last_update_time_; }
 
     // EKF 中心点

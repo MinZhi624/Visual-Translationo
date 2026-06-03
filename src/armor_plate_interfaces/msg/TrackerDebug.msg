@@ -16,6 +16,9 @@ float32 center_z
 float32 center_r
 float32 center_v_x
 float32 center_v_y
+float32 center_v_z
+float32 center_l
+float32 center_h
 bool is_lost
 float32 raw_yaw
 float32 filter_yaw

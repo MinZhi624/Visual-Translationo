@@ -87,15 +87,14 @@ void DebugTracker::pushTrackerDebugFrame(const cv::Mat& debug_img) const
 void DebugTracker::infoTrackerDebugMsg(const armor_plate_interfaces::msg::TrackerDebug& msg)
 {
     RCLCPP_INFO(rclcpp::get_logger("DEBUG_TRACKER"),
-        "world:(%.3f,%.3f,%.3f)->(%.3f,%.3f,%.3f) "
-        "yaw:%.4f->%.4f "
-        "center:(%.4f,%.4f,%.4f) r:%.4f v:(%.4f,%.4f) "
-        "lost:%d",
-        msg.target_point_world.x, msg.target_point_world.y, msg.target_point_world.z,
-        msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z,
-        msg.raw_yaw, msg.filter_yaw,
-        msg.center_x, msg.center_y, msg.center_z, msg.center_r,
-        msg.center_v_x, msg.center_v_y,
+        "观测:(%.4f,%.4f,%.4f,%.4f) 滤波:(%.4f,%.4f,%.4f,%.4f),"
+        "EKF状态: 中心点(%.4f,%.4f,%.4f) 中心速度(%.4f,%.4f,%.4f), "
+        "r = %.4f, l = %.4f, h = %.4f, 是否丢失:%d",
+        msg.target_point_world.x, msg.target_point_world.y, msg.target_point_world.z, msg.raw_yaw,
+        msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z, msg.filter_yaw,
+        msg.center_x, msg.center_y, msg.center_z,
+        msg.center_v_x, msg.center_v_y, msg.center_v_z,
+        msg.center_r, msg.center_l, msg.center_h,
         msg.is_lost ? 1 : 0);
 }
 
