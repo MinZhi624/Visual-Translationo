@@ -11,7 +11,7 @@ double Traget::normalizeRadAngle(double rad)
 
 void Traget::updateArmorList()
 {
-    Eigen::Vector<double, 11> state = ekf_.getStatePost();
+    Eigen::Vector<double, 11> state = ekf_.getState();
     double yaw = state[6];
 
     for (int i = 0; i < 4; ++i) {
@@ -31,8 +31,7 @@ void Traget::updateArmorList()
 size_t Traget::findArmorIdx(const TrackerArmor & armor)
 {
     updateArmorList();
-
-    // 找距离观测点最远的预测装甲板（对面那块）-- 排除distance结算的影响
+    // 找距离观测点最远的预测装甲板（对面那块），后续关联时排除。
     size_t far_idx = 0;
     double max_dist = 0.0;
     for (size_t i = 0; i < 4; ++i) {
@@ -45,14 +44,26 @@ size_t Traget::findArmorIdx(const TrackerArmor & armor)
         }
     }
 
-    // 在其余 3 块中找与观测装甲板 yaw 角度差最小的
+    /*  不用距离差的原因：
+        1. 天然Pose的yaw 和 World中的yaw 单位统一
+        2. World中的yaw 其实相当于用了x,y的数据。
+    */
+    const double armor_pose_yaw_world = armor.ypr_world_.x();
+    const double armor_yaw_world = armor.ypd_world_.x();
+
     size_t best_idx = (far_idx == 0) ? 1 : 0;
-    double min_ang = std::abs(normalizeRadAngle(armor.ypr_world_.x() - armor_list_[best_idx].w()));
+    double min_score = 1e10;
     for (size_t i = 0; i < 4; ++i) {
         if (i == far_idx) continue;
-        double ang = std::abs(normalizeRadAngle(armor.ypr_world_.x() - armor_list_[i].w()));
-        if (ang < min_ang) {
-            min_ang = ang;
+
+        double predicted_armor_yaw = armor_list_[i].w();
+        double predicted_bearing_yaw = std::atan2(armor_list_[i].y(), armor_list_[i].x());
+        double armor_pose_yaw_diff = std::abs(normalizeRadAngle(armor_pose_yaw_world - predicted_armor_yaw));
+        double armor_yaw_diff = std::abs(normalizeRadAngle(armor_yaw_world - predicted_bearing_yaw));
+        double score = armor_pose_yaw_diff + armor_yaw_diff;
+
+        if (score < min_score) {
+            min_score = score;
             best_idx = i;
         }
     }
@@ -74,6 +85,7 @@ void Traget::update(const TrackerArmor & armor)
                    armor.ypd_world_.z(), armor.ypr_world_.x();
     ekf_.correct(measurement, armor_index);
     selected_armor_id_ = armor_index;
+    updateArmorList();
     checkConverge();
     checkDivergence();
 }
@@ -101,8 +113,8 @@ bool Traget::checkDivergence()
         TODO:
         1. 未来考虑v_z的情况
     */
-    const double r = ekf_.getStatePost()[8];
-    const double l = ekf_.getStatePost()[9];
+    const double r = ekf_.getState()[8];
+    const double l = ekf_.getState()[9];
     // 判断半径是否在 0.05 ~ 0.5 之间
     bool is_r_vaild = (r >= 0.05 && r <= 0.5);
     bool is_l_vaild = (r + l >= 0.05 && r + l <= 0.5);
@@ -158,17 +170,17 @@ void Traget::init(const TrackerArmor & armor)
 
 Eigen::Vector3d Traget::getCenterPointWorld() const
 {
-    Eigen::Vector<double, 11> state = ekf_.getStatePost();
+    Eigen::Vector<double, 11> state = ekf_.getState();
     return Eigen::Vector3d(state[0], state[2], state[4]);
 }
 
 Eigen::Vector3d Traget::getCenterVelocity() const
 {
-    Eigen::Vector<double, 11> state = ekf_.getStatePost();
+    Eigen::Vector<double, 11> state = ekf_.getState();
     return Eigen::Vector3d(state[1], state[3], 0);
 }
 
 double Traget::getRadius() const
 {
-    return ekf_.getStatePost()[8];
+    return ekf_.getState()[8];
 }

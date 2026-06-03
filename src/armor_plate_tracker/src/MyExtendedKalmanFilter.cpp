@@ -35,11 +35,9 @@ static double normalizeRadAngle(double rad)
 
 MyExtendedKalmanFilter::MyExtendedKalmanFilter()
 {
-    state_pre_ = Eigen::Vector<double, 11>::Zero();
-    state_post_ = Eigen::Vector<double, 11>::Zero();
+    state_ = Eigen::Vector<double, 11>::Zero();
 
-    error_cov_pre_ = Eigen::Matrix<double, 11, 11>::Identity();
-    error_cov_post_ = Eigen::Matrix<double, 11, 11>::Identity();
+    error_cov_ = Eigen::Matrix<double, 11, 11>::Identity();
 
     state_transition_matrix_ = Eigen::Matrix<double, 11, 11>::Identity();
     observation_jacobian_ = Eigen::Matrix<double, 4, 11>::Zero();
@@ -58,13 +56,11 @@ MyExtendedKalmanFilter::MyExtendedKalmanFilter()
 }
 
 void MyExtendedKalmanFilter::initialize(
-    const Eigen::Vector<double, 11>& state_pre,
-    const Eigen::Matrix<double, 11, 11>& error_cov_pre)
+    const Eigen::Vector<double, 11>& state,
+    const Eigen::Matrix<double, 11, 11>& error_cov)
 {
-    state_pre_ = state_pre;
-    state_post_ = state_pre;
-    error_cov_pre_ = error_cov_pre;
-    error_cov_post_ = error_cov_pre;
+    state_ = state;
+    error_cov_ = error_cov;
 }
 
 void MyExtendedKalmanFilter::predict()
@@ -83,15 +79,11 @@ void MyExtendedKalmanFilter::predict()
         l^k       = l^{k-1}
         h^k       = h^{k-1}
     */
-    state_pre_ = state_transition_matrix_ * state_post_;
-    error_cov_pre_ = state_transition_matrix_ * error_cov_post_ * state_transition_matrix_.transpose()
-                   + process_noise_cov_;
+    state_ = state_transition_matrix_ * state_;
+    error_cov_ = state_transition_matrix_ * error_cov_ * state_transition_matrix_.transpose()
+               + process_noise_cov_;
 
-    state_pre_[6] = normalizeRadAngle(state_pre_[6]);
-
-    // 没有 correct 的帧也要推进后验，否则连续丢帧时状态不会继续预测。
-    state_post_ = state_pre_;
-    error_cov_post_ = error_cov_pre_;
+    state_[6] = normalizeRadAngle(state_[6]);
 }
 
 Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement, int armor_id)
@@ -122,12 +114,12 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
         std::log(std::abs(delta_angle) + 1.0) + 1.0,
         std::log(std::abs(measurement[2]) + 1.0) / 200.0 + 9e-2;
 
-    auto predicted_obs = measurementFunction(state_pre_);
+    auto predicted_obs = measurementFunction(state_);
     Eigen::Matrix<double, 4, 4> innovation_cov =
-        observation_jacobian_ * error_cov_pre_ * observation_jacobian_.transpose()
+        observation_jacobian_ * error_cov_ * observation_jacobian_.transpose()
         + observation_noise_cov_;
 
-    kalman_gain_ = error_cov_pre_ * observation_jacobian_.transpose() * innovation_cov.inverse();
+    kalman_gain_ = error_cov_ * observation_jacobian_.transpose() * innovation_cov.inverse();
 
     Eigen::Vector<double, 4> residual = measurement - predicted_obs;
     // yaw pitch与 armor_yaw 是角度量，残差必须落回 [-pi, pi]，避免跨 pi 时跳变。
@@ -135,7 +127,8 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     residual[1] = normalizeRadAngle(residual[1]);
     residual[3] = normalizeRadAngle(residual[3]);
 
-    state_post_ = state_pre_ + kalman_gain_ * residual;
+    state_ = state_ + kalman_gain_ * residual;
+    state_[6] = normalizeRadAngle(state_[6]);
 
     /*
         Joseph stabilized covariance update。
@@ -146,12 +139,12 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     */
     Eigen::Matrix<double, 11, 11> identity = Eigen::Matrix<double, 11, 11>::Identity();
     Eigen::Matrix<double, 11, 11> temp = identity - kalman_gain_ * observation_jacobian_;
-    error_cov_post_ = temp * error_cov_pre_ * temp.transpose()
-                    + kalman_gain_ * observation_noise_cov_ * kalman_gain_.transpose();
+    error_cov_ = temp * error_cov_ * temp.transpose()
+               + kalman_gain_ * observation_noise_cov_ * kalman_gain_.transpose();
 
-    filtered_observation_ = measurementFunction(state_post_);
+    filtered_observation_ = measurementFunction(state_);
     // 卡方检验
-    // NIS=y^T * S^-1 * y
+    // NIS = residual^T * S^-1 * residual
     double nis = residual.transpose() * innovation_cov.inverse() * residual;
     if (nis > NIS_THRESHOLD) nis_failures_.push_back(1);
     else nis_failures_.push_back(0);
@@ -235,8 +228,8 @@ Eigen::Matrix<double, 4, 11> MyExtendedKalmanFilter::calculateObservationJacobia
         H = d(ypda) / d(state)
         H = d(ypda) / d(xyza) * d(xyza) / d(state)
     */
-    auto xyza_state_jacobian = calculateStateToXYZAJacobian(state_pre_, armor_id_);
-    auto xyza_armor = measurementFunctionStateToXYZA(state_pre_, armor_id_);
+    auto xyza_state_jacobian = calculateStateToXYZAJacobian(state_, armor_id_);
+    auto xyza_armor = measurementFunctionStateToXYZA(state_, armor_id_);
     auto ypda_xyza_jacobian = calculateXYZAToYPDAJacobian(xyza_armor);
     return ypda_xyza_jacobian * xyza_state_jacobian;
 }

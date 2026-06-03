@@ -1,13 +1,11 @@
 #include "armor_plate_tracker/Tracker.hpp"
 #include "armor_plate_tracker/DebugTracker.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
-#include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/aim_command.hpp"
 #include "armor_plate_interfaces/msg/tracker_data.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 #include "rclcpp/rclcpp.hpp"
-#include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
 using armor_plate_interfaces::msg::ArmorPlates;

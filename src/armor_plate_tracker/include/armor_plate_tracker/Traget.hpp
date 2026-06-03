@@ -39,7 +39,7 @@ public:
     size_t getSelectedArmorId() const { return selected_armor_id_; }
 
     std::array<Eigen::Vector<double, 4>, 4> getTrackerArmorList() const { return armor_list_; }
-    Eigen::Vector<double, 11> getEKFState() const { return ekf_.getStatePost(); }
+    Eigen::Vector<double, 11> getEKFState() const { return ekf_.getState(); }
     Eigen::Vector<double, 4> getFilteredObservation() const { return ekf_.getFilteredObservation(); }
 
     // 便捷接口：从 EKF 状态中提取常用量

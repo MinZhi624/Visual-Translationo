@@ -1,20 +1,11 @@
 #include "armor_plate_tracker/Tracker.hpp"
 
-#include <chrono>
 #include <rclcpp/logger.hpp>
 #include <vector>
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "rclcpp/logging.hpp"
 
 using armor_plate_interfaces::msg::TrackerDebug;
-
-static double normalizeRadAngle(double rad) {
-    while (rad > M_PI)
-        rad -= 2.0f * M_PI;
-    while (rad < -M_PI)
-        rad += 2.0f * M_PI;
-    return rad;
-}
 
 // ========== Tracker ==========
 
@@ -88,7 +79,7 @@ void Tracker::Update(const std::vector<ArmorPlate> &armor_plates, double current
     selected_armor_id_ = static_cast<int>(traget_.getSelectedArmorId());
 
     // TODO： 升级火控系统
-    // 寻找目标 -- 以离图像中心最近的装甲板为基准
+    // 目前：寻找目标 -- 以离图像中心最近的装甲板为基准
     TrackerArmor target_armor = selected_armors[0];
     for (size_t i = 1; i < selected_armors.size(); ++i) {
         if (selected_armors[i].image_distance_to_center < target_armor.image_distance_to_center) {
