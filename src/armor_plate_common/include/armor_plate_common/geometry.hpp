@@ -23,6 +23,10 @@ inline Eigen::Vector3d calculateYPR(const Eigen::Quaterniond & q)
 
     return {yaw, pitch, roll};
 }
+inline Eigen::Vector3d calculateYPR(const Eigen::Matrix3d & R)
+{
+    return calculateYPR(Eigen::Quaterniond(R));
+}
 
 inline Eigen::Vector3d calculateYPD(const Eigen::Vector3d & xyz)
 {

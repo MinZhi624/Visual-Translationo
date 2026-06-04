@@ -34,6 +34,8 @@ static const std::vector<cv::Point3f> LARGE_ARMOR_POINTS = {
     cv::Point3f(0, LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT)    // 左下
 };
 
+static const double ARMOR_PITCH_DEGREE = 15.0f;
+
 class PoseSolver
 {
 private:
@@ -50,30 +52,41 @@ private:
 		double reprojection_error = 0.0;
 	};
 
+	constexpr static double SEARCH_RANGE = 140.0;
+
 	//===== PNP解算 =====//
 	cv::Mat camera_matrix_; 				// 初始化相机内参
 	cv::Mat distortion_coefficients_;		// 相机畸变系数
 	cv::Mat rectification_matrix_;			// 校正矩阵
 	cv::Mat projection_matrix_;				// 投影矩阵
+	//===== 坐标系装换 =====//
+	Eigen::Matrix3d R_world_gimbal_;
+	Eigen::Matrix3d R_gimbal_world_;
 
 	std::unordered_map<int, std::vector<LastArmorYawRecord>> record_;
 
 	static double calculateYawFromRvec(const cv::Mat & rvec);
 	static double calculatePitchFromRotation(const Eigen::Matrix3d & R);
 	static double calculateWorldPitchFromRvec(const cv::Mat & rvec, const GimbalData & gimbal);
-	static double calculateReprojectionError(
+	double calculateReprojectionError(
 		const std::vector<cv::Point3f> & object_points,
 		const std::vector<cv::Point2f> & image_points,
-		const cv::Mat & camera_matrix,
-		const cv::Mat & distortion_coefficients,
-		const cv::Mat & rvec,
-		const cv::Mat & tvec
+		const cv::Mat & rvec = cv::Mat(),
+		const cv::Mat & tvec = cv::Mat()
+	) const;
+
+	double calculateReprojectionError(
+		const DetectorArmor & armor,
+		const double & yaw
 	);
 	std::vector<PnPCandidate> createPnPCandidates(
 		const std::vector<cv::Point3f> & object_points,
 		const std::vector<cv::Point2f> & image_points,
 		const GimbalData & gimbal
 	) const;
+	// ===== pitch单自由度锁定 ===== //
+	void optimizeYaw(DetectorArmor & armor);
+	// ===== PNP双重解算 ===== //
 	static size_t selectByGeometry(const std::vector<PnPCandidate> & candidates);
 	static size_t selectByYawContinuity(const std::vector<PnPCandidate> & candidates, double nearest_yaw);
 	size_t selectBestCandidate(
@@ -99,5 +112,10 @@ public:
 	cv::Point2f xyzCameraToPixel(cv::Point3f point3D) const;
 	cv::Point2f xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const;
 	
+	std::vector<cv::Point2f> reprojectArmor(
+		const Eigen::Vector3d & xyz_world, 
+		const double & angle,
+		const ArmorType & armor_type);
+
 	float calculateImageDistanceToCenter(const cv::Point2f & target_center_point);
 };

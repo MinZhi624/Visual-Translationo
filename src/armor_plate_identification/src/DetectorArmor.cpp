@@ -67,7 +67,7 @@ Color Light::getLightColor(const cv::Mat& img_bgr, const cv::RotatedRect& rect, 
 DetectorArmor::DetectorArmor(Light& light_left, Light& light_right)
 {
     paired_lights_ = {light_left, light_right};
-    points_ = {light_left.top_, light_right.top_, light_right.bottom_, light_left.bottom_};
+    image_points_ = {light_left.top_, light_right.top_, light_right.bottom_, light_left.bottom_};
 
     // ===== 几何参数计算 ===== //
     // 角度差（度）

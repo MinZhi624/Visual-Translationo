@@ -228,10 +228,10 @@ void Test::publish()
         armor_plate.pose.position.x = armor.xyz_camera_.x();
         armor_plate.pose.position.y = armor.xyz_camera_.y();
         armor_plate.pose.position.z = armor.xyz_camera_.z();
-        armor_plate.pose.orientation.x = armor.q_camera_.x();
-        armor_plate.pose.orientation.y = armor.q_camera_.y();
-        armor_plate.pose.orientation.z = armor.q_camera_.z();
-        armor_plate.pose.orientation.w = armor.q_camera_.w();
+        armor_plate.pose.orientation.x = armor.q_camrea_armor_.x();
+        armor_plate.pose.orientation.y = armor.q_camrea_armor_.y();
+        armor_plate.pose.orientation.z = armor.q_camrea_armor_.z();
+        armor_plate.pose.orientation.w = armor.q_camrea_armor_.w();
         armor_plate.number = static_cast<int>(armor.name_);
         armor_plate.image_distance_to_center = armor.image_distance_to_center_;
         armor_plates_msg.armor_plates.push_back(armor_plate);

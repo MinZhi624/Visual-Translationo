@@ -189,7 +189,7 @@ void DebugIdentification::drawNumbers(cv::Mat& img)
         if (armor.name_ == ArmorName::NONE) continue;
         std::string text = armorNameToString(armor.name_)
                          + " (" + std::to_string(static_cast<int>(armor.confidence_ * 100)) + "%)";
-        cv::putText(img, text, (armor.points_[0] + armor.points_[1]) / 2,
+        cv::putText(img, text, (armor.image_points_[0] + armor.image_points_[1]) / 2,
                     cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 255, 255), 2);
     }
 }
