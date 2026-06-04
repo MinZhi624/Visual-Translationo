@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_tracker/Traget.hpp"
+#include "armor_plate_tracker/Target.hpp"
 #include "armor_plate_tracker/CoordinateTransformer.hpp"
 
 #include <armor_plate_interfaces/ArmorTypes.hpp>
@@ -23,8 +23,8 @@ class Tracker
 {
 private:
     static constexpr float MIN_VALID_ARMOR_PITCH_WORLD = -0.05f;
-    // 目标跟踪器（封装 EKF + 装甲板列表）
-    Traget traget_;
+    // 目标跟踪器
+    Target target_;
     // 坐标变换器
     CoordinateTransformer transformer_;
     // 观测量
@@ -50,10 +50,8 @@ private:
     TrackerArmor ArmorPlateToTrackerArmor(const ArmorPlate & armor_plate);
     std::vector<TrackerArmor> ArmorPlateToTrackerArmor(const std::vector<ArmorPlate> & armor_plates);
 
-    static std::map<ArmorName, std::vector<TrackerArmor>> groupByArmorName(
-        const std::vector<TrackerArmor> & armors);
-    static TrackerArmor selectRepresentative(
-        const std::vector<TrackerArmor> & armors);
+    static std::map<ArmorName, std::vector<TrackerArmor>> groupByArmorName(const std::vector<TrackerArmor> & armors);
+    static TrackerArmor selectRepresentative(const std::vector<TrackerArmor> & armors);
 
     void updateMeasurement(const TrackerArmor & armor, double current_time);
     void updateFilteredValue(const TrackerArmor & armor);
@@ -65,9 +63,7 @@ public:
 
     void reset();
     void init(const TrackerArmor & armor, double current_time);
-
     void setMaxLostTime(double seconds) { max_lost_time_ = seconds; }
-
     void Update(const std::vector<ArmorPlate> & armor_plates,
                 double current_time,
                 const GimbalData & gimbal);
@@ -75,7 +71,7 @@ public:
     // 获取装甲板数据
     const TrackerArmor & getMeasuredArmor() const { return measured_armor_; }
     const TrackerArmor & getFilterArmor() const { return filter_armor_; }
-    const std::vector<Eigen::Vector<double, 4>> getTrackerArmorList() const;
+    const std::array<Eigen::Vector<double, 4>, 4> & getTrackerArmorList() const { return target_.getTargetArmorList(); }
     // 增量角（从 filter_armor_ 的 ypd_gimbal_ 获取）
     float getYaw() const { return filter_armor_.ypd_gimbal_.x(); }
     float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }

@@ -15,29 +15,24 @@ Tracker::Tracker() = default;
 
 void Tracker::Update(const std::vector<ArmorPlate> &armor_plates, double current_time, const GimbalData &gimbal)
 {
-    // ---- 阶段 1：预处理 ----
     double dt = calculateDt(current_time);
     transformer_.update(gimbal);
     auto armors = ArmorPlateToTrackerArmor(armor_plates);
-
-    // ---- 阶段 2：按 ArmorName 分组 ----
     auto grouped = groupByArmorName(armors);
 
-    // ---- 阶段 3：EKF 预测（除 LOST 外都做，TEMP_LOST 时维持）----
     if (state_ != TrackerState::LOST) {
-        traget_.predict(dt);
+        target_.predict(dt);
     }
 
-    // ---- 阶段 4：执行跟踪动作（只产生 is_found，不直接改 state_）----
     bool is_found = false;
 
     if (state_ == TrackerState::LOST) {
         if (!grouped.empty()) {
-            // TODO: 未来添加 ArmorName 级别的优先级策略（英雄>步兵等）
+            // TODO: 未来添加 ArmorName 级别的优先级策略
             // 当前：在所有装甲板中选最近图像中心的初始化
             TrackerArmor init_armor = selectRepresentative(armors);
 
-            traget_.init(init_armor);
+            target_.init(init_armor);
             updateMeasurement(init_armor, current_time);
             is_found = true;
         }
@@ -46,7 +41,7 @@ void Tracker::Update(const std::vector<ArmorPlate> &armor_plates, double current
         auto it = grouped.find(last_armor_name_);
         if (it != grouped.end()) {
             const auto &matched = it->second;
-            traget_.update(matched);  // 一群装甲板串行 correct
+            target_.update(matched);  // 一群装甲板串行 correct
 
             TrackerArmor rep = selectRepresentative(matched);
             updateMeasurement(rep, current_time);
@@ -54,16 +49,13 @@ void Tracker::Update(const std::vector<ArmorPlate> &armor_plates, double current
         }
     }
 
-    // ---- 阶段 5：提取滤波结果（非 LOST）----
-    if (state_ != TrackerState::LOST) {
-        extractFilteredResult();
+    if (state_ != TrackerState::LOST && !target_.checkEKFHealth()) {
+        reset();
+        is_found = false;
     }
 
-    // ---- 阶段 6：EKF 健康检查 + 统一状态转换 ----
-    if (state_ != TrackerState::LOST &&
-        (traget_.isDivergent() || traget_.isConverged())) {
-        reset();  // 同步清理 EKF + 设 state_ = LOST
-        is_found = false;
+    if (state_ != TrackerState::LOST) {
+        extractFilteredResult();
     }
 
     updateState(is_found, current_time);  // 隐藏式状态更新，仅此一处修改 state_
@@ -115,11 +107,10 @@ void Tracker::updateState(bool is_found, double current_time)
 void Tracker::reset()
 {
     RCLCPP_WARN(rclcpp::get_logger("TRACKER"), "reset tracker");
-    traget_.reset();
+    target_.reset();
 
     state_ = TrackerState::LOST;
     detect_count_ = 0;
-    last_update_time_ = 0.0;
     last_detection_time_ = 0.0;
     last_armor_name_ = ArmorName::NONE;
     selected_armor_id_ = -1;
@@ -130,7 +121,7 @@ void Tracker::reset()
 
 void Tracker::init(const TrackerArmor &armor, double current_time)
 {
-    traget_.init(armor);
+    target_.init(armor);
     updateMeasurement(armor, current_time);
     updateFilteredValue(armor);
 }
@@ -165,21 +156,21 @@ void Tracker::updateFilteredValue(const TrackerArmor &armor)
 
 void Tracker::extractFilteredResult()
 {
-    center_point_world_ = traget_.getCenterPointWorld();
-    center_velocity_ = traget_.getCenterVelocity();
-    center_r_ = static_cast<float>(traget_.getRadius());
+    center_point_world_ = target_.getCenterPointWorld();
+    center_velocity_ = target_.getCenterVelocity();
+    center_r_ = static_cast<float>(target_.getRadius());
 
-    if (traget_.isConverged() || traget_.isDivergent()) {
+    if (!target_.checkEKFHealth()) {
         RCLCPP_WARN(rclcpp::get_logger("TRACKER"),
-                    "Converged = %d; Divergent = %d",
-                    traget_.isConverged(),
-                    traget_.isDivergent());
+                    "EKF 异常: Converged = %d; Divergent = %d",
+                    target_.isConverged(),
+                    target_.isDivergent());
     }
 
     // 用 EKF 预测状态重建选中的装甲板滤波结果
-    selected_armor_id_ = static_cast<int>(traget_.getSelectedArmorId());
+    selected_armor_id_ = static_cast<int>(target_.getSelectedArmorId());
     Eigen::Vector<double, 4> filtered_obs =
-        traget_.getArmorObservation(static_cast<size_t>(selected_armor_id_));
+        target_.getArmorObservation(static_cast<size_t>(selected_armor_id_));
     TrackerArmor filtered(filtered_obs);
     transformer_.updateTrackerArmor(filtered);
     updateFilteredValue(filtered);
@@ -215,7 +206,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
     msg.predicted_armor_points_world.clear();
     msg.predicted_armor_yaws_world.clear();
     if (!isLost()) {
-        auto armor_list = getTrackerArmorList();
+        auto armor_list = target_.getTargetArmorList();
         msg.predicted_armor_points_world.reserve(armor_list.size());
         msg.predicted_armor_yaws_world.reserve(armor_list.size());
         for (const auto &armor : armor_list) {
@@ -234,17 +225,10 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
     msg.center_v_x = static_cast<float>(center_velocity_.x());
     msg.center_v_y = static_cast<float>(center_velocity_.y());
     msg.center_v_z = static_cast<float>(center_velocity_.z());
-    msg.center_l = static_cast<float>(traget_.getL());
-    msg.center_h = static_cast<float>(traget_.getH());
+    msg.center_l = static_cast<float>(target_.getL());
+    msg.center_h = static_cast<float>(target_.getH());
 
     return msg;
-}
-
-const std::vector<Eigen::Vector<double, 4>> Tracker::getTrackerArmorList() const
-{
-    auto arr = traget_.getTrackerArmorList();
-    std::vector<Eigen::Vector<double, 4>> armor_list(arr.begin(), arr.end());
-    return armor_list;
 }
 
 std::map<ArmorName, std::vector<TrackerArmor>> Tracker::groupByArmorName(
@@ -259,6 +243,10 @@ std::map<ArmorName, std::vector<TrackerArmor>> Tracker::groupByArmorName(
 
 TrackerArmor Tracker::selectRepresentative(const std::vector<TrackerArmor> &armors)
 {
+    /*
+        TODO: 未来添加 ArmorName 级别的优先级策略
+        当前：在所有装甲板中选最近图像中心的初始化
+    */
     if (armors.empty()) {
         return TrackerArmor();
     }

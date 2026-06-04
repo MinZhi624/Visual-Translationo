@@ -34,13 +34,6 @@ static const std::vector<cv::Point3f> LARGE_ARMOR_POINTS = {
     cv::Point3f(0, LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT)    // 左下
 };
 
-// camera: X右 Y下 Z前
-// gimbal/world base: X前 Y左 Z上
-static const Eigen::Matrix3d R_GIMBAL_CAMERA =
-    (Eigen::Matrix3d() << 0, 0, 1, -1, 0, 0, 0, -1, 0).finished();
-static const Eigen::Matrix3d R_WORLD_GIMBAL = R_GIMBAL_CAMERA.transpose();
-
-
 class PoseSolver
 {
 private:
@@ -65,7 +58,6 @@ private:
 
 	std::unordered_map<int, std::vector<LastArmorYawRecord>> record_;
 
-	static double normalizeRadAngle(double rad);
 	static double calculateYawFromRvec(const cv::Mat & rvec);
 	static double calculatePitchFromRotation(const Eigen::Matrix3d & R);
 	static double calculateWorldPitchFromRvec(const cv::Mat & rvec, const GimbalData & gimbal);
@@ -108,5 +100,4 @@ public:
 	cv::Point2f xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const;
 	
 	float calculateImageDistanceToCenter(const cv::Point2f & target_center_point);
-	static Eigen::Matrix3d calculateRWorldGimbal(const GimbalData & gimbal);
 };

@@ -1,31 +1,16 @@
 #include "armor_plate_tracker/CoordinateTransformer.hpp"
-#include <cmath>
-
-// 相机坐标系 -> 云台坐标系
-// camera: X右 Y下 Z前
-// gimbal: X前 Y左 Z上
-const Eigen::Matrix3d CoordinateTransformer::R_gimbal_camera_ =
-    (Eigen::Matrix3d() << 0, 0, 1, -1, 0, 0, 0, -1, 0).finished();
-
-const Eigen::Matrix3d CoordinateTransformer::R_camera_gimbal_ = R_gimbal_camera_.transpose();
-
-Eigen::Matrix3d CoordinateTransformer::calculateRWorldGimbal(double yaw, double pitch)
-{
-    Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(-pitch, Eigen::Vector3d::UnitY()).toRotationMatrix();
-    return R_yaw * R_pitch;
-}
+#include "armor_plate_common/geometry.hpp"
+#include "armor_plate_common/transform.hpp"
 
 void CoordinateTransformer::update(const GimbalData & gimbal)
 {
-    R_world_gimbal_ = calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
-    R_gimbal_world_ = R_world_gimbal_.transpose();
+    R_world_gimbal_ = armor_plate_common::calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
 
-    R_world_camera_ = R_world_gimbal_ * R_gimbal_camera_;
+    R_world_camera_ = R_world_gimbal_ * armor_plate_common::R_GIMBAL_CAMERA;
     R_camera_world_ = R_world_camera_.transpose();
 
     q_world_gimbal_ = Eigen::Quaterniond(R_world_gimbal_);
-    q_gimbal_camera_ = Eigen::Quaterniond(R_gimbal_camera_);
+    q_gimbal_camera_ = Eigen::Quaterniond(armor_plate_common::R_GIMBAL_CAMERA);
 }
 
 // ========== 坐标变换 ==========
@@ -50,37 +35,6 @@ Eigen::Quaterniond CoordinateTransformer::worldToCamera(const Eigen::Quaterniond
     return q_gimbal_camera_.conjugate() * q_world_gimbal_.conjugate() * q;
 }
 
-// ========== 角度计算 ==========
-
-Eigen::Vector3d CoordinateTransformer::calculateYPR(const Eigen::Quaterniond & q)
-{
-    // 提取 yaw (Z), pitch (Y), roll (X)
-    double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
-    double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
-    double yaw = std::atan2(siny_cosp, cosy_cosp);
-
-    double sinp = 2.0 * (q.w() * q.y() - q.z() * q.x());
-    double pitch = (std::abs(sinp) >= 1.0) ? std::copysign(M_PI / 2.0, sinp) : std::asin(sinp);
-
-    double sinr_cosp = 2.0 * (q.w() * q.x() + q.y() * q.z());
-    double cosr_cosp = 1.0 - 2.0 * (q.x() * q.x() + q.y() * q.y());
-    double roll = std::atan2(sinr_cosp, cosr_cosp);
-
-    return {yaw, pitch, roll};
-}
-
-Eigen::Vector3d CoordinateTransformer::calculateYPD(const Eigen::Vector3d & xyz)
-{
-    /*
-        云台 、 世界坐标系下
-        x 向前, y 向左， z向上
-    */
-    double yaw = std::atan2(xyz.y(), xyz.x());
-    double pitch = std::atan2(xyz.z(), std::sqrt(xyz.x() * xyz.x() + xyz.y() * xyz.y()));
-    double distance = xyz.norm();
-    return {yaw, pitch, distance};
-}
-
 // ========== 更新装甲板 ==========
 
 void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
@@ -92,8 +46,8 @@ void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
         armor.xyz_camera_ = worldToCamera(armor.xyz_world_);
         armor.q_camera_armor_ = worldToCamera(armor.q_world_armor_);
     }
-    armor.ypr_camera_ = calculateYPR(armor.q_camera_armor_);
-    armor.ypr_world_ = calculateYPR(armor.q_world_armor_);
-    armor.ypd_gimbal_ = calculateYPD(R_gimbal_camera_ * armor.xyz_camera_);
-    armor.ypd_world_ = calculateYPD(armor.xyz_world_);
+    armor.ypr_camera_ = armor_plate_common::calculateYPR(armor.q_camera_armor_);
+    armor.ypr_world_ = armor_plate_common::calculateYPR(armor.q_world_armor_);
+    armor.ypd_gimbal_ = armor_plate_common::calculateYPD(armor_plate_common::R_GIMBAL_CAMERA * armor.xyz_camera_);
+    armor.ypd_world_ = armor_plate_common::calculateYPD(armor.xyz_world_);
 }

@@ -1,4 +1,6 @@
 #include "armor_plate_identification/PoseSolver.hpp"
+#include "armor_plate_common/angle.hpp"
+#include "armor_plate_common/transform.hpp"
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
@@ -94,8 +96,8 @@ cv::Point2f PoseSolver::xyzCameraToPixel(cv::Point3f point3D) const
 }
 cv::Point2f PoseSolver::xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const
 {
-    const Eigen::Matrix3d R_world_gimbal = calculateRWorldGimbal(gimbal);
-    const Eigen::Matrix3d R_world_camera = R_world_gimbal * R_GIMBAL_CAMERA;
+    const Eigen::Matrix3d R_world_gimbal = armor_plate_common::calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
+    const Eigen::Matrix3d R_world_camera = R_world_gimbal * armor_plate_common::R_GIMBAL_CAMERA;
     const Eigen::Matrix3d R_camera_world = R_world_camera.transpose();
     Eigen::Vector3d point_camrea = R_camera_world * point3D;
     cv::Point3d point_camrea_cv = {point_camrea.x(), point_camrea.y(), point_camrea.z()};
@@ -182,7 +184,7 @@ size_t PoseSolver::selectByYawContinuity(const std::vector<PnPCandidate> & candi
         if (has_valid_pitch && candidates[i].world_pitch < MIN_VALID_ARMOR_PITCH_WORLD) {
             continue;
         }
-        const double yaw_delta = std::abs(normalizeRadAngle(candidates[i].yaw - nearest_yaw));
+        const double yaw_delta = std::abs(armor_plate_common::normalizeRadAngle(candidates[i].yaw - nearest_yaw));
         if (yaw_delta < min_yaw_delta) {
             min_yaw_delta = yaw_delta;
             continuous_id = i;
@@ -224,7 +226,7 @@ size_t PoseSolver::selectBestCandidate(
 
     // 4. 仲裁：几何最优发生了 yaw 突变，且连续性解误差没差太多时，修正为连续性解
     const double best_yaw_delta =
-        std::abs(normalizeRadAngle(candidates[best_id].yaw - nearest_record.yaw));
+        std::abs(armor_plate_common::normalizeRadAngle(candidates[best_id].yaw - nearest_record.yaw));
     const double error_margin =
         candidates[continuous_id].reprojection_error - candidates[best_id].reprojection_error;
 
@@ -236,13 +238,6 @@ size_t PoseSolver::selectBestCandidate(
 }
 
 // ========== 工具类 ==========
-
-double PoseSolver::normalizeRadAngle(double rad)
-{
-    while (rad > M_PI) rad -= 2.0 * M_PI;
-    while (rad < -M_PI) rad += 2.0 * M_PI;
-    return rad;
-}
 
 double PoseSolver::calculateYawFromRvec(const cv::Mat & rvec)
 {
@@ -262,14 +257,7 @@ double PoseSolver::calculatePitchFromRotation(const Eigen::Matrix3d & R)
 {
     Eigen::Quaterniond q(R);
     const double sinp = 2.0 * (q.w() * q.y() - q.z() * q.x());
-    return (std::abs(sinp) >= 1.0) ? std::copysign(M_PI / 2.0, sinp) : std::asin(sinp);
-}
-
-Eigen::Matrix3d PoseSolver::calculateRWorldGimbal(const GimbalData & gimbal)
-{
-    Eigen::Matrix3d R_yaw = Eigen::AngleAxisd(gimbal.yaw_abs, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    Eigen::Matrix3d R_pitch = Eigen::AngleAxisd(-gimbal.pitch_abs, Eigen::Vector3d::UnitY()).toRotationMatrix();
-    return R_yaw * R_pitch;
+    return (std::abs(sinp) >= 1.0) ? std::copysign(M_PI_2, sinp) : std::asin(sinp);
 }
 
 double PoseSolver::calculateWorldPitchFromRvec(const cv::Mat & rvec, const GimbalData & gimbal)
@@ -280,7 +268,9 @@ double PoseSolver::calculateWorldPitchFromRvec(const cv::Mat & rvec, const Gimba
     Eigen::Matrix3d R_camera_armor;
     cv::cv2eigen(rmat, R_camera_armor);
 
-    Eigen::Matrix3d R_world_armor = calculateRWorldGimbal(gimbal) * R_GIMBAL_CAMERA * R_camera_armor;
+    Eigen::Matrix3d R_world_armor =
+        armor_plate_common::calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs)
+        * armor_plate_common::R_GIMBAL_CAMERA * R_camera_armor;
     return calculatePitchFromRotation(R_world_armor);
 }
 

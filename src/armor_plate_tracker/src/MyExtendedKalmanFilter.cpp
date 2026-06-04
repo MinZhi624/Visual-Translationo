@@ -1,4 +1,5 @@
 #include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
+#include "armor_plate_common/angle.hpp"
 
 #include <Eigen/Dense>
 
@@ -26,13 +27,6 @@
     r + l 是 1/3 号装甲板半径。
     z_c + h 是 1/3 号装甲板高度。
 */
-static double normalizeRadAngle(double rad)
-{
-    while (rad > M_PI) rad -= 2.0 * M_PI;
-    while (rad < -M_PI) rad += 2.0 * M_PI;
-    return rad;
-}
-
 MyExtendedKalmanFilter::MyExtendedKalmanFilter()
 {
     state_ = Eigen::Vector<double, 11>::Zero();
@@ -83,7 +77,7 @@ void MyExtendedKalmanFilter::predict()
     error_cov_ = state_transition_matrix_ * error_cov_ * state_transition_matrix_.transpose()
                + process_noise_cov_;
 
-    state_[6] = normalizeRadAngle(state_[6]);
+    state_[6] = armor_plate_common::normalizeRadAngle(state_[6]);
 }
 
 Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement, int armor_id)
@@ -107,14 +101,14 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
         R_distance = log(abs(delta_angle) + 1) + 1
         R_angle    = log(abs(distance_to_armor) + 1) / 200 + 9e-2
     */
-    double delta_angle = normalizeRadAngle(measurement[3] - measurement[0]);
+    double delta_angle = armor_plate_common::normalizeRadAngle(measurement[3] - measurement[0]);
     observation_noise_cov_.diagonal() <<
         4e-3,
         4e-3,
         std::log(std::abs(delta_angle) + 1.0) + 1.0,
         std::log(std::abs(measurement[2]) + 1.0) / 200.0 + 9e-2;
 
-    auto predicted_obs = measurementFunction(state_);
+    auto predicted_obs = measurementFunction();
     Eigen::Matrix<double, 4, 4> innovation_cov =
         observation_jacobian_ * error_cov_ * observation_jacobian_.transpose()
         + observation_noise_cov_;
@@ -123,12 +117,12 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
 
     Eigen::Vector<double, 4> residual = measurement - predicted_obs;
     // yaw pitch与 armor_yaw 是角度量，残差必须落回 [-pi, pi]，避免跨 pi 时跳变。
-    residual[0] = normalizeRadAngle(residual[0]);
-    residual[1] = normalizeRadAngle(residual[1]);
-    residual[3] = normalizeRadAngle(residual[3]);
+    residual[0] = armor_plate_common::normalizeRadAngle(residual[0]);
+    residual[1] = armor_plate_common::normalizeRadAngle(residual[1]);
+    residual[3] = armor_plate_common::normalizeRadAngle(residual[3]);
 
     state_ = state_ + kalman_gain_ * residual;
-    state_[6] = normalizeRadAngle(state_[6]);
+    state_[6] = armor_plate_common::normalizeRadAngle(state_[6]);
 
     /*
         Joseph stabilized covariance update。
@@ -142,7 +136,7 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     error_cov_ = temp * error_cov_ * temp.transpose()
                + kalman_gain_ * observation_noise_cov_ * kalman_gain_.transpose();
 
-    filtered_observation_ = measurementFunction(state_);
+    filtered_observation_ = measurementFunction();
     // 卡方检验
     // NIS = residual^T * S^-1 * residual
     double nis = residual.transpose() * innovation_cov.inverse() * residual;
@@ -234,9 +228,9 @@ Eigen::Matrix<double, 4, 11> MyExtendedKalmanFilter::calculateObservationJacobia
     return ypda_xyza_jacobian * xyza_state_jacobian;
 }
 
-Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunction(const Eigen::Vector<double, 11>& state)
+Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunction()
 {
-    auto xyza_state = measurementFunctionStateToXYZA(state, armor_id_);
+    auto xyza_state = measurementFunctionStateToXYZA(state_, armor_id_);
     auto ypda_xyza = measurementFunctionXYZAToYPDA(xyza_state);
     return ypda_xyza;
 }
@@ -373,7 +367,7 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionStateToXYZA(
         x_c - radius * std::cos(car_yaw),
         y_c - radius * std::sin(car_yaw),
         armor_z,
-        normalizeRadAngle(car_yaw);
+        armor_plate_common::normalizeRadAngle(car_yaw);
     return observation;
 }
 
@@ -390,6 +384,6 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionXYZAToYPDA(c
         yaw,
         pitch,
         distance,
-        normalizeRadAngle(xyza[3])
+        armor_plate_common::normalizeRadAngle(xyza[3])
     };
 }

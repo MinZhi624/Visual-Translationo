@@ -1,5 +1,77 @@
 #include "armor_plate_tracker/DebugTracker.hpp"
 
+std::vector<Marker> createCarMarkers(
+    const std::array<Eigen::Vector<double, 4>, 4> & armor_list,
+    const Eigen::Vector3d & center,
+    const Eigen::Vector3d & car_speed,
+    const rclcpp::Time & stamp,
+    int base_id
+)
+{
+    std::vector<Marker> markers;
+    markers.reserve(11);
+
+    // 中心点球体（绿色）
+    markers.push_back(createSphereMarker(
+        center, "world", stamp, base_id + 0,
+        0.08f, 0.0f, 1.0f, 0.0f, 1.0f));
+
+    // 旋转轴箭头（绿色，向上0.5m）
+    Eigen::Vector3d axis_top = center + Eigen::Vector3d(0.0, 0.0, 0.5);
+    markers.push_back(createArrowMarker(
+        center, axis_top, "world", stamp, base_id + 1,
+        0.02f, 0.06f, 0.0f,
+        0.0f, 1.0f, 0.0f, 1.0f));
+
+    // 中心速度箭头（黄色）
+    constexpr double kVelocityScale = 0.5;
+    Eigen::Vector3d arrow_end = center + car_speed * kVelocityScale;
+    markers.push_back(createArrowMarker(
+        center, arrow_end, "world", stamp, base_id + 2,
+        0.02f, 0.06f, 0.0f,
+        1.0f, 1.0f, 0.0f, 1.0f));
+
+    // 四个预测装甲板（id 5-8）+ 文字标签（id 9-12）
+    for (int i = 0; i < 4; ++i) {
+        double angle = armor_list[i][3];
+        Eigen::Vector3d pos(armor_list[i][0], armor_list[i][1], armor_list[i][2]);
+        Eigen::Quaterniond q(Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ()));
+        markers.push_back(createBoxMarker(
+            pos, q, "world", stamp, base_id + 5 + i,
+            0.0f, 1.0f, 0.0f, 1.0f));
+        markers.push_back(createTextMarker(
+            pos, "id=" + std::to_string(i),
+            "world", stamp, base_id + 9 + i,
+            0.08f, 1.0f, 1.0f, 1.0f, 1.0f));
+    }
+
+    return markers;
+}
+
+Marker createMeasurementMarker(
+    const TrackerArmor & armor,
+    const rclcpp::Time & stamp,
+    int id
+)
+{
+    return createBoxMarker(
+        armor.xyz_world_, armor.q_world_armor_,
+        "world", stamp, id,
+        1.0f, 0.0f, 0.0f, 1.0f);
+}
+
+Marker createFilteredMarker(
+    const TrackerArmor & armor,
+    const rclcpp::Time & stamp,
+    int id
+)
+{
+    return createBoxMarker(
+        armor.xyz_world_, armor.q_world_armor_,
+        "world", stamp, id,
+        0.0f, 1.0f, 0.0f, 1.0f);
+}
+
 visualization_msgs::msg::Marker createSphereMarker(
     const Eigen::Vector3d& position,
     const std::string& frame_id,

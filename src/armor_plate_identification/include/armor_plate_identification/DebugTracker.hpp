@@ -1,6 +1,7 @@
 #pragma once
 #include "armor_plate_identification/PoseSolver.hpp"
 #include "armor_plate_identification/GuiWorker.hpp"
+#include "armor_plate_common/angle.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include <armor_plate_interfaces/GimbalData.hpp>
 
@@ -10,7 +11,7 @@
 class DebugTracker
 {
 private:
-    static constexpr double ARMOR_PITCH = 15.0 * M_PI / 180.0;
+    static constexpr double ARMOR_PITCH = armor_plate_common::degToRad(15.0);
     PoseSolver* pose_solver_;
     GuiWorker* gui_worker_;
 public:

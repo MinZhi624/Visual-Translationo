@@ -41,6 +41,7 @@ find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
+find_package(armor_plate_common REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(OpenVINO REQUIRED)
 # ======================
@@ -109,6 +110,7 @@ ament_target_dependencies(
   "sensor_msgs"
   "camera_info_manager"
   "armor_plate_interfaces"
+  "armor_plate_common"
   "ament_index_cpp"
 )
 ament_target_dependencies(
@@ -116,6 +118,7 @@ ament_target_dependencies(
   "rclcpp"
   "OpenCV"
   "armor_plate_interfaces"
+  "armor_plate_common"
   "ament_index_cpp"
 )
   

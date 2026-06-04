@@ -1,35 +1,30 @@
-#include "armor_plate_tracker/Traget.hpp"
+#include "armor_plate_tracker/Target.hpp"
+#include "armor_plate_common/angle.hpp"
 
 #include <algorithm>
+#include <armor_plate_common/geometry.hpp>
 #include <numeric>
 
-double Traget::normalizeRadAngle(double rad)
-{
-    while (rad > M_PI) rad -= 2.0 * M_PI;
-    while (rad < -M_PI) rad += 2.0 * M_PI;
-    return rad;
-}
-
-void Traget::updateArmorList()
+void Target::updateArmorList()
 {
     Eigen::Vector<double, 11> state = ekf_.getState();
     double yaw = state[6];
 
     for (int i = 0; i < 4; ++i) {
-        double angle = yaw + i * M_PI / 2.0;
+        double armor_angle = yaw + i * M_PI / 2.0;
         bool use_l_h = (i == 1 || i == 3);
         double radius = use_l_h ? state[8] + state[9] : state[8];
         double z = use_l_h ? state[4] + state[10] : state[4];
         armor_list_[i] = Eigen::Vector<double, 4>{
-            state[0] - radius * std::cos(angle),
-            state[2] - radius * std::sin(angle),
+            state[0] - radius * std::cos(armor_angle),
+            state[2] - radius * std::sin(armor_angle),
             z,
-            normalizeRadAngle(angle)
+            armor_plate_common::normalizeRadAngle(armor_angle)
         };
     }
 }
 
-size_t Traget::findArmorIdx(const TrackerArmor & armor)
+size_t Target::findArmorIdx(const TrackerArmor & armor)
 {
     updateArmorList();
 
@@ -57,8 +52,8 @@ size_t Traget::findArmorIdx(const TrackerArmor & armor)
 
         double predicted_armor_pose_yaw = armor_list_[i].w();
         double predicted_armor_yaw = std::atan2(armor_list_[i].y(), armor_list_[i].x());
-        double armor_pose_yaw_diff = std::abs(normalizeRadAngle(armor_pose_yaw_world - predicted_armor_pose_yaw));
-        double armor_yaw_diff = std::abs(normalizeRadAngle(armor_yaw_world - predicted_armor_yaw));
+        double armor_pose_yaw_diff = std::abs(armor_plate_common::normalizeRadAngle(armor_pose_yaw_world - predicted_armor_pose_yaw));
+        double armor_yaw_diff = std::abs(armor_plate_common::normalizeRadAngle(armor_yaw_world - predicted_armor_yaw));
         double score = armor_pose_yaw_diff + armor_yaw_diff;
         if (score < min_score) {
             min_score = score;
@@ -71,7 +66,7 @@ size_t Traget::findArmorIdx(const TrackerArmor & armor)
 
 
 
-Eigen::Vector<double, 4> Traget::getArmorObservation(size_t armor_id)
+Eigen::Vector<double, 4> Target::getArmorObservation(size_t armor_id)
 {
     updateArmorList();
     if (armor_id >= armor_list_.size()) {
@@ -79,40 +74,20 @@ Eigen::Vector<double, 4> Traget::getArmorObservation(size_t armor_id)
     }
 
     const Eigen::Vector<double, 4> & armor = armor_list_[armor_id];
-
-    /*
-        由 EKF 预测装甲板 xyza 转成观测 ypda:
-        yaw_to_armor = atan2(armor_y, armor_x)
-        pitch_to_armor = atan2(armor_z, sqrt(armor_x * armor_x + armor_y * armor_y))
-        distance_to_armor = sqrt(armor_x * armor_x + armor_y * armor_y + armor_z * armor_z)
-        armor_yaw = armor_angle
-    */
-    double armor_x = armor.x();
-    double armor_y = armor.y();
-    double armor_z = armor.z();
-    double armor_angle = armor.w();
-
-    double yaw_to_armor = std::atan2(armor_y, armor_x);
-    double pitch_to_armor = std::atan2(armor_z, std::sqrt(armor_x * armor_x + armor_y * armor_y));
-    double distance_to_armor = std::sqrt(armor_x * armor_x + armor_y * armor_y + armor_z * armor_z);
-    double armor_yaw = armor_angle;
-
     Eigen::Vector<double, 4> observation;
-    observation << yaw_to_armor,
-                   pitch_to_armor,
-                   distance_to_armor,
-                   armor_yaw;
+    observation.head<3>() = armor_plate_common::calculateYPD(armor.head<3>());
+    observation.w() = armor.w();
     return observation;
 }
 
-void Traget::predict(double dt)
+void Target::predict(double dt)
 {
     ekf_.updateProcessNoiseCov(dt);
     ekf_.updateStateTransitionMatrix(dt);
     ekf_.predict();
 }
 
-void Traget::update(const TrackerArmor & armor)
+void Target::update(const TrackerArmor & armor)
 {
     size_t armor_index = findArmorIdx(armor);
     Eigen::Vector<double, 4> measurement;
@@ -125,7 +100,7 @@ void Traget::update(const TrackerArmor & armor)
     checkDivergence();
 }
 
-void Traget::update(const std::vector<TrackerArmor> & armors)
+void Target::update(const std::vector<TrackerArmor> & armors)
 {
     if (armors.empty()) return;
     for (const auto & armor : armors) {
@@ -133,16 +108,17 @@ void Traget::update(const std::vector<TrackerArmor> & armors)
     }
 }
 
-bool Traget::checkConverge()
+bool Target::checkConverge()
 {
     const std::deque<int> & nis_failures = ekf_.getNISFailures();
     // 这里用WindowSize是为了防止一开始数字太小导致判断错误
-    is_converged_ = std::accumulate(nis_failures.begin(), nis_failures.end(), 0) >= (0.4 * MyExtendedKalmanFilter::NIS_WINDOW_SIZE);
+    // NIS 失败少表示滤波器收敛/正常
+    is_converged_ = std::accumulate(nis_failures.begin(), nis_failures.end(), 0) < (0.4 * MyExtendedKalmanFilter::NIS_WINDOW_SIZE);
     return is_converged_;
 }
 
 
-bool Traget::checkDivergence()
+bool Target::checkDivergence()
 {
     is_divergent_ = false;
     const double r = ekf_.getState()[8];
@@ -154,18 +130,17 @@ bool Traget::checkDivergence()
     return is_divergent_;
 }
 
-void Traget::reset()
+void Target::reset()
 {
     Eigen::Vector<double, 11> zero_state = Eigen::Vector<double, 11>::Zero();
     Eigen::Matrix<double, 11, 11> identity_P = Eigen::Matrix<double, 11, 11>::Identity();
     ekf_.initialize(zero_state, identity_P);
 
-    is_initialized_ = false;
     selected_armor_id_ = 0;
     armor_list_.fill(Eigen::Vector<double, 4>::Zero());
 }
 
-void Traget::init(const TrackerArmor & armor)
+void Target::init(const TrackerArmor & armor)
 {
     float armor_pose_yaw_world = armor.ypr_world_.x();
     const Eigen::Vector3d & xyz_world = armor.xyz_world_;
@@ -182,7 +157,7 @@ void Traget::init(const TrackerArmor & armor)
         l = 0
         h = 0
     */
-    const double r_init = 0.20;
+    const double r_init = 0.26;
     double x_c0 = xyz_world.x() + r_init * std::cos(armor_pose_yaw_world);
     double y_c0 = xyz_world.y() + r_init * std::sin(armor_pose_yaw_world);
 
@@ -194,34 +169,33 @@ void Traget::init(const TrackerArmor & armor)
     init_P.diagonal() << 1.0, 64.0, 1.0, 64.0, 1.0, 64.0, 0.4, 100.0, 1.0, 1.0, 1.0;
 
     ekf_.initialize(init_state, init_P);
-    is_initialized_ = true;
     selected_armor_id_ = 0;
 }
 
 
-Eigen::Vector3d Traget::getCenterPointWorld() const
+Eigen::Vector3d Target::getCenterPointWorld() const
 {
     Eigen::Vector<double, 11> state = ekf_.getState();
     return Eigen::Vector3d(state[0], state[2], state[4]);
 }
 
-Eigen::Vector3d Traget::getCenterVelocity() const
+Eigen::Vector3d Target::getCenterVelocity() const
 {
     Eigen::Vector<double, 11> state = ekf_.getState();
     return Eigen::Vector3d(state[1], state[3], state[5]);
 }
 
-double Traget::getRadius() const
+double Target::getRadius() const
 {
     return ekf_.getState()[8];
 }
 
-double Traget::getL() const
+double Target::getL() const
 {
     return ekf_.getState()[9];
 }
 
-double Traget::getH() const
+double Target::getH() const
 {
     return ekf_.getState()[10];
 }

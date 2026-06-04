@@ -31,12 +31,12 @@ private:
     int armor_id_ = 0;
     
     Eigen::Matrix<double, 4, 11> calculateObservationJacobian();
-    Eigen::Matrix4d calculateXYZAToYPDAJacobian(const Eigen::Vector<double, 4> & xyza);
-    Eigen::Matrix<double, 4, 11> calculateStateToXYZAJacobian(const Eigen::Vector<double, 11> & state, int armor_id);
+    static Eigen::Matrix4d calculateXYZAToYPDAJacobian(const Eigen::Vector<double, 4> & xyza);
+    static Eigen::Matrix<double, 4, 11> calculateStateToXYZAJacobian(const Eigen::Vector<double, 11> & state, int armor_id);
 
-    Eigen::Vector<double, 4> measurementFunction(const Eigen::Vector<double, 11>& state);
-    Eigen::Vector<double, 4> measurementFunctionStateToXYZA(const Eigen::Vector<double, 11>& state, int armor_id);
-    Eigen::Vector<double, 4> measurementFunctionXYZAToYPDA(const Eigen::Vector<double, 4>& xyza);
+    Eigen::Vector<double, 4> measurementFunction();
+    static Eigen::Vector<double, 4> measurementFunctionStateToXYZA(const Eigen::Vector<double, 11>& state, int armor_id);
+    static Eigen::Vector<double, 4> measurementFunctionXYZAToYPDA(const Eigen::Vector<double, 4>& xyza);
 public:
     static constexpr size_t NIS_WINDOW_SIZE = 100;
 

@@ -45,6 +45,7 @@ flowchart TD
 | `armor_plate_tracker` | 目标选择、世界坐标系 11 维 EKF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/visualization_marker_array` |
 | `armor_plate_serial` | 串口双向通信 | `serial_node` | `/aim_command` | `/gimbal_angle`, (串口) |
 | `armor_plate_interfaces` | 自定义消息定义 | — | — | — |
+| `armor_plate_common` | 公共数学/几何工具（角度、YPR/YPD、坐标系旋转） | — | — | — |
 | `armor_plate_bringup` | 一键启动组合 | `run.launch.py` / `test.launch.py` / `auto_test.launch.py` | — | — |
 
 ---
@@ -68,7 +69,7 @@ flowchart TD
 
 - 装甲板中心 ROI 透视变换提取
 - **OpenVINO Runtime** 推理，输出 0-9 + negative
-- 模型文件：`model/number_cnn.onnx`（另有 `mlp.onnx` 备选）
+- 模型文件：`model/number_cnn.onnx`
 - 训练工具链见 `DeepLearning/`
 
 ### 4. PnP 位姿解算
@@ -186,6 +187,7 @@ cd /home/minzhi/Desktop/Visual-Translationo
 
 colcon build --packages-select \
   armor_plate_interfaces \
+  armor_plate_common \
   armor_plate_identification \
   armor_plate_tracker \
   armor_plate_serial \
@@ -273,6 +275,7 @@ Visual-Translationo/
 │   │   ├── model/number_cnn.onnx      # ONNX 数字识别模型
 │   │   ├── video/                     # 测试视频
 │   │   └── third_parties/             # MindVision / Galaxy SDK
+│   ├── armor_plate_common/            # 公共数学/几何工具
 │   ├── armor_plate_tracker/           # 跟踪 + 世界坐标系 EKF
 │   │   ├── config/params.yaml
 │   │   ├── src/

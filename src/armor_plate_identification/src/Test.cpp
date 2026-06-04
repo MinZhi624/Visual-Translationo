@@ -107,7 +107,7 @@ void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
     }
     if (best_diff > 50000000) return;  // 超过 50ms 放弃
 
-    DebugTracker::infoTrackerDebugMsg(msg);
+    // DebugTracker::infoTrackerDebugMsg(msg);
 
     cv::Mat debug_img = it->img.clone();
 
