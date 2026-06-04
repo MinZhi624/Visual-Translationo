@@ -23,10 +23,13 @@ void ArmorPlateTracker::publish(const ArmorPlates::SharedPtr armor_plates)
     const auto & filtered = tracker_.getFilterArmor();
     // AimCommand 和 TrackerData 仅在跟踪成功时发送
     if (!tracker_.isLost()) {
-        AimCommand aim_command;
-        aim_command.delta_pitch = tracker_.getPitch();
-        aim_command.delta_yaw = tracker_.getYaw();
-        aim_command_pub_->publish(aim_command);
+        if(tracker_.isSend()) {
+            AimCommand aim_command;
+            aim_command.delta_pitch = tracker_.getPitch();
+            aim_command.delta_yaw = tracker_.getYaw();
+            aim_command_pub_->publish(aim_command);
+        }
+        
 
         // RCLCPP_INFO(this->get_logger(),
         //     "delta_yaw=%.4f rad (%.2f deg), delta_pitch=%.4f rad (%.2f deg)",

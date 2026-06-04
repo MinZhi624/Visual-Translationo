@@ -42,7 +42,6 @@ void Tracker::Update(const std::vector<ArmorPlate> &armor_plates, double current
         if (it != grouped.end()) {
             const auto &matched = it->second;
             target_.update(matched);  // 一群装甲板串行 correct
-
             TrackerArmor rep = selectRepresentative(matched);
             updateMeasurement(rep, current_time);
             is_found = true;

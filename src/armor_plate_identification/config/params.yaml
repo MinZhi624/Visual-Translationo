@@ -46,20 +46,20 @@ armor_plate_identification_node:
     # gain: 8.0
     # 大恒
     camera_type: "galaxy"
-    exposure_time: 7000.0
+    exposure_time: 10000.0
     gain: 8.0
     # === 灯条匹配参数 ===
     max_angle_diff: 10.0
-    min_length_ratio: 0.7
+    min_length_ratio: 0.8
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
     # === 数字分类器参数 ===
-    number_threshold: 0.5
+    number_threshold: 0.2
     # === DEBUG ===
     debug_timecontrol: true
-    debug_lights: false
+    debug_lights: true
     debug_preprocessing: false
     debug_number_classification: false
     delay_time: 0

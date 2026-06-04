@@ -76,7 +76,8 @@ public:
     float getYaw() const { return filter_armor_.ypd_gimbal_.x(); }
     float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }
 
-    bool isLost() const { return state_ == TrackerState::LOST; }
+    const bool isSend() const {return state_ == TrackerState::TRACKING; }
+    const bool isLost() const { return state_ == TrackerState::LOST; }
     double getLastUpdateTime() const { return last_update_time_; }
 
     // EKF 中心点

@@ -21,8 +21,7 @@ void ArmorPlateIdentification::run()
             continue;
         }
         fail_count = 0;
-        img_show_ = frame.clone();
-
+        img_show_ = frame;
         debug_base_.onFrameStart();
 
         identification(frame);
@@ -229,7 +228,6 @@ void ArmorPlateIdentification::solvePose()
         }
     }
     matched_gimbal_ = gimbal;
-
     pose_solver_.solve(armors_, matched_gimbal_);
 }
 
@@ -263,7 +261,7 @@ void ArmorPlateIdentification::save()
 
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        img_buffs_.push_back({read_stamp_, img_show_.clone(), matched_gimbal_});
+        img_buffs_.push_back({read_stamp_, img_show_, matched_gimbal_});
         if (img_buffs_.size() > 50) img_buffs_.pop_front();
     }
 }

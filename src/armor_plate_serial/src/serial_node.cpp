@@ -15,28 +15,6 @@ using armor_plate_interfaces::msg::AimCommand;
 using armor_plate_interfaces::msg::GimbalAngle;
 
 
-uint16_t crc16_modbus_bit(const uint8_t * data, size_t len)
-{
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < len; ++i)
-    {
-        crc ^= data[i];
-        for (int bit = 0; bit < 8; ++bit)
-        {
-            if (crc & 0x0001u)
-            {
-                crc = (crc >> 1) ^ 0xA001u;
-            }
-            else
-            {
-                crc >>= 1;
-            }
-        }
-    }
-    return crc;
-}
-
-
 class SerialDriver : public rclcpp::Node
 {
 private:
@@ -64,7 +42,7 @@ private:
     {
         const auto * packet = reinterpret_cast<const EcToVisionFrame_t *>(frame.data());
         GimbalAngle msg;
-        // 补偿串口通信延迟：把时间戳往前推
+        // 补偿串口通信延迟：把时间戳往前推 几乎没有延迟
         msg.stamp = this->now() - rclcpp::Duration::from_seconds(timestamp_offset_);
         msg.yaw_abs   = static_cast<float>(packet->yaw_actual_1e4rad) / 10000.0f;
         msg.pitch_abs = static_cast<float>(packet->pitch_actual_1e4rad) / 10000.0f;

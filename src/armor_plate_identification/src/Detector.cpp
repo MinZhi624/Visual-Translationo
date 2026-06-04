@@ -96,17 +96,17 @@ cv::Mat Detector::preprocess(const cv::Mat& img_bgr)
     cv::Mat kernal = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 5));
     cv::dilate(img_thre, img_thre, kernal);
     cv::erode(img_thre, img_thre, kernal);
-    // 填充调试图像数据
-    preprocess_debug_.blue_dim_thre = target_color_dim_thre.clone();
-    preprocess_debug_.gray_thre = gray_thre.clone();
-    preprocess_debug_.merged_thre = img_thre.clone();
+    // 填充调试图像数据, 这里不用深拷贝，因为这些在最后的时候才处理
+    preprocess_debug_.blue_dim_thre = target_color_dim_thre;
+    preprocess_debug_.gray_thre = gray_thre;
+    preprocess_debug_.merged_thre = img_thre;
     preprocess_debug_.fragment_info = fragment_info;
     return img_thre;
 }
 
 void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr)
 {
-    // 初始化（重置）参数
+    // 初始化（重置）参数,防止历史数据累加
     reset();
     // 找到灯条并构造 Light 对象
     find_lights_ = findLights(img_thre, img_bgr);
@@ -116,10 +116,6 @@ void Detector::detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr)
     });
     // 匹配灯条
     armors_ = matchLights(find_lights_, img_bgr);
-    // 得到装甲板的号码ROI
-    for (auto& armor : armors_) {
-        armor.number_roi_ = NumberClassifier::getNumberROI(img_bgr, armor);
-    }
     // 更新装甲板数量
     num_lights_ = armors_.size();
 }
@@ -155,14 +151,14 @@ std::vector<DetectorArmor> Detector::matchLights(std::vector<Light>& all_lights,
             armor.pattern_ = getArmorPattern(img_bgr, armor);
             classifier_.classify(armor);
             if(!classifier_.checkArmorName(armor)) {
-                rejected_armors_.push_back(armor);
+                rejected_armors_.push_back(std::move(armor));
                 continue;
             }
             if(!NumberClassifier::checkArmorType(armor)) {
-                rejected_armors_.push_back(armor);
+                rejected_armors_.push_back(std::move(armor));
                 continue;
             }
-            candidates.push_back(armor);
+            candidates.push_back(std::move(armor));
         }
     }
     
@@ -194,8 +190,8 @@ std::vector<DetectorArmor> Detector::matchLights(std::vector<Light>& all_lights,
     }
     std::vector<DetectorArmor> result;
     for (size_t i = 0; i < candidates.size(); i++) {
-        if (!removed[i]) result.push_back(candidates[i]);
-        else rejected_armors_.push_back(candidates[i]);
+        if (!removed[i]) result.push_back(std::move(candidates[i]));
+        else rejected_armors_.push_back(std::move(candidates[i]));
     }
     return result;
 }

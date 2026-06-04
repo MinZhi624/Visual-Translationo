@@ -35,7 +35,7 @@ void Test::run()
         debug_test_.mark("save");
         show();
         debug_test_.mark("show");
-
+        
         debug_test_.onFrameEnd();
 
         KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
@@ -246,7 +246,8 @@ void Test::save()
     debug_test_.save();
     {
         std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        img_buffs_.push_back({read_stamp_, img_show_.clone(), test_gimbal_});
+        // 这里图片浅拷贝
+        img_buffs_.push_back({read_stamp_, img_show_, test_gimbal_});
         if (img_buffs_.size() > 50) img_buffs_.pop_front();
     }
 }
@@ -264,7 +265,6 @@ void Test::show()
     for (const auto& [name, img] : frames) {
         gui_worker_.pushFrame(name, img);
     }
-    debug_test_.mark("show");
 }
 
 void Test::closeTrackerDebugFile()

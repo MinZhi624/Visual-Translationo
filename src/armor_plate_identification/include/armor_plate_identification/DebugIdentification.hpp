@@ -1,7 +1,6 @@
 #pragma once
 #include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/GuiWorker.hpp"
-#include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include <rclcpp/logging.hpp>
 #include <opencv2/core.hpp>
 #include <map>

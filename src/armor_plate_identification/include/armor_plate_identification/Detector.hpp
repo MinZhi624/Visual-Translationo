@@ -68,8 +68,8 @@ public:
 	int num_lights_ = 0;
 
 	cv::Mat preprocess(const cv::Mat& img_bgr);
-	const PreprocessDebug& getPreprocessDebug() const { return preprocess_debug_; }
 	void detectArmors(cv::Mat& img_thre, const cv::Mat& img_bgr);
+	const PreprocessDebug& getPreprocessDebug() const { return preprocess_debug_; }
 
 	const std::vector<DetectorArmor>& getArmors() const { return armors_; }
 	const std::vector<Light>& getLights() const { return find_lights_; }

@@ -90,6 +90,11 @@ void NumberClassifier::classify(DetectorArmor& armor)
 }
 void NumberClassifier::classifyFromOpenVino(DetectorArmor& armor)
 {
+    /*
+        TODO:
+        现在我用这个反而更费时，
+        所以这个展示不用
+    */
     if(armor.number_roi_.empty()) {
         armor.confidence_ = 0.0;
         armor.name_ = ArmorName::NONE;
