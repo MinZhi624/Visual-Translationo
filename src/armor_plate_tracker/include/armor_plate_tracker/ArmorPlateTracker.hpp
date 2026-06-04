@@ -33,6 +33,7 @@ private:
 
     // ===== DEBUG =====//
     bool debug_;
+    bool diagnostic_log_ = false;
     rclcpp::Publisher<TrackerDebug>::SharedPtr tracker_debug_pub_;
 
     void init();

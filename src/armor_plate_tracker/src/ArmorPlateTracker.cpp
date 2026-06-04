@@ -14,6 +14,13 @@ void ArmorPlateTracker::ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
     const auto& armor_plates = msg->armor_plates;
     GimbalData gimbal{msg->gimbal_yaw_abs, msg->gimbal_pitch_abs};
     tracker_.Update(armor_plates, current_time_, gimbal);
+    if (diagnostic_log_) {
+        RCLCPP_INFO_THROTTLE(
+            this->get_logger(), *this->get_clock(), 500,
+            "[diag][tracker_in] t=%.6f armors=%zu gimbal_yaw=%.4f gimbal_pitch=%.4f lost=%d",
+            current_time_, armor_plates.size(), gimbal.yaw_abs, gimbal.pitch_abs,
+            tracker_.isLost());
+    }
     publish(msg);
 }
 
@@ -23,11 +30,27 @@ void ArmorPlateTracker::publish(const ArmorPlates::SharedPtr armor_plates)
     const auto & filtered = tracker_.getFilterArmor();
     // AimCommand 和 TrackerData 仅在跟踪成功时发送
     if (!tracker_.isLost()) {
+        const double delta_pitch = tracker_.getPitch();
+        const double delta_yaw = tracker_.getYaw();
         if(tracker_.isSend()) {
             AimCommand aim_command;
-            aim_command.delta_pitch = tracker_.getPitch();
-            aim_command.delta_yaw = tracker_.getYaw();
+            aim_command.delta_pitch = delta_pitch;
+            aim_command.delta_yaw = delta_yaw;
             aim_command_pub_->publish(aim_command);
+        }
+        if (diagnostic_log_) {
+            const auto center = tracker_.getCenterPointWorld();
+            RCLCPP_INFO_THROTTLE(
+                this->get_logger(), *this->get_clock(), 500,
+                "[diag][tracker_out] send=%d delta=(%.4f, %.4f) measured_world=(%.3f, %.3f, %.3f) "
+                "filtered_world=(%.3f, %.3f, %.3f) measured_gimbal=(%.4f, %.4f) "
+                "filtered_gimbal=(%.4f, %.4f) center=(%.3f, %.3f, %.3f)",
+                tracker_.isSend(), delta_yaw, delta_pitch,
+                measured.xyz_world_.x(), measured.xyz_world_.y(), measured.xyz_world_.z(),
+                filtered.xyz_world_.x(), filtered.xyz_world_.y(), filtered.xyz_world_.z(),
+                measured.ypd_gimbal_.x(), measured.ypd_gimbal_.y(),
+                filtered.ypd_gimbal_.x(), filtered.ypd_gimbal_.y(),
+                center.x(), center.y(), center.z());
         }
         
 
@@ -62,6 +85,7 @@ void ArmorPlateTracker::init()
     // ===== 参数获取 ===== //
     max_lost_time_ = this->declare_parameter<double>("max_lost_time", 0.5);
     mutation_yaw_threshold_ = this->declare_parameter<double>("mutation_yaw_threshold", 3.0);
+    diagnostic_log_ = this->declare_parameter<bool>("diagnostic_log", false);
     // ===== ROS 相关 ===== //
     armor_plates_sub_ = this->create_subscription<ArmorPlates>(
         "armor_plates",

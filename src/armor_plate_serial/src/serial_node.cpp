@@ -37,6 +37,7 @@ private:
     std::vector<uint8_t> recv_temp_buf_;
     // 时间补偿
     double timestamp_offset_ = 0.0;
+    bool diagnostic_log_ = false;
     
     void publishFrame(const std::array<uint8_t, 13> & frame)
     {
@@ -47,6 +48,12 @@ private:
         msg.yaw_abs   = static_cast<float>(packet->yaw_actual_1e4rad) / 10000.0f;
         msg.pitch_abs = static_cast<float>(packet->pitch_actual_1e4rad) / 10000.0f;
         gimbal_angle_pub_->publish(msg);
+        if (diagnostic_log_) {
+            RCLCPP_INFO_THROTTLE(
+                this->get_logger(), *this->get_clock(), 500,
+                "[diag][serial_rx] yaw=%.4f pitch=%.4f timestamp_offset=%.3f",
+                msg.yaw_abs, msg.pitch_abs, timestamp_offset_);
+        }
     }
 
     void recvLoop()
@@ -116,6 +123,12 @@ private:
         latest_yaw_ = msg->delta_yaw;
         latest_pitch_ = msg->delta_pitch;
         if(latest_pitch_ == 0.0f && latest_yaw_ == 0.0f) return;
+        if (diagnostic_log_) {
+            RCLCPP_INFO_THROTTLE(
+                this->get_logger(), *this->get_clock(), 500,
+                "[diag][serial_tx] delta_yaw=%.4f delta_pitch=%.4f",
+                latest_yaw_, latest_pitch_);
+        }
         frame.sof1 = 0xA5;
         frame.sof2 = 0x5A;
         frame.seq = latest_seq_++;
@@ -142,6 +155,7 @@ private:
         std::string device_name = this->declare_parameter<std::string>("device_name", "/dev/ttyACM0");
         uint32_t baud_rate = static_cast<uint32_t>(this->declare_parameter<int>("baud_rate", 115200));
         timestamp_offset_ = this->declare_parameter<double>("timestamp_offset", 0.0);
+        diagnostic_log_ = this->declare_parameter<bool>("diagnostic_log", false);
 
         using FC = drivers::serial_driver::FlowControl;
         using PT = drivers::serial_driver::Parity;
