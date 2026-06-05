@@ -189,7 +189,6 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
     };
 
     msg.is_lost = isLost();
-    msg.target_point_world = toVec3(measured_armor_.xyz_world_);
 
     if (!isLost()) {
         msg.filtered_point_world = toVec3(filter_armor_.xyz_world_);
@@ -209,8 +208,8 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
         msg.predicted_armor_points_world.reserve(armor_list.size());
         msg.predicted_armor_yaws_world.reserve(armor_list.size());
         for (const auto &armor : armor_list) {
-            msg.predicted_armor_points_world.push_back(toVec3(Eigen::Vector3d(armor[0], armor[1], armor[2])));
-            msg.predicted_armor_yaws_world.push_back(static_cast<float>(armor[3]));
+            msg.predicted_armor_points_world.push_back(toVec3(armor.xyz_world));
+            msg.predicted_armor_yaws_world.push_back(static_cast<float>(armor.yaw));
         }
     }
 
@@ -226,6 +225,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
     msg.center_v_z = static_cast<float>(center_velocity_.z());
     msg.center_l = static_cast<float>(target_.getL());
     msg.center_h = static_cast<float>(target_.getH());
+    msg.armor_name = static_cast<int32_t>(last_armor_name_);
 
     return msg;
 }

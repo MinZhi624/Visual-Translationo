@@ -1,5 +1,6 @@
 #pragma once
 #include "armor_plate_identification/DetectorArmor.hpp"
+#include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
 #include <opencv2/core.hpp>
 #include <Eigen/Geometry>
@@ -51,8 +52,6 @@ private:
 		double world_pitch = 0.0;
 		double reprojection_error = 0.0;
 	};
-
-	constexpr static double SEARCH_RANGE = 140.0;
 
 	//===== PNP解算 =====//
 	cv::Mat camera_matrix_; 				// 初始化相机内参
@@ -111,11 +110,14 @@ public:
 
 	cv::Point2f xyzCameraToPixel(cv::Point3f point3D) const;
 	cv::Point2f xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const;
-	
-	std::vector<cv::Point2f> reprojectArmor(
-		const Eigen::Vector3d & xyz_world, 
-		const double & angle,
-		const ArmorType & armor_type);
+
+	std::vector<cv::Point2f> reprojectArmor(const ArmorPose & armor_pose) const;
+	std::vector<cv::Point2f> reprojectArmor(const ArmorPose & armor_pose, const GimbalData & gimbal) const;
 
 	float calculateImageDistanceToCenter(const cv::Point2f & target_center_point);
+
+private:
+	std::vector<cv::Point2f> reprojectArmorImpl(
+		const ArmorPose & armor_pose,
+		const Eigen::Matrix3d & R_gimbal_world) const;
 };

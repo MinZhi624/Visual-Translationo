@@ -41,11 +41,10 @@ static Color getLightColor(const cv::Mat& img_bgr,const cv::RotatedRect& rect, c
 class DetectorArmor
 {
 private:
-	// 匹配常量
 	static constexpr float DIST_RATIO_THRESH = 2.8f;  // 大/小装甲板分界阈值
 public:
 	// 基本信息
-	std::array<Light, 2> paired_lights_; 	// 按x轴从左到右排列的两个灯条
+	std::array<Light, 2> paired_lights_; 			// 按x轴从左到右排列的两个灯条
 	std::vector<cv::Point2f> image_points_; 		// 按照顺时针顺序排列的四个点
 	float image_distance_to_center_;
 

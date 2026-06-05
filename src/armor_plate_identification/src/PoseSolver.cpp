@@ -19,6 +19,8 @@ static constexpr double SAME_ARMOR_CENTER_THRESH = 30.0;
 static constexpr double YAW_MUTATION_THRESH = M_PI_2;
 static constexpr double REPROJECTION_ERROR_MARGIN = 3.0;
 static constexpr double MIN_VALID_ARMOR_PITCH_WORLD = -0.05;
+static constexpr double SEARCH_RANGE = 140.0;
+
 
 PoseSolver::PoseSolver()
     : camera_matrix_(),
@@ -53,6 +55,10 @@ PoseSolver::PoseSolver(
 
 void PoseSolver::solve(std::vector<DetectorArmor> & armors, const GimbalData & gimbal)
 {
+    /*
+        TODO:
+        现在解决了pnp上下解问题，但是没有解决pnp小角度左右双解问题
+    */
     R_world_gimbal_ = armor_plate_common::calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
     R_gimbal_world_ = R_world_gimbal_.transpose();
     std::unordered_map<int, std::vector<LastArmorYawRecord>> new_record;
@@ -109,46 +115,17 @@ void PoseSolver::optimizeYaw(DetectorArmor & armor)
     }
     armor.ypr_world_[0] = best_yaw;
 }
-double PoseSolver::calculateReprojectionError(
-		const DetectorArmor & armor,
-		const double & yaw)
+
+std::vector<cv::Point2f> PoseSolver::reprojectArmor(const ArmorPose & armor_pose) const
 {
-    auto image_points = reprojectArmor(armor.xyz_world_, yaw, armor.type_);
-    double err = 0.0;
-    for (int i = 0; i < 4; ++i) err += cv::norm(image_points[i] - armor.image_points_[i]);
-    return err;
-}
-std::vector<cv::Point2f> PoseSolver::reprojectArmor(
-		const Eigen::Vector3d & xyz_world, 
-		const double & angle,
-		const ArmorType & armor_type)
-{
-    const auto R_pitch = Eigen::AngleAxisd(armor_plate_common::degToRad(ARMOR_PITCH_DEGREE), Eigen::Vector3d::UnitY()).toRotationMatrix();
-    const auto R_yaw = Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    const auto R_world_armor = R_yaw * R_pitch;
-    // 求解 rvec, tvec
-    const Eigen::Vector3d & t_world_armor = xyz_world;
-    Eigen::Matrix3d R_camrea_armor = 
-        armor_plate_common::R_CAMERA_GIMBAL * R_gimbal_world_ * R_world_armor;
-    // 这里我认为是理想相机安装
-    Eigen::Vector3d t_camrea_armor = 
-        armor_plate_common::R_CAMERA_GIMBAL * R_gimbal_world_ * t_world_armor;
-    // 装换格式
-    cv::Vec3d rvec;
-    cv::Vec3d tvec;
-    cv::Mat R_armor2camera_cv;
-    cv::eigen2cv(R_camrea_armor, R_armor2camera_cv);
-    cv::Rodrigues(R_armor2camera_cv, rvec);
-    cv::eigen2cv(t_camrea_armor, tvec);
-    // 重投影
-    std::vector<cv::Point2f> image_points;
-    // 根据装甲板类型重投影
-    const auto & object_points = (armor_type == ArmorType::LARGE) ? LARGE_ARMOR_POINTS : SMALL_ARMOR_POINTS;
-    cv::projectPoints(object_points, rvec, tvec, camera_matrix_, distortion_coefficients_, image_points);
-    return image_points;
+    return reprojectArmorImpl(armor_pose, R_gimbal_world_);
 }
 
-
+std::vector<cv::Point2f> PoseSolver::reprojectArmor(const ArmorPose & armor_pose, const GimbalData & gimbal) const
+{
+    Eigen::Matrix3d R_world_gimbal = armor_plate_common::calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
+    return reprojectArmorImpl(armor_pose, R_world_gimbal.transpose());
+}
 
 cv::Point2f PoseSolver::xyzCameraToPixel(cv::Point3f point3D) const
 {
@@ -292,7 +269,7 @@ size_t PoseSolver::selectBestCandidate(
     //  历史连续性最优
     size_t continuous_id = selectByYawContinuity(candidates, nearest_record.yaw);
 
-    // 4. 仲裁：几何最优发生了 yaw 突变，且连续性解误差没差太多时，修正为连续性解
+    //  几何最优发生了 yaw 突变，且连续性解误差没差太多时，修正为连续性解
     const double best_yaw_delta =
         std::abs(armor_plate_common::normalizeRadAngle(candidates[best_id].yaw - nearest_record.yaw));
     const double error_margin =
@@ -356,4 +333,44 @@ double PoseSolver::calculateReprojectionError(
         error += cv::norm(image_points[i] - projected_points[i]);
     }
     return error;
+}
+double PoseSolver::calculateReprojectionError(
+		const DetectorArmor & armor,
+		const double & yaw)
+{
+    ArmorPose armor_pose;
+    armor_pose.xyz_world = armor.xyz_world_;
+    armor_pose.yaw = yaw;
+    armor_pose.type = armor.type_;
+    auto image_points = reprojectArmor(armor_pose);
+    double err = 0.0;
+    for (int i = 0; i < 4; ++i) err += cv::norm(image_points[i] - armor.image_points_[i]);
+    return err;
+}
+
+std::vector<cv::Point2f> PoseSolver::reprojectArmorImpl(
+		const ArmorPose & armor_pose,
+		const Eigen::Matrix3d & R_gimbal_world) const
+{
+    const auto R_pitch = Eigen::AngleAxisd(armor_plate_common::degToRad(ARMOR_PITCH_DEGREE), Eigen::Vector3d::UnitY()).toRotationMatrix();
+    const auto R_yaw = Eigen::AngleAxisd(armor_pose.yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    const auto R_world_armor = R_yaw * R_pitch;
+
+    const Eigen::Vector3d & t_world_armor = armor_pose.xyz_world;
+    Eigen::Matrix3d R_camera_armor =
+        armor_plate_common::R_CAMERA_GIMBAL * R_gimbal_world * R_world_armor;
+    Eigen::Vector3d t_camera_armor =
+        armor_plate_common::R_CAMERA_GIMBAL * R_gimbal_world * t_world_armor;
+
+    cv::Vec3d rvec;
+    cv::Vec3d tvec;
+    cv::Mat R_armor2camera_cv;
+    cv::eigen2cv(R_camera_armor, R_armor2camera_cv);
+    cv::Rodrigues(R_armor2camera_cv, rvec);
+    cv::eigen2cv(t_camera_armor, tvec);
+
+    std::vector<cv::Point2f> image_points;
+    const auto & object_points = (armor_pose.type == ArmorType::LARGE) ? LARGE_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+    cv::projectPoints(object_points, rvec, tvec, camera_matrix_, distortion_coefficients_, image_points);
+    return image_points;
 }

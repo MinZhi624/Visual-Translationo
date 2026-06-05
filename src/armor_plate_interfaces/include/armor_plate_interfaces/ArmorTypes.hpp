@@ -44,6 +44,11 @@ inline ArmorName intToArmorName(int id)
     }
 }
 
+inline ArmorType armorNameToType(ArmorName name)
+{
+    return (name == ArmorName::ONE) ? ArmorType::LARGE : ArmorType::SMALL;
+}
+
 inline std::string armorNameToString(const ArmorName& name)
 {
     switch (name) {

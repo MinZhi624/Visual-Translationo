@@ -1,7 +1,7 @@
 #include "armor_plate_tracker/DebugTracker.hpp"
 
 std::vector<Marker> createCarMarkers(
-    const std::array<Eigen::Vector<double, 4>, 4> & armor_list,
+    const std::array<ArmorPose, 4> & armor_list,
     const Eigen::Vector3d & center,
     const Eigen::Vector3d & car_speed,
     const rclcpp::Time & stamp,
@@ -33,8 +33,8 @@ std::vector<Marker> createCarMarkers(
 
     // 四个预测装甲板（id 5-8）+ 文字标签（id 9-12）
     for (int i = 0; i < 4; ++i) {
-        double angle = armor_list[i][3];
-        Eigen::Vector3d pos(armor_list[i][0], armor_list[i][1], armor_list[i][2]);
+        double angle = armor_list[i].yaw;
+        Eigen::Vector3d pos = armor_list[i].xyz_world;
         Eigen::Quaterniond q(Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ()));
         markers.push_back(createBoxMarker(
             pos, q, "world", stamp, base_id + 5 + i,
@@ -69,7 +69,7 @@ Marker createFilteredMarker(
     return createBoxMarker(
         armor.xyz_world_, armor.q_world_armor_,
         "world", stamp, id,
-        0.0f, 1.0f, 0.0f, 1.0f);
+        0.0f, 0.0f, 1.0f, 1.0f);
 }
 
 visualization_msgs::msg::Marker createSphereMarker(

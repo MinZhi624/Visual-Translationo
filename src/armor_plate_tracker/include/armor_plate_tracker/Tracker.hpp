@@ -2,6 +2,7 @@
 #include "armor_plate_tracker/Target.hpp"
 #include "armor_plate_tracker/CoordinateTransformer.hpp"
 
+#include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/ArmorTypes.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
@@ -11,7 +12,6 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <map>
-#include <vector>
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
@@ -71,13 +71,13 @@ public:
     // 获取装甲板数据
     const TrackerArmor & getMeasuredArmor() const { return measured_armor_; }
     const TrackerArmor & getFilterArmor() const { return filter_armor_; }
-    const std::array<Eigen::Vector<double, 4>, 4> & getTrackerArmorList() const { return target_.getTargetArmorList(); }
+    const std::array<ArmorPose, 4> & getTrackerArmorList() const { return target_.getTargetArmorList(); }
     // 增量角（从 filter_armor_ 的 ypd_gimbal_ 获取）
     float getYaw() const { return filter_armor_.ypd_gimbal_.x(); }
     float getPitch() const { return filter_armor_.ypd_gimbal_.y(); }
 
-    const bool isSend() const {return state_ == TrackerState::TRACKING; }
-    const bool isLost() const { return state_ == TrackerState::LOST; }
+    bool isSend() const {return state_ == TrackerState::TRACKING; }
+    bool isLost() const { return state_ == TrackerState::LOST; }
     double getLastUpdateTime() const { return last_update_time_; }
 
     // EKF 中心点
