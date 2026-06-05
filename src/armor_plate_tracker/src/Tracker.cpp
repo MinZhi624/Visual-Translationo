@@ -259,13 +259,10 @@ TrackerArmor Tracker::selectRepresentative(const std::vector<TrackerArmor> &armo
 TrackerArmor Tracker::ArmorPlateToTrackerArmor(const ArmorPlate &armor_plate)
 {
     TrackerArmor armor(
-        Eigen::Vector3d(armor_plate.pose.position.x, armor_plate.pose.position.y, armor_plate.pose.position.z),
-        Eigen::Quaterniond(armor_plate.pose.orientation.w,
-                           armor_plate.pose.orientation.x,
-                           armor_plate.pose.orientation.y,
-                           armor_plate.pose.orientation.z));
+        Eigen::Vector3d(armor_plate.x_world, armor_plate.y_world, armor_plate.z_world),
+        armor_plate.yaw_world,
+        armor_plate.image_distance_to_center);
     armor.armor_name = intToArmorName(armor_plate.number);
-    armor.image_distance_to_center = armor_plate.image_distance_to_center;
     transformer_.updateTrackerArmor(armor);
     return armor;
 }

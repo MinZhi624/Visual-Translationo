@@ -57,65 +57,40 @@ void PoseSolver::solve(std::vector<DetectorArmor> & armors, const GimbalData & g
     R_gimbal_world_ = R_world_gimbal_.transpose();
     std::unordered_map<int, std::vector<LastArmorYawRecord>> new_record;
     for (auto & armor : armors) {
-        // 老方法 pnp 双解中选择 -> 解决 pitch 方向问题
-        // const auto& world_points = (armor.type_ == ArmorType::LARGE)
-        //     ? LARGE_ARMOR_POINTS
-        //     : SMALL_ARMOR_POINTS;
-        // cv::Point2f target_center = (armor.image_points_[0] + armor.image_points_[1] + armor.image_points_[2] + armor.image_points_[3]) / 4;
-
-        // const int armor_name_key = static_cast<int>(armor.name_);
-        // std::vector<PnPCandidate> candidates = createPnPCandidates(world_points, armor.image_points_, gimbal);
-        // size_t best_id = selectBestCandidate(candidates, armor_name_key, target_center);
-
-        // cv::Mat rmat;
-        // cv::Rodrigues(candidates[best_id].rvec, rmat);
-        
-        // Eigen::Matrix3d R_camrea_armor;
-        // Eigen::Vector3d t_camera; 
-        // cv::cv2eigen(rmat, R_camrea_armor);
-        // cv::cv2eigen(candidates[best_id].tvec, t_camera);
-
-        // armor.xyz_camera_ = t_camera;
-        // armor.q_armor_camera_ = Eigen::Quaterniond(R_camrea_armor);
-
-        // armor.image_distance_to_center_ = calculateImageDistanceToCenter(target_center);
-
-        // new_record[armor_name_key].push_back({candidates[best_id].yaw, target_center});
-
-        // 通过重投影误差来选择YAW最优解
-        const auto & object_points = (armor.type_ == ArmorType::LARGE)
+        const auto& world_points = (armor.type_ == ArmorType::LARGE)
             ? LARGE_ARMOR_POINTS
             : SMALL_ARMOR_POINTS;
-        cv::Vec3d rvec, tvec;
-        cv::solvePnP(
-            object_points,
-            armor.image_points_,
-            camera_matrix_,
-            distortion_coefficients_,
-            rvec,
-            tvec,
-            false,
-            cv::SOLVEPNP_IPPE
-        );
+        cv::Point2f target_center = (armor.image_points_[0] + armor.image_points_[1] + armor.image_points_[2] + armor.image_points_[3]) / 4;
+
+        const int armor_name_key = static_cast<int>(armor.name_);
+        std::vector<PnPCandidate> candidates = createPnPCandidates(world_points, armor.image_points_, gimbal);
+        size_t best_id = selectBestCandidate(candidates, armor_name_key, target_center);
+
         cv::Mat rmat;
-        cv::Rodrigues(rvec, rmat);
-        
-        Eigen::Matrix3d R_camrea_armor;
-        Eigen::Vector3d t_camera; 
-        cv::cv2eigen(rmat, R_camrea_armor);
-        cv::cv2eigen(tvec, t_camera);
-        
+        cv::Rodrigues(candidates[best_id].rvec, rmat);
+
+        Eigen::Matrix3d R_camera_armor;
+        Eigen::Vector3d t_camera;
+        cv::cv2eigen(rmat, R_camera_armor);
+        cv::cv2eigen(candidates[best_id].tvec, t_camera);
+
         armor.xyz_camera_ = t_camera;
-        armor.q_camrea_armor_ = Eigen::Quaterniond(R_camrea_armor);
-        armor.ypr_world_ = armor_plate_common::calculateYPR(R_camrea_armor);
+        armor.q_camrea_armor_ = Eigen::Quaterniond(R_camera_armor);
+
+        armor.image_distance_to_center_ = calculateImageDistanceToCenter(target_center);
+
+        // camera -> world
         Eigen::Matrix3d R_world_camera = R_world_gimbal_ * armor_plate_common::R_GIMBAL_CAMERA;
-        armor.xyz_world_ =  R_world_camera * armor.xyz_camera_;
-        armor.q_world_armor_ = Eigen::Quaterniond(R_world_camera * R_camrea_armor);
-        armor.ypr_world_ = armor_plate_common::calculateYPR(R_world_camera * R_camrea_armor);
-        // 优化yaw
+        armor.xyz_world_ = R_world_camera * armor.xyz_camera_;
+        armor.q_world_armor_ = Eigen::Quaterniond(R_world_camera * R_camera_armor);
+        armor.ypr_world_ = armor_plate_common::calculateYPR(R_world_camera * R_camera_armor);
+
+        // 优化 yaw
         optimizeYaw(armor);
+
+        new_record[armor_name_key].push_back({candidates[best_id].yaw, target_center});
     }
-    // record_ = std::move(new_record);
+    record_ = std::move(new_record);
 }
 void PoseSolver::optimizeYaw(DetectorArmor & armor)
 {

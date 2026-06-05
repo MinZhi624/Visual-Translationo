@@ -39,15 +39,6 @@ Eigen::Quaterniond CoordinateTransformer::worldToCamera(const Eigen::Quaterniond
 
 void CoordinateTransformer::updateTrackerArmor(TrackerArmor & armor) const
 {
-    if (armor.source_ == TrackerArmor::Source::CAMERA) {
-        armor.xyz_world_ = cameraToWorld(armor.xyz_camera_);
-        armor.q_world_armor_ = cameraToWorld(armor.q_camera_armor_);
-    } else {
-        armor.xyz_camera_ = worldToCamera(armor.xyz_world_);
-        armor.q_camera_armor_ = worldToCamera(armor.q_world_armor_);
-    }
-    armor.ypr_camera_ = armor_plate_common::calculateYPR(armor.q_camera_armor_);
-    armor.ypr_world_ = armor_plate_common::calculateYPR(armor.q_world_armor_);
-    armor.ypd_gimbal_ = armor_plate_common::calculateYPD(armor_plate_common::R_GIMBAL_CAMERA * armor.xyz_camera_);
-    armor.ypd_world_ = armor_plate_common::calculateYPD(armor.xyz_world_);
+    armor.ypd_gimbal_ = armor_plate_common::calculateYPD(
+        armor_plate_common::R_GIMBAL_CAMERA * R_camera_world_ * armor.xyz_world_);
 }
