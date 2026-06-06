@@ -3,4 +3,3 @@ armor_plate_serial_node:
     device_name: "/dev/ttyACM0"
     baud_rate: 115200
     timestamp_offset: 0.0
-    diagnostic_log: true

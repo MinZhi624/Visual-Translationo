@@ -20,7 +20,6 @@ private:
     // ===== 装甲板跟踪器  ===== //
     Tracker tracker_;
     double max_lost_time_;
-    double mutation_yaw_threshold_;
     // ===== ROS 相关  ===== //
     rclcpp::Subscription<ArmorPlates>::SharedPtr armor_plates_sub_;
     rclcpp::Publisher<AimCommand>::SharedPtr aim_command_pub_;
@@ -33,7 +32,6 @@ private:
 
     // ===== DEBUG =====//
     bool debug_;
-    bool diagnostic_log_ = false;
     rclcpp::Publisher<TrackerDebug>::SharedPtr tracker_debug_pub_;
 
     void init();

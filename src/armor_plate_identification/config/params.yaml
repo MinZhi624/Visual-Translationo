@@ -2,19 +2,16 @@ test_node_cpp:
   ros__parameters:
     # === 目标颜色 ===
     target_color: "BLUE"
-    # === Test 虚拟云台角 ===
-    test_gimbal_yaw_deg: 0.0
-    test_gimbal_pitch_deg: 0.0
     # === 预处理参数 ===
     threshold_value: 100
     color_threshold: 100
     # === 灯条匹配参数 ===
-    max_angle_diff: 10.0
-    min_length_ratio: 0.8
+    max_angle_diff: 15.0
+    min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
-    max_y_diff_ratio: 0.8
+    max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
-    min_distance_ratio: 0.3
+    min_distance_ratio: 0.1
     # === 数字分类器参数 ===
     number_threshold: 0.5
     # === DEBUG ===
@@ -49,8 +46,8 @@ armor_plate_identification_node:
     exposure_time: 10000.0
     gain: 8.0
     # === 灯条匹配参数 ===
-    max_angle_diff: 10.0
-    min_length_ratio: 0.8
+    max_angle_diff: 15.0
+    min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
@@ -59,9 +56,8 @@ armor_plate_identification_node:
     number_threshold: 0.2
     # === DEBUG ===
     debug_timecontrol: true
-    debug_lights: true
+    debug_lights: false
     debug_preprocessing: false
     debug_number_classification: false
     delay_time: 0
-    stats_interval: 50
-    diagnostic_log: true
+    stats_interval: 100

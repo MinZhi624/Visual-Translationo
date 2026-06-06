@@ -68,9 +68,6 @@ private:
     GuiWorker gui_worker_;
     DebugTracker debug_tracker_{&pose_solver_, &gui_worker_};
     bool headless_ = false;
-    bool diagnostic_log_ = false;
-    double last_gimbal_match_diff_ms_ = 0.0;
-    size_t last_gimbal_history_size_ = 0;
 
     void init();
     void identification(cv::Mat& img_bgr);

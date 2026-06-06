@@ -135,7 +135,6 @@ void ArmorPlateIdentification::stopTrackerDebugWorker()
 void ArmorPlateIdentification::init()
 {
     target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
-    diagnostic_log_ = this->declare_parameter<bool>("diagnostic_log", false);
 
     initDetector();
 
@@ -205,11 +204,8 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
 void ArmorPlateIdentification::solvePose()
 {
     GimbalData gimbal;
-    double gimbal_match_diff_ms = 0.0;
-    size_t gimbal_history_size = 0;
     {
         std::lock_guard<std::mutex> lock(gimbal_mutex_);
-        gimbal_history_size = gimbal_history_.size();
         if (!gimbal_history_.empty()) {
             // 按图像时间戳在 gimbal history 中找最近值
             auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
@@ -223,7 +219,6 @@ void ArmorPlateIdentification::solvePose()
                     it = jt;
                 }
             }
-            gimbal_match_diff_ms = static_cast<double>(best_diff) / 1e6;
             gimbal.yaw_abs = it->yaw_abs;
             gimbal.pitch_abs = it->pitch_abs;
         } else {
@@ -233,15 +228,6 @@ void ArmorPlateIdentification::solvePose()
         }
     }
     matched_gimbal_ = gimbal;
-    last_gimbal_match_diff_ms_ = gimbal_match_diff_ms;
-    last_gimbal_history_size_ = gimbal_history_size;
-    if (diagnostic_log_) {
-        RCLCPP_INFO_THROTTLE(
-            this->get_logger(), *this->get_clock(), 500,
-            "[diag][ident] armors=%zu gimbal_dt=%.2fms yaw=%.4f pitch=%.4f history=%zu",
-            armors_.size(), last_gimbal_match_diff_ms_, matched_gimbal_.yaw_abs,
-            matched_gimbal_.pitch_abs, last_gimbal_history_size_);
-    }
     pose_solver_.solve(armors_, matched_gimbal_);
 }
 
