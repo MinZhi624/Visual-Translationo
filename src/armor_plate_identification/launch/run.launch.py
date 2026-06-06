@@ -13,7 +13,7 @@ def generate_launch_description():
 
     armor_plate_identification_node = Node(
         package="armor_plate_identification",
-        executable="ArmorPlateIdentifcation",
+        executable="ArmorPlateIdentification",
         output='screen',
         emulate_tty=True,
         parameters=[params_file]

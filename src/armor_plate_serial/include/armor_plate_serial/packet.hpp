@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <vector>
+#include <algorithm>
 // 数据结构
 typedef struct __attribute__((packed))
 {
@@ -20,3 +22,10 @@ typedef struct __attribute__((packed))
     int32_t pitch_actual_1e4rad;
     uint16_t crc16;
 } EcToVisionFrame_t;
+
+inline EcToVisionFrame_t EcToVisionfromVector(const std::vector<uint8_t> & origin_data) 
+{
+    EcToVisionFrame_t packet;
+    std::copy(origin_data.begin(), origin_data.end(), reinterpret_cast<uint8_t *>(&packet));
+    return packet;
+}

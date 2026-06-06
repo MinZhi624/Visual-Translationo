@@ -6,59 +6,58 @@ test_node_cpp:
     threshold_value: 100
     color_threshold: 100
     # === 灯条匹配参数 ===
-    max_angle_diff: 10.0
-    min_length_ratio: 0.8
-    min_x_diff_ratio: 0.75
-    max_y_diff_ratio: 0.8
-    max_distance_ratio: 0.8
-    min_distance_ratio: 0.3
-    # === 数字分类器参数 ===
-    model_path: "model/number_cnn.onnx"
-    label_path: "model/label_cnn.txt"
-    number_threshold: 0.2
-    ignore_labels: ["negative"]
-    # === DEBUG ===
-    debug_base: true
-    debug_preprocessing: true
-    debug_identification: true
-    debug_number_classification: true
-    # 正常
-    # debug_frame: false
-    # debug_frame_count: 0
-    # delay_time: 20
-    # 数字记录
-    debug_frame: true
-    debug_frame_count: 600
-    delay_time: 0
-
-armor_plate_identification_node:
-  ros__parameters:
-    # === 目标颜色 ===
-    target_color: "BLUE"
-    # === 相机类型 ===
-    # 迈德
-    camera_type: "mindvision"
-    exposure_time: 8000.0
-    gain: 8.0
-    # 大恒
-    # camera_type: "galaxy"
-    # exposure_time: 7000.0
-    # gain: 8.0
-    # === 灯条匹配参数 ===
-    max_angle_diff: 10.0
+    max_angle_diff: 15.0
     min_length_ratio: 0.7
     min_x_diff_ratio: 0.75
     max_y_diff_ratio: 1.0
     max_distance_ratio: 0.8
     min_distance_ratio: 0.1
     # === 数字分类器参数 ===
-    model_path: "model/number_cnn.onnx"
-    label_path: "model/label_cnn.txt"
-    number_threshold: 0.2
-    ignore_labels: ["negative"]
+    number_threshold: 0.5
     # === DEBUG ===
-    debug_base: true
-    debug_identification: false
+    debug_timecontrol: true
+    debug_lights: false
     debug_preprocessing: false
-    debug_number_classification: true
+    debug_number_classification: false
+    stats_interval: 50
+    # === 帧调试 ===
+    debug_frame: false
+    delay_time: 20 
+    debug_frame_count: 0
+    # === 记录模式 ===
+    # debug_frame: true
+    # delay_time: 0 
+    # debug_frame_count: 500
+
+armor_plate_identification_node:
+  ros__parameters:
+    # === 目标颜色 ===
+    target_color: "BLUE"
+    # === 预处理参数 ===
+    threshold_value: 100
+    color_threshold: 100
+    # === 相机类型 ===
+    # 迈德
+    # camera_type: "mindvision"
+    # exposure_time: 8000.0
+    # gain: 8.0
+    # 大恒
+    camera_type: "galaxy"
+    exposure_time: 10000.0
+    gain: 8.0
+    # === 灯条匹配参数 ===
+    max_angle_diff: 15.0
+    min_length_ratio: 0.7
+    min_x_diff_ratio: 0.75
+    max_y_diff_ratio: 1.0
+    max_distance_ratio: 0.8
+    min_distance_ratio: 0.1
+    # === 数字分类器参数 ===
+    number_threshold: 0.2
+    # === DEBUG ===
+    debug_timecontrol: true
+    debug_lights: false
+    debug_preprocessing: false
+    debug_number_classification: false
     delay_time: 0
+    stats_interval: 100

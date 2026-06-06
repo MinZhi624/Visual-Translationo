@@ -1,0 +1,80 @@
+#pragma once
+#include <opencv2/core.hpp>
+#include <builtin_interfaces/msg/time.hpp>
+#include <Eigen/Geometry>
+#include <vector>
+#include <armor_plate_interfaces/ArmorTypes.hpp>
+#include <armor_plate_interfaces/GimbalData.hpp>
+
+/** @brief 预处理调试图像数据 */
+struct PreprocessDebug {
+    cv::Mat blue_dim_thre;   // BLUE/RED 通道二值图
+    cv::Mat gray_thre;       // GRAY 通道二值图
+    cv::Mat merged_thre;     // 合并后二值图
+    std::vector<std::pair<cv::Rect, int>> fragment_info;  // 每个 color 区域的碎片数
+};
+
+
+/** @brief 灯条类 */
+class Light
+{
+public:
+	// 基本信息
+	cv::RotatedRect rect_; // ellipse_rect 用于画图
+	cv::Point2f center_;
+	cv::Point2f top_;
+	cv::Point2f bottom_;
+	double angle_;
+	double length_;
+	double width_;
+	int area_;
+	int id_ = -1;
+	Color color_;
+
+	Light() = default;
+	Light(cv::RotatedRect ellipse_rect, cv::RotatedRect min_rect, Color color);
+
+static Color getLightColor(const cv::Mat& img_bgr,const cv::RotatedRect& rect, const std::vector<cv::Point>& contour);
+};
+
+/** @brief 装甲板类 */
+class DetectorArmor
+{
+private:
+	static constexpr float DIST_RATIO_THRESH = 2.8f;  // 大/小装甲板分界阈值
+public:
+	// 基本信息
+	std::array<Light, 2> paired_lights_; 			// 按x轴从左到右排列的两个灯条
+	std::vector<cv::Point2f> image_points_; 		// 按照顺时针顺序排列的四个点
+	float image_distance_to_center_;
+
+	Eigen::Vector3d xyz_camera_; 		
+	Eigen::Vector3d ypr_camera_;
+	Eigen::Quaterniond q_camrea_armor_; 			
+	
+	Eigen::Vector3d xyz_world_;
+	Eigen::Vector3d ypr_world_;
+	Eigen::Quaterniond q_world_armor_;
+	// 数字识别信息
+	ArmorType type_;
+	ArmorName name_;
+    cv::Mat number_roi_; 	// 数字识别区域
+    cv::Mat pattern_;		// 去重
+	float confidence_;
+	// 匹配信息
+	double angle_diff_;
+	double length_ratio_;
+	double y_diff_ratio_;
+	double x_diff_ratio_;
+	double distance_ratio_;
+
+	DetectorArmor() = default;
+	DetectorArmor(Light& light_left, Light& light_right);
+};
+
+/** @brief 图像保存结构体 */
+struct Record{
+	builtin_interfaces::msg::Time img_stamp;
+	cv::Mat img;
+	GimbalData gimbal;
+};

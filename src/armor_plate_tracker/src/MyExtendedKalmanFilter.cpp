@@ -1,163 +1,387 @@
 #include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
+#include "armor_plate_common/angle.hpp"
+#include <armor_plate_common/geometry.hpp>
+
 #include <Eigen/Dense>
 
+#include <algorithm>
+#include <cmath>
+
+namespace apc = armor_plate_common;
+
+/*
+    EKF 状态定义:
+    state[0]  = x_c
+    state[1]  = v_x
+    state[2]  = y_c
+    state[3]  = v_y
+    state[4]  = z_c
+    state[5]  = v_z
+    state[6]  = yaw
+    state[7]  = omega
+    state[8]  = r
+    state[9]  = l
+    state[10] = h
+
+    x_c, y_c, z_c 是目标旋转中心。
+    yaw 是目标自转角。
+    omega 是目标自转角速度。
+    r 是 0/2 号装甲板半径。
+    r + l 是 1/3 号装甲板半径。
+    z_c + h 是 1/3 号装甲板高度。
+*/
 MyExtendedKalmanFilter::MyExtendedKalmanFilter()
 {
-    state_pre_ = Eigen::Vector<double, 9>::Zero();
-    state_post_ = Eigen::Vector<double, 9>::Zero();
+    state_ = Eigen::Vector<double, 11>::Zero();
 
-    error_cov_pre_ = Eigen::Matrix<double, 9, 9>::Identity();
-    error_cov_post_ = Eigen::Matrix<double, 9, 9>::Identity();
+    error_cov_ = Eigen::Matrix<double, 11, 11>::Identity();
 
-    state_transition_matrix_ = Eigen::Matrix<double, 9, 9>::Identity();
-    observation_jacobian_ = Eigen::Matrix<double, 4, 9>::Zero();
+    state_transition_matrix_ = Eigen::Matrix<double, 11, 11>::Identity();
+    observation_jacobian_ = Eigen::Matrix<double, 4, 11>::Zero();
 
-    process_noise_cov_ = Eigen::Matrix<double, 9, 9>::Zero();
+    process_noise_cov_ = Eigen::Matrix<double, 11, 11>::Zero();
     process_noise_cov_.diagonal() <<
-        0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0005, 0.001, 0.01;
-    
+        0.001, 0.01, 0.001, 0.01, 0.001, 0.01, 0.001, 0.01, 0.0, 0.0, 0.0;
+
     observation_noise_cov_ = Eigen::Matrix<double, 4, 4>::Zero();
     observation_noise_cov_.diagonal() <<
-        0.004, 0.004, 0.001, 0.01;
+        4e-3, 4e-3, 1, 9e-2;
 
-    kalman_gain_ = Eigen::Matrix<double, 9, 4>::Zero();
+    kalman_gain_ = Eigen::Matrix<double, 11, 4>::Zero();
     origin_observation_ = Eigen::Vector<double, 4>::Zero();
     filtered_observation_ = Eigen::Vector<double, 4>::Zero();
 }
 
 void MyExtendedKalmanFilter::initialize(
-    const Eigen::Vector<double, 9>& state_pre,
-    const Eigen::Matrix<double, 9, 9>& error_cov_pre)
+    const Eigen::Vector<double, 11>& state,
+    const Eigen::Matrix<double, 11, 11>& error_cov)
 {
-    state_pre_ = state_pre;
-    state_post_ = state_pre;
-    error_cov_pre_ = error_cov_pre;
-    error_cov_post_ = error_cov_pre;
+    state_ = state;
+    error_cov_ = error_cov;
 }
 
 void MyExtendedKalmanFilter::predict()
 {
-    state_pre_ = state_transition_matrix_ * state_post_;
-    error_cov_pre_ = state_transition_matrix_ * error_cov_post_ * state_transition_matrix_.transpose()
-                   + process_noise_cov_;
-    
-    // 先验 yaw 归一化到 [-π, π]，防止 predict 后角度越界
-    while (state_pre_[7] > M_PI) state_pre_[7] -= 2.0 * M_PI;
-    while (state_pre_[7] < -M_PI) state_pre_[7] += 2.0 * M_PI;
+    /*
+        预测方程如下:
+        x_c^k     = x_c^{k-1} + v_x^{k-1} * dt
+        v_x^k     = v_x^{k-1}
+        y_c^k     = y_c^{k-1} + v_y^{k-1} * dt
+        v_y^k     = v_y^{k-1}
+        z_c^k     = z_c^{k-1} + v_z^{k-1} * dt
+        v_z^k     = v_z^{k-1}
+        yaw^k     = yaw^{k-1} + omega^{k-1} * dt
+        omega^k   = omega^{k-1}
+        r^k       = r^{k-1}
+        l^k       = l^{k-1}
+        h^k       = h^{k-1}
+    */
+    state_ = state_transition_matrix_ * state_;
+    error_cov_ = state_transition_matrix_ * error_cov_ * state_transition_matrix_.transpose()
+               + process_noise_cov_;
+
+    state_[6] = apc::normalizeRadAngle(state_[6]);
 }
 
-Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement)
+Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement, int armor_id)
 {
-    // 保存原始观测值
+    armor_id_ = armor_id;
     origin_observation_ = measurement;
+    observation_jacobian_ = calculateObservationJacobian();
 
-    // 1. 在 state_pre_ 处计算观测雅可比 H
-    calculateObservationJacobian();
+    /*
+        自适应 R 矩阵:
+        核心原因，当装甲板侧过来的时候，位姿解算会不准，详细看Compare/Identification里面的图片.
+        会呈现出来椭圆的的现象。尤其是当我角点识别不好的preprocess的情况下  
+        z[0] = yaw_to_armor
+        z[1] = pitch_to_armor
+        z[2] = distance_to_armor
+        z[3] = armor_yaw
 
-    // 2. 计算观测预测值 h(x_pre)
-    Eigen::Vector<double, 4> predicted_obs;
-    measurementFunction(state_pre_, predicted_obs);
+        delta_angle = armor_yaw - yaw_to_armor
+        R_yaw      = 4e-3
+        R_pitch    = 4e-3
+        R_distance = log(abs(delta_angle) + 1) + 1
+        R_angle    = log(abs(distance_to_armor) + 1) / 200 + 9e-2
+    */
+    double delta_angle = apc::normalizeRadAngle(measurement[3] - measurement[0]);
+    observation_noise_cov_.diagonal() <<
+        4e-3,
+        4e-3,
+        std::log(std::abs(delta_angle) + 1.0) + 1.0,
+        std::log(std::abs(measurement[2]) + 1.0) / 200.0 + 9e-2;
 
-    // 3. 计算卡尔曼增益 K = P_pre * H^T * (H * P_pre * H^T + R)^(-1)
-    kalman_gain_ = error_cov_pre_ * observation_jacobian_.transpose()
-                 * (observation_jacobian_ * error_cov_pre_ * observation_jacobian_.transpose()
-                    + observation_noise_cov_).inverse();
+    auto predicted_obs = measurementFunction();
+    Eigen::Matrix<double, 4, 4> innovation_cov =
+        observation_jacobian_ * error_cov_ * observation_jacobian_.transpose()
+        + observation_noise_cov_;
 
-    // 4. 计算残差并更新后验状态
+    kalman_gain_ = error_cov_ * observation_jacobian_.transpose() * innovation_cov.inverse();
+
     Eigen::Vector<double, 4> residual = measurement - predicted_obs;
-    
-    // yaw 残差归一化：处理 -π/π 跳变，避免 179° 与 -179° 的差被算成 358°
-    while (residual[3] > M_PI) residual[3] -= 2.0 * M_PI;
-    while (residual[3] < -M_PI) residual[3] += 2.0 * M_PI;
-    
-    state_post_ = state_pre_ + kalman_gain_ * residual;
+    // yaw pitch与 armor_yaw 是角度量，残差必须落回 [-pi, pi]，避免跨 pi 时跳变。
+    residual[0] = apc::normalizeRadAngle(residual[0]);
+    residual[1] = apc::normalizeRadAngle(residual[1]);
+    residual[3] = apc::normalizeRadAngle(residual[3]);
 
-    // 5. 状态值硬约束与角度归一化
-    checkValue();
+    state_ = state_ + kalman_gain_ * residual;
+    state_[6] = apc::normalizeRadAngle(state_[6]);
 
-    // 6. 更新后验误差协方差 P_post = (I - K * H) * P_pre
-    Eigen::Matrix<double, 9, 9> identity = Eigen::Matrix<double, 9, 9>::Identity();
-    error_cov_post_ = (identity - kalman_gain_ * observation_jacobian_) * error_cov_pre_;
+    /*
+        Joseph stabilized covariance update。
+        原本的 P = (I - K * H) * P
+        
+        容易 P 浮点数计算不稳定，可能会破坏对称性
+        但是 APA^T 更新方法更容易保持对称性
+    */
+    Eigen::Matrix<double, 11, 11> identity = Eigen::Matrix<double, 11, 11>::Identity();
+    Eigen::Matrix<double, 11, 11> temp = identity - kalman_gain_ * observation_jacobian_;
+    error_cov_ = temp * error_cov_ * temp.transpose()
+               + kalman_gain_ * observation_noise_cov_ * kalman_gain_.transpose();
 
-    // 7. 计算滤波后的观测值
-    measurementFunction(state_post_, filtered_observation_);
+    filtered_observation_ = measurementFunction();
+    // 卡方检验
+    // NIS = residual^T * S^-1 * residual
+    double nis = residual.transpose() * innovation_cov.inverse() * residual;
+    if (nis > NIS_THRESHOLD) nis_failures_.push_back(1);
+    else nis_failures_.push_back(0);
+
+    if (nis_failures_.size() > NIS_WINDOW_SIZE) nis_failures_.pop_front();
 
     return filtered_observation_;
+}
+
+void MyExtendedKalmanFilter::updateProcessNoiseCov(const double & dt)
+{
+    /*
+        分段白噪声加速度模型如下:
+        Q11 = dt^4 / 4
+        Q12 = dt^3 / 2
+        Q21 = dt^3 / 2
+        Q22 = dt^2
+
+        x/v_x 使用平动加速度方差 a_var。
+        y/v_y 使用平动加速度方差 a_var。
+        z/v_z 使用平动加速度方差 a_var。
+        yaw/omega 使用角加速度方差 yaw_a_var。
+    */
+    const double safe_dt = std::max(0.0, dt);
+    const double a_var = 2000.0;
+    const double yaw_a_var = 1600.0;
+
+    const double Q11 = safe_dt * safe_dt * safe_dt * safe_dt / 4.0;
+    const double Q12 = safe_dt * safe_dt * safe_dt / 2.0;
+    const double Q21 = safe_dt * safe_dt * safe_dt / 2.0;
+    const double Q22 = safe_dt * safe_dt;
+
+    process_noise_cov_ <<
+        a_var * Q11, a_var * Q12,           0,           0,           0,           0,               0,               0, 0, 0, 0,
+        a_var * Q21, a_var * Q22,           0,           0,           0,           0,               0,               0, 0, 0, 0,
+                  0,           0, a_var * Q11, a_var * Q12,           0,           0,               0,               0, 0, 0, 0,
+                  0,           0, a_var * Q21, a_var * Q22,           0,           0,               0,               0, 0, 0, 0,
+                  0,           0,           0,           0, a_var * Q11, a_var * Q12,               0,               0, 0, 0, 0,
+                  0,           0,           0,           0, a_var * Q21, a_var * Q22,               0,               0, 0, 0, 0,
+                  0,           0,           0,           0,           0,           0, yaw_a_var * Q11, yaw_a_var * Q12, 0, 0, 0,
+                  0,           0,           0,           0,           0,           0, yaw_a_var * Q21, yaw_a_var * Q22, 0, 0, 0,
+                  0,           0,           0,           0,           0,           0,               0,               0, 0, 0, 0,
+                  0,           0,           0,           0,           0,           0,               0,               0, 0, 0, 0,
+                  0,           0,           0,           0,           0,           0,               0,               0, 0, 0, 0;
 }
 
 void MyExtendedKalmanFilter::updateStateTransitionMatrix(const double& dt)
 {
     /*
-        方程如下:  都是线性的
-        x^k = x^{k-1} + v^{k-1}_x * dt 
-        y^k = y^{k-1} + v^{k-1}_y * dt
-        Z^k = Z^{k-1} + v^{k-1}_z * dt
-        v^k_x = v^{k-1}_x
-        v^k_y = v^{k-1}_y
-        v^k_z = v^{k-1}_z 
-        r^k = r^{k-1}
-        yaw^k = yaw^{k-1} + v^{k-1}_yaw * dt
-        v^k_yaw = v^{k-1}_yaw
+        状态转移矩阵对应的方程如下:
+        x_c^k     = x_c^{k-1} + v_x^{k-1} * dt
+        v_x^k     = v_x^{k-1}
+        y_c^k     = y_c^{k-1} + v_y^{k-1} * dt
+        v_y^k     = v_y^{k-1}
+        z_c^k     = z_c^{k-1} + v_z^{k-1} * dt
+        v_z^k     = v_z^{k-1}
+        yaw^k     = yaw^{k-1} + omega^{k-1} * dt
+        omega^k   = omega^{k-1}
+        r^k       = r^{k-1}
+        l^k       = l^{k-1}
+        h^k       = h^{k-1}
     */
-    state_transition_matrix_ << 
-        1, 0, 0, dt, 0, 0, 0, 0, 0,
-        0, 1, 0, 0, dt, 0, 0, 0, 0,
-        0, 0, 1, 0, 0, dt, 0, 0, 0,
-        0, 0, 0, 1, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 1, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 1, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 1, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1, dt,
-        0, 0, 0, 0, 0, 0, 0, 0, 1;
+    state_transition_matrix_ <<
+        1, dt, 0,  0, 0,  0, 0,  0, 0, 0, 0,
+        0,  1, 0,  0, 0,  0, 0,  0, 0, 0, 0,
+        0,  0, 1, dt, 0,  0, 0,  0, 0, 0, 0,
+        0,  0, 0,  1, 0,  0, 0,  0, 0, 0, 0,
+        0,  0, 0,  0, 1, dt, 0,  0, 0, 0, 0,
+        0,  0, 0,  0, 0,  1, 0,  0, 0, 0, 0,
+        0,  0, 0,  0, 0,  0, 1, dt, 0, 0, 0,
+        0,  0, 0,  0, 0,  0, 0,  1, 0, 0, 0,
+        0,  0, 0,  0, 0,  0, 0,  0, 1, 0, 0,
+        0,  0, 0,  0, 0,  0, 0,  0, 0, 1, 0,
+        0,  0, 0,  0, 0,  0, 0,  0, 0, 0, 1;
 }
 
-void MyExtendedKalmanFilter::calculateObservationJacobian()
+Eigen::Matrix<double, 4, 11> MyExtendedKalmanFilter::calculateObservationJacobian()
 {
     /*
-        方程如下:
-        1, 0, 0, 0, 0, 0, sin(yaw), rcos(yaw) , 0,
-        0, 1, 0, 0, 0, 0, -cos(yaw), rsin(yaw), 0,
-        0, 0, 1, 0, 0, 0, 0,      , 0         , 0,
-        0, 0, 0, 0, 0, 0, 0,      , 1         , 0,
+        观测雅可比链式法则如下:
+        H = d(ypda) / d(state)
+        H = d(ypda) / d(xyza) * d(xyza) / d(state)
     */
-    observation_jacobian_ <<
-        1, 0, 0, 0, 0, 0, std::sin(state_pre_[7]),  state_pre_[6] * std::cos(state_pre_[7]), 0,
-        0, 1, 0, 0, 0, 0, -std::cos(state_pre_[7]), state_pre_[6] * std::sin(state_pre_[7]), 0,
-        0, 0, 1, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1, 0;
+    auto xyza_state_jacobian = calculateStateToXYZAJacobian(state_, armor_id_);
+    auto xyza_armor = measurementFunctionStateToXYZA(state_, armor_id_);
+    auto ypda_xyza_jacobian = calculateXYZAToYPDAJacobian(xyza_armor);
+    return ypda_xyza_jacobian * xyza_state_jacobian;
 }
 
-void MyExtendedKalmanFilter::measurementFunction(
-    const Eigen::Vector<double, 9>& state,
-    Eigen::Vector<double, 4>& observation)
+Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunction()
 {
-    /*  
-        方程如下:
-        x = x_c + r *sin(yaw)
-        y = y_c - r * cos(yaw)
-        z = z
-        yaw = yaw
+    auto xyza_state = measurementFunctionStateToXYZA(state_, armor_id_);
+    auto ypda_xyza = measurementFunctionXYZAToYPDA(xyza_state);
+    return ypda_xyza;
+}
+
+Eigen::Matrix<double, 4, 11> MyExtendedKalmanFilter::calculateStateToXYZAJacobian(
+    const Eigen::Vector<double, 11>& state, int armor_id)
+{
+    /*
+        装甲板几何模型如下:
+        angle_i = yaw + i * PI / 2
+        id = 0 或 id = 2 时 radius = r
+        id = 1 或 id = 3 时 radius = r + l
+        id = 0 或 id = 2 时 armor_z = z_c
+        id = 1 或 id = 3 时 armor_z = z_c + h
+        armor_x = x_c - radius * cos(angle_i)
+        armor_y = y_c - radius * sin(angle_i)
+        armor_angle = angle_i
+
+        对 state 的雅可比关系如下:
+        d armor_x / d x_c = 1
+        d armor_x / d yaw = radius * sin(angle_i)
+        d armor_x / d r = -cos(angle_i)
+        d armor_x / d l = -cos(angle_i), 仅 id = 1 或 id = 3 时成立
+        d armor_y / d y_c = 1
+        d armor_y / d yaw = -radius * cos(angle_i)
+        d armor_y / d r = -sin(angle_i)
+        d armor_y / d l = -sin(angle_i), 仅 id = 1 或 id = 3 时成立
+        d armor_z / d z_c = 1
+        d armor_z / d h = 1, 仅 id = 1 或 id = 3 时成立
+        d armor_angle / d yaw = 1
     */
+    Eigen::Matrix<double, 4, 11> xyza_state_jacobian = Eigen::Matrix<double, 4, 11>::Zero();
+
+    double car_yaw = state[6] + armor_id * M_PI / 2.0;
+    bool use_l_h = (armor_id == 1 || armor_id == 3);
+    double radius = use_l_h ? state[8] + state[9] : state[8];
+
+    double cos_yaw = std::cos(car_yaw);
+    double sin_yaw = std::sin(car_yaw);
+
+    xyza_state_jacobian <<
+        1, 0, 0, 0, 0, 0,  radius * sin_yaw, 0, -cos_yaw, use_l_h ? -cos_yaw : 0.0,                    0,
+        0, 0, 1, 0, 0, 0, -radius * cos_yaw, 0, -sin_yaw, use_l_h ? -sin_yaw : 0.0,                    0,
+        0, 0, 0, 0, 1, 0,                 0, 0,        0,                        0, use_l_h ? 1.0 : 0.0,
+        0, 0, 0, 0, 0, 0,                 1, 0,        0,                        0,                    0;
+
+    return xyza_state_jacobian;
+}
+
+Eigen::Matrix4d MyExtendedKalmanFilter::calculateXYZAToYPDAJacobian(const Eigen::Vector<double, 4> & xyza)
+{
+    /*
+        xyza -> ypda 方程如下:
+        yaw = atan2(y, x)
+        pitch = atan2(z, sqrt(x^2 + y^2))
+        distance = sqrt(x^2 + y^2 + z^2)
+        armor_yaw = angle
+
+        对 xyza 的雅可比关系如下:
+        d yaw / d x = -y / (x^2 + y^2)
+        d yaw / d y = x / (x^2 + y^2)
+        d yaw / d z = 0
+        d pitch / d x = -(x * z) / ((x^2 + y^2 + z^2) * sqrt(x^2 + y^2))
+        d pitch / d y = -(y * z) / ((x^2 + y^2 + z^2) * sqrt(x^2 + y^2))
+        d pitch / d z = sqrt(x^2 + y^2) / (x^2 + y^2 + z^2)
+        d distance / d x = x / distance
+        d distance / d y = y / distance
+        d distance / d z = z / distance
+        d armor_yaw / d angle = 1
+    */
+    double x = xyza[0];
+    double y = xyza[1];
+    double z = xyza[2];
+
+    double xy2 = x * x + y * y;
+    double xy_norm = std::sqrt(xy2);
+    double dist2 = xy2 + z * z;
+    double dist = std::sqrt(dist2);
+
+    Eigen::Matrix4d jacobian = Eigen::Matrix4d::Zero();
+    if (xy2 < 1e-9 || dist2 < 1e-9) {
+        jacobian(3, 3) = 1.0;
+        return jacobian;
+    }
+
+    double dyaw_dx = -y / xy2;
+    double dyaw_dy = x / xy2;
+
+    double dpitch_dx = -(x * z) / (dist2 * xy_norm);
+    double dpitch_dy = -(y * z) / (dist2 * xy_norm);
+    double dpitch_dz = xy_norm / dist2;
+
+    double ddistance_dx = x / dist;
+    double ddistance_dy = y / dist;
+    double ddistance_dz = z / dist;
+
+    jacobian <<
+        dyaw_dx,      dyaw_dy,      0.0,           0.0,
+        dpitch_dx,    dpitch_dy,    dpitch_dz,     0.0,
+        ddistance_dx, ddistance_dy, ddistance_dz,  0.0,
+        0.0,          0.0,          0.0,           1.0;
+    return jacobian;
+}
+
+Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionStateToXYZA(
+    const Eigen::Vector<double, 11>& state, int armor_id)
+{
     double x_c = state[0];
-    double y_c = state[1];
-    double z_c = state[2];
-    double r = state[6];
-    double yaw = state[7];
+    double y_c = state[2];
+    double z_c = state[4];
+    double yaw = state[6];
+    double r = state[8];
+    double l = state[9];
+    double h = state[10];
 
+    /*
+        h_state_to_xyza(state, armor_id) 方程如下:
+        car_yaw = yaw + armor_id * PI / 2
+        id = 0 或 id = 2 时 radius = r
+        id = 1 或 id = 3 时 radius = r + l
+        id = 0 或 id = 2 时 armor_z = z_c
+        id = 1 或 id = 3 时 armor_z = z_c + h
+        armor_x = x_c - radius * cos(car_yaw)
+        armor_y = y_c - radius * sin(car_yaw)
+        armor_angle = car_yaw
+    */
+    double car_yaw = yaw + armor_id * M_PI / 2.0;
+    bool use_l_h = (armor_id == 1 || armor_id == 3);
+    double radius = use_l_h ? r + l : r;
+    double armor_z = use_l_h ? z_c + h : z_c;
+
+    Eigen::Vector<double, 4> observation;
     observation <<
-        x_c + r * std::sin(yaw),
-        y_c - r * std::cos(yaw),
-        z_c,
-        yaw;
+        x_c - radius * std::cos(car_yaw),
+        y_c - radius * std::sin(car_yaw),
+        armor_z,
+        apc::normalizeRadAngle(car_yaw);
+    return observation;
 }
 
-void MyExtendedKalmanFilter::checkValue()
+Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionXYZAToYPDA(const Eigen::Vector<double, 4>& xyza)
 {
-    // r 硬限制在 [0.12, 0.4]
-    if (state_post_[6] < 0.12) state_post_[6] = 0.12;
-    if (state_post_[6] > 0.4)  state_post_[6] = 0.4;
-    
-    // yaw 归一化到 [-π, π]
-    while (state_post_[7] > M_PI) state_post_[7] -= 2.0 * M_PI;
-    while (state_post_[7] < -M_PI) state_post_[7] += 2.0 * M_PI;
+    Eigen::Vector3d xyz = xyza.head<3>();
+    Eigen::Vector3d ypd = apc::calculateYPD(xyz);
+    return {
+        ypd.x(),
+        ypd.y(),
+        ypd.z(),
+        apc::normalizeRadAngle(xyza[3])
+    };
 }

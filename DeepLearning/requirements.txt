@@ -1,0 +1,7 @@
+numpy==1.23.5
+onnx==1.13.0
+onnx_simplifier==0.3.7
+onnxsim==0.4.10
+opencv_python==4.5.5.64
+torch==1.10.0+cu113
+torch==1.11.0

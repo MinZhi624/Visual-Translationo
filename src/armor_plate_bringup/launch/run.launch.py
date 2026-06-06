@@ -32,7 +32,7 @@ def generate_launch_description():
 
     identification_node = Node(
         package='armor_plate_identification',
-        executable='ArmorPlateIdentifcation',
+        executable='ArmorPlateIdentification',
         output='screen',
         emulate_tty=True,
         parameters=[identification_node_params_file]

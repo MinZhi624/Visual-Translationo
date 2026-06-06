@@ -14,16 +14,18 @@ find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
+find_package(armor_plate_common REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(camera_info_manager REQUIRED)
-find_package(tf2_ros REQUIRED)
 find_package(visualization_msgs REQUIRED)
 
 add_executable(armor_plate_tracker_node
   src/ArmorPlateTracker.cpp
   src/MyExtendedKalmanFilter.cpp
   src/Tracker.cpp
+  src/Target.cpp
   src/DebugTracker.cpp
+  src/CoordinateTransformer.cpp
 )
 
 target_include_directories(armor_plate_tracker_node PUBLIC
@@ -45,9 +47,9 @@ ament_target_dependencies(
   "OpenCV"
   "Eigen3"
   "armor_plate_interfaces"
+  "armor_plate_common"
   "image_transport"
   "camera_info_manager"
-  "tf2_ros"
   "visualization_msgs"
 )
 

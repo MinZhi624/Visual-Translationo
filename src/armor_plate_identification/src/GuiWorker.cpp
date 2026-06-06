@@ -1,0 +1,91 @@
+#include "armor_plate_identification/GuiWorker.hpp"
+#include "armor_plate_identification/DetectorArmor.hpp"
+
+#include <opencv2/imgproc.hpp>
+
+void GuiWorker::drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors)
+{
+    for (const auto& armor : armors) {
+        cv::line(img, armor.image_points_[0], armor.image_points_[2], cv::Scalar(255, 0, 255), 2);
+        cv::line(img, armor.image_points_[1], armor.image_points_[3], cv::Scalar(255, 0, 255), 2);
+    }
+}
+
+void GuiWorker::drawRotatedRect(cv::Mat& img, const cv::RotatedRect& rect, const cv::Scalar& color, int thickness)
+{
+    cv::Point2f vertices[4];
+    rect.points(vertices);
+    for (int i = 0; i < 4; i++) {
+        cv::line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
+    }
+}
+
+void GuiWorker::drawRotatedRect(cv::Mat& img, const cv::Point2f& p1, const cv::Point2f& p2, const cv::Point2f& p3, const cv::Point2f& p4, const cv::Scalar& color, int thickness)
+{
+    cv::line(img, p1, p2, color, thickness);
+    cv::line(img, p2, p3, color, thickness);
+    cv::line(img, p3, p4, color, thickness);
+    cv::line(img, p4, p1, color, thickness);
+}
+
+void GuiWorker::start()
+{
+    if (running_.load()) return;
+    running_ = true;
+    last_action_ = KeyAction::None;
+    last_raw_key_ = -1;
+    thread_ = std::thread(&GuiWorker::loop, this);
+}
+
+void GuiWorker::stop()
+{
+    if (!running_.load()) return;
+    running_ = false;
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
+
+void GuiWorker::pushFrame(const std::string& window_name, const cv::Mat& img)
+{
+    std::lock_guard<std::mutex> lock(frames_mutex_);
+    if (img.empty()) return;
+    frames_[window_name] = img.clone();
+}
+
+KeyEvent GuiWorker::consumeKey()
+{
+    KeyAction action = last_action_.exchange(KeyAction::None);
+    int raw = last_raw_key_.exchange(-1);
+    return KeyEvent{action, raw};
+}
+
+void GuiWorker::loop()
+{
+    while (running_.load()) {
+        {
+            std::lock_guard<std::mutex> lock(frames_mutex_);
+            for (const auto& [name, img] : frames_) {
+                if (!img.empty()) {
+                    cv::imshow(name, img);
+                }
+            }
+        }
+
+        int key = cv::waitKey(1);
+        if (key != -1) {
+            if (key == 27 || key == 'q' || key == 'Q') {
+                last_action_ = KeyAction::Exit;
+            } else if (key == 'p' || key == 'P') {
+                last_action_ = KeyAction::Pause;
+            } else if (key == '+' || key == '-' || key == '_' || key == '=' ||
+                       key == 's' || key == 'S') {
+                last_action_ = KeyAction::Processed;
+            } else {
+                last_action_ = KeyAction::None;
+            }
+            last_raw_key_ = key;
+        }
+    }
+    cv::destroyAllWindows();
+}

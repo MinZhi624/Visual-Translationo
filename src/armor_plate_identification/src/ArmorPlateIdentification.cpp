@@ -1,0 +1,367 @@
+#include "armor_plate_identification/ArmorPlateIdentification.hpp"
+
+void ArmorPlateIdentification::run()
+{
+    if (!headless_) {
+        gui_worker_.start();
+    }
+
+    RCLCPP_INFO(this->get_logger(), "开始图像处理循环");
+    int fail_count = 0;
+    while (rclcpp::ok()) {
+        cv::Mat frame = camera_driver_.Read();
+        read_stamp_ = this->now();
+        if (frame.empty()) {
+            fail_count++;
+            if (fail_count > 5) {
+                RCLCPP_FATAL(this->get_logger(), "Camera read failed!");
+                gui_worker_.stop();
+                rclcpp::shutdown();
+            }
+            continue;
+        }
+        fail_count = 0;
+        img_show_ = frame;
+        debug_base_.onFrameStart();
+
+        identification(frame);
+        solvePose();
+        publish();
+        save();
+        show();
+
+        debug_base_.onFrameEnd();
+
+        KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
+        if (control(event)) break;
+    }
+    gui_worker_.stop();
+}
+
+bool ArmorPlateIdentification::control(const KeyEvent& event)
+{
+    debug_base_.control(event);
+
+    if (event.action == KeyAction::Exit) {
+        return true;
+    }
+
+    if (event.action == KeyAction::Pause && !headless_) {
+        RCLCPP_INFO(this->get_logger(), "暂停，按任意键继续...");
+        while (rclcpp::ok()) {
+            auto pause_event = gui_worker_.consumeKey();
+            if (pause_event.action != KeyAction::None) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    if (debug_base_.isDebugTimeControl()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(debug_base_.getDelayTimeMs()));
+    }
+
+    return false;
+}
+
+void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
+{
+    {
+        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
+        tracker_debug_msgs_.clear();
+        tracker_debug_msgs_.push_back(msg);
+    }
+    tracker_debug_cv_.notify_one();
+}
+
+void ArmorPlateIdentification::processTrackerDebug(const TrackerDebug::SharedPtr msg)
+{
+    std::deque<Record> images_buffs;
+    {
+        std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
+        if (img_buffs_.empty()) return;
+        images_buffs = img_buffs_;
+    }
+    auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
+    int64_t msg_ns = to_ns(msg->header.stamp);
+    // 最近邻匹配
+    auto it = images_buffs.begin();
+    int64_t best_diff = std::abs(to_ns(it->img_stamp) - msg_ns);
+    for (auto jt = std::next(it); jt != images_buffs.end(); ++jt) {
+        int64_t diff = std::abs(to_ns(jt->img_stamp) - msg_ns);
+        if (diff < best_diff) {
+            best_diff = diff;
+            it = jt;
+        }
+    }
+    if (best_diff > 50000000) return;  // 超过 50ms 放弃
+
+    cv::Mat debug_img = it->img.clone();
+
+    debug_tracker_.drawTragetPoints(debug_img, *msg, it->gimbal);
+    debug_tracker_.drawPredictedCar(debug_img, *msg, it->gimbal);
+
+    if (!headless_) {
+        debug_tracker_.pushTrackerDebugFrame(debug_img);
+    }
+}
+
+void ArmorPlateIdentification::trackerDebugWorker()
+{
+    while (rclcpp::ok()) {
+        TrackerDebug::SharedPtr msg;
+        {
+            std::unique_lock<std::mutex> lock(tracker_debug_queue_mutex_);
+            tracker_debug_cv_.wait(lock, [this]() {
+                return !tracker_debug_worker_running_ || !tracker_debug_msgs_.empty();
+            });
+            if (!tracker_debug_worker_running_ && tracker_debug_msgs_.empty()) return;
+            msg = tracker_debug_msgs_.back();
+            tracker_debug_msgs_.clear();
+        }
+        if (msg) processTrackerDebug(msg);
+    }
+}
+
+void ArmorPlateIdentification::stopTrackerDebugWorker()
+{
+    {
+        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
+        tracker_debug_worker_running_ = false;
+        tracker_debug_msgs_.clear();
+    }
+    tracker_debug_cv_.notify_all();
+    if (tracker_debug_thread_.joinable()) tracker_debug_thread_.join();
+}
+
+void ArmorPlateIdentification::init()
+{
+    target_color_ = this->declare_parameter<std::string>("target_color", "BLUE");
+
+    initDetector();
+
+    armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", rclcpp::SensorDataQoS());
+
+    gimbal_angle_sub_ = this->create_subscription<GimbalAngle>(
+        "gimbal_angle", rclcpp::SensorDataQoS(),
+        [this](const GimbalAngle::SharedPtr msg) {
+            std::lock_guard<std::mutex> lock(gimbal_mutex_);
+            gimbal_data_.stamp = msg->stamp;
+            gimbal_data_.yaw_abs = msg->yaw_abs;
+            gimbal_data_.pitch_abs = msg->pitch_abs;
+            // 同步更新 GimbalData 用于后续传递
+            matched_gimbal_.yaw_abs = msg->yaw_abs;
+            matched_gimbal_.pitch_abs = msg->pitch_abs;
+            gimbal_history_.push_back(gimbal_data_);
+            // 保留最近 50 个
+            if (gimbal_history_.size() > 50) gimbal_history_.pop_front();
+        }
+    );
+
+    camera_type_ = this->declare_parameter<std::string>("camera_type", "galaxy");
+    double exposure_time = this->declare_parameter<double>("exposure_time", 3500.0);
+    double gain = this->declare_parameter<double>("gain", 1.0);
+    if (!camera_driver_.init(camera_type_, exposure_time, gain)) {
+        RCLCPP_FATAL(this->get_logger(), "相机初始化失败，程序退出");
+        rclcpp::shutdown();
+        return;
+    }
+
+    initPoseSolver();
+    initDebug();
+
+    tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
+        "tracker_debug", 10,
+        std::bind(&ArmorPlateIdentification::trackerDebugCallBack, this, std::placeholders::_1)
+    );
+    tracker_debug_worker_running_ = true;
+    tracker_debug_thread_ = std::thread(&ArmorPlateIdentification::trackerDebugWorker, this);
+
+    RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s", camera_type_.c_str());
+    RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
+    if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
+    if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
+}
+
+void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
+{
+    cv::Mat img_thre = lights_.preprocess(img_bgr);
+    debug_base_.mark("preprocess");
+
+    lights_.detectArmors(img_thre, img_bgr);
+    GuiWorker::drawArmors(img_show_, lights_.getArmors());
+    debug_base_.mark("detectArmors");
+
+    armors_ = lights_.getArmors();
+
+    if (debug_base_.isRecordingRois()) {
+        debug_base_.feedRejected(lights_.getRejectedNumberRois());
+    }
+
+    debug_base_.debugLights(lights_.getLights());
+    debug_base_.debugNumberClassification(lights_.getArmors());
+    debug_base_.debugPreprocessing(img_bgr, lights_.getPreprocessDebug());
+}
+
+void ArmorPlateIdentification::solvePose()
+{
+    GimbalData gimbal;
+    {
+        std::lock_guard<std::mutex> lock(gimbal_mutex_);
+        if (!gimbal_history_.empty()) {
+            // 按图像时间戳在 gimbal history 中找最近值
+            auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
+            int64_t image_ns = to_ns(read_stamp_);
+            auto it = gimbal_history_.begin();
+            int64_t best_diff = std::abs(to_ns(it->stamp) - image_ns);
+            for (auto jt = std::next(it); jt != gimbal_history_.end(); ++jt) {
+                int64_t diff = std::abs(to_ns(jt->stamp) - image_ns);
+                if (diff < best_diff) {
+                    best_diff = diff;
+                    it = jt;
+                }
+            }
+            gimbal.yaw_abs = it->yaw_abs;
+            gimbal.pitch_abs = it->pitch_abs;
+        } else {
+            // 用最新值
+            gimbal.yaw_abs = gimbal_data_.yaw_abs;
+            gimbal.pitch_abs = gimbal_data_.pitch_abs;
+        }
+    }
+    matched_gimbal_ = gimbal;
+    pose_solver_.solve(armors_, matched_gimbal_);
+}
+
+void ArmorPlateIdentification::publish()
+{
+    ArmorPlates armor_plates_msg;
+    armor_plates_msg.header.stamp = read_stamp_;
+    armor_plates_msg.header.frame_id = "camera_link";
+    armor_plates_msg.armor_plates.reserve(armors_.size());
+    for (const auto& armor : armors_) {
+        ArmorPlate armor_plate;
+        armor_plate.x_world = armor.xyz_world_.x();
+        armor_plate.y_world = armor.xyz_world_.y();
+        armor_plate.z_world = armor.xyz_world_.z();
+        armor_plate.yaw_world = armor.ypr_world_.x();
+        armor_plate.number = static_cast<int>(armor.name_);
+        armor_plate.image_distance_to_center = armor.image_distance_to_center_;
+        armor_plates_msg.armor_plates.push_back(armor_plate);
+    }
+    armor_plates_msg.gimbal_yaw_abs = matched_gimbal_.yaw_abs;
+    armor_plates_msg.gimbal_pitch_abs = matched_gimbal_.pitch_abs;
+    armor_plates_pub_->publish(armor_plates_msg);
+}
+
+void ArmorPlateIdentification::save()
+{
+    debug_base_.save();
+
+    {
+        std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
+        img_buffs_.push_back({read_stamp_, img_show_, matched_gimbal_});
+        if (img_buffs_.size() > 50) img_buffs_.pop_front();
+    }
+}
+
+void ArmorPlateIdentification::show()
+{
+    debug_base_.draw(img_show_);
+
+    if (!headless_) {
+        cv::Mat show_img;
+        cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
+        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, show_img);
+    }
+
+    debug_base_.show();
+    auto frames = debug_base_.getDisplayFrames();
+    for (const auto& [name, img] : frames) {
+        gui_worker_.pushFrame(name, img);
+    }
+}
+
+ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identification_node"), camera_driver_(this)
+{
+    init();
+}
+
+ArmorPlateIdentification::~ArmorPlateIdentification()
+{
+    stopTrackerDebugWorker();
+    camera_driver_.close();
+    gui_worker_.stop();
+}
+
+int main(int argc, char** argv)
+{
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<ArmorPlateIdentification>();
+    std::thread spin_thread([&]() { rclcpp::spin(node); });
+    node->run();
+    if (spin_thread.joinable()) spin_thread.join();
+    rclcpp::shutdown();
+    return 0;
+}
+
+void ArmorPlateIdentification::initDebug()
+{
+    DebugBaseParams base_params;
+    base_params.debug_timecontrol_ = this->declare_parameter<bool>("debug_timecontrol", false);
+    base_params.debug_lights_ = this->declare_parameter<bool>("debug_lights", false);
+    base_params.debug_preprocessing_ = this->declare_parameter<bool>("debug_preprocessing", false);
+    base_params.debug_number_classification_ = this->declare_parameter<bool>("debug_number_classification", false);
+    base_params.delay_time = this->declare_parameter<int>("delay_time", 0);
+    base_params.stats_interval = this->declare_parameter<int>("stats_interval", 50);
+
+    headless_ = this->declare_parameter<bool>("headless", false);
+    debug_base_ = DebugIdentification(base_params);
+
+    if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
+    if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
+    if (base_params.debug_number_classification_) RCLCPP_INFO(this->get_logger(), "数字识别DEBUG模式开启");
+    if (base_params.debug_timecontrol_) {
+        RCLCPP_INFO(this->get_logger(), "DEBUG模式：+/-调速度  P-暂停  ESC-退出");
+    }
+}
+
+void ArmorPlateIdentification::initDetector()
+{
+    std::string package_share_dir = ament_index_cpp::get_package_share_directory("armor_plate_identification");
+    std::string model_relative_path = this->declare_parameter<std::string>("model_path", "");
+    std::string model_path = package_share_dir + "/" + model_relative_path;
+    float number_threshold = static_cast<float>(this->declare_parameter<double>("number_threshold", 0.15));
+    LightParams light_params;
+    light_params.min_contours_area_ = 30;
+    light_params.min_contours_ratio_ = 0.06f;
+    light_params.max_contours_ratio_ = 0.5f;
+    ArmorParams armor_params;
+    armor_params.max_angle_diff_ = static_cast<float>(this->declare_parameter<double>("max_angle_diff", 10.0));
+    armor_params.min_length_ratio_ = static_cast<float>(this->declare_parameter<double>("min_length_ratio", 0.7));
+    armor_params.min_x_diff_ratio_ = static_cast<float>(this->declare_parameter<double>("min_x_diff_ratio", 0.75));
+    armor_params.max_y_diff_ratio_ = static_cast<float>(this->declare_parameter<double>("max_y_diff_ratio", 1.0));
+    armor_params.max_distance_ratio_ = static_cast<float>(this->declare_parameter<double>("max_distance_ratio", 0.8));
+    armor_params.min_distance_ratio_ = static_cast<float>(this->declare_parameter<double>("min_distance_ratio", 0.1));
+    armor_params.target_color_ = target_color_;
+    lights_ = Detector(model_path, number_threshold,
+                       light_params, armor_params,
+                       this->declare_parameter<int>("threshold_value", 160),
+                       this->declare_parameter<int>("color_threshold", 100));
+}
+
+void ArmorPlateIdentification::initPoseSolver()
+{
+    camera_info_msg_ = camera_driver_.getCameraInfo();
+    cv::Mat camera_matrix = cv::Mat::zeros(3, 3, CV_64F);
+    cv::Mat distortion_coefficients = cv::Mat::zeros(1, 5, CV_64F);
+    cv::Mat projection_matrix = cv::Mat::zeros(3, 4, CV_64F);
+    for (int i = 0; i < 9; ++i) {
+        camera_matrix.at<double>(i / 3, i % 3) = camera_info_msg_.k[i];
+    }
+    for (size_t i = 0; i < camera_info_msg_.d.size() && i < 5; ++i) {
+        distortion_coefficients.at<double>(0, static_cast<int>(i)) = camera_info_msg_.d[i];
+    }
+    for (int i = 0; i < 12; ++i) {
+        projection_matrix.at<double>(i / 4, i % 4) = camera_info_msg_.p[i];
+    }
+    pose_solver_ = PoseSolver(camera_matrix, distortion_coefficients, projection_matrix);
+}
