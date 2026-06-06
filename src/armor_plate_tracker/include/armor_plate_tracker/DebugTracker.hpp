@@ -1,6 +1,7 @@
 #pragma once
 
 #include "armor_plate_tracker/TrackerArmor.hpp"
+#include <armor_plate_interfaces/ArmorPose.hpp>
 
 #include <visualization_msgs/msg/marker.hpp>
 #include <rclcpp/time.hpp>
@@ -12,7 +13,7 @@ using visualization_msgs::msg::Marker;
 */
 
 std::vector<Marker> createCarMarkers(
-    const std::array<Eigen::Vector<double, 4>, 4> & armor_list,
+    const std::array<ArmorPose, 4> & armor_list,
     const Eigen::Vector3d & center,
     const Eigen::Vector3d & car_speed,
     const rclcpp::Time & stamp,

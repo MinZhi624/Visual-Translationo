@@ -1,7 +1,10 @@
 #include "armor_plate_identification/DetectorArmor.hpp"
+#include <armor_plate_common/angle.hpp>
 #include <opencv2/imgproc.hpp>
 #include <cmath>
 #include <algorithm>
+
+namespace apc = armor_plate_common;
 
 ////////////////////// Light /////////////////////////
 
@@ -11,7 +14,7 @@ Light::Light(cv::RotatedRect ellipse_rect, cv::RotatedRect min_rect, Color color
     // 这里用ellipse_rect来画图
     // 用椭圆角度计算方向，用 minAreaRect 尺寸约束端点
     center_ = min_rect.center;
-    double angle_rad = (ellipse_rect.angle + 90) * CV_PI / 180.0;
+    double angle_rad = apc::degToRad(ellipse_rect.angle + 90);
     cv::Point2f dir = cv::Point2f(std::cos(angle_rad), std::sin(angle_rad));
     if (std::abs(dir.y) > 0.8f) {
         if (dir.y > 0) dir = -dir;
@@ -67,11 +70,11 @@ Color Light::getLightColor(const cv::Mat& img_bgr, const cv::RotatedRect& rect, 
 DetectorArmor::DetectorArmor(Light& light_left, Light& light_right)
 {
     paired_lights_ = {light_left, light_right};
-    points_ = {light_left.top_, light_right.top_, light_right.bottom_, light_left.bottom_};
+    image_points_ = {light_left.top_, light_right.top_, light_right.bottom_, light_left.bottom_};
 
     // ===== 几何参数计算 ===== //
     // 角度差（度）
-    double diff = std::abs((light_left.angle_ - light_right.angle_) * 180.0 / CV_PI);
+    double diff = std::abs(apc::radToDeg(light_left.angle_ - light_right.angle_));
     diff = std::min(diff, 180.0 - diff);
     angle_diff_ = diff;
     // 长度比

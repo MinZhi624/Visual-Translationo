@@ -8,7 +8,6 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <vector>
 
 namespace DebugWindow {
     constexpr const char* IDENTIFICATION = "identification";

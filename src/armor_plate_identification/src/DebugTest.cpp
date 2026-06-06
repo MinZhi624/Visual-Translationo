@@ -41,11 +41,6 @@ void DebugTest::saveTrackerDebug(const std::string& log_dir,
 
     if (tracker_log_file.is_open()) {
         tracker_log_file << msg.header.stamp.sec << " " << msg.header.stamp.nanosec << " "
-            << "观测:("
-            << std::fixed << std::setprecision(4) << msg.target_point_world.x << ","
-            << std::fixed << std::setprecision(4) << msg.target_point_world.y << ","
-            << std::fixed << std::setprecision(4) << msg.target_point_world.z << ","
-            << std::fixed << std::setprecision(4) << msg.raw_yaw << ") "
             << "滤波:("
             << std::fixed << std::setprecision(4) << msg.filtered_point_world.x << ","
             << std::fixed << std::setprecision(4) << msg.filtered_point_world.y << ","

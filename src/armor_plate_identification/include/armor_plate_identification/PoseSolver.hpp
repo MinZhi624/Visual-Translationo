@@ -1,38 +1,11 @@
 #pragma once
 #include "armor_plate_identification/DetectorArmor.hpp"
+#include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
+#include <armor_plate_interfaces/armor_geometry.hpp>
 #include <opencv2/core.hpp>
 #include <Eigen/Geometry>
 #include <unordered_map>
-#include <vector>
-
-// 装甲板单位是mm
-static constexpr float SMALL_ARMOR_WIDTH = 135;
-static constexpr float SMALL_ARMOR_HEIGHT = 55;
-static constexpr float LARGE_ARMOR_WIDTH = 225;
-static constexpr float LARGE_ARMOR_HEIGHT = 55;
-
-// PNP解算的单位是m
-static constexpr double SMALL_HALF_WIDTH = SMALL_ARMOR_WIDTH / 2.0 / 1000.0;
-static constexpr double SMALL_HALF_HEIGHT = SMALL_ARMOR_HEIGHT / 2.0 / 1000.0;
-static constexpr double LARGE_HALF_WIDTH = LARGE_ARMOR_WIDTH / 2.0 / 1000.0;
-static constexpr double LARGE_HALF_HEIGHT = LARGE_ARMOR_HEIGHT / 2.0 / 1000.0;
-
-
-// 顺时针左上角是0，以X轴为法向量。x向前，y向左，z向上.
-static const std::vector<cv::Point3f> SMALL_ARMOR_POINTS = {
-    cv::Point3f(0, SMALL_HALF_WIDTH, SMALL_HALF_HEIGHT),    // 左上
-    cv::Point3f(0, -SMALL_HALF_WIDTH, SMALL_HALF_HEIGHT),   // 右上
-    cv::Point3f(0, -SMALL_HALF_WIDTH, -SMALL_HALF_HEIGHT),  // 右下
-    cv::Point3f(0, SMALL_HALF_WIDTH, -SMALL_HALF_HEIGHT)    // 左下
-};
-
-static const std::vector<cv::Point3f> LARGE_ARMOR_POINTS = {
-    cv::Point3f(0, LARGE_HALF_WIDTH, LARGE_HALF_HEIGHT),    // 左上
-    cv::Point3f(0, -LARGE_HALF_WIDTH, LARGE_HALF_HEIGHT),   // 右上
-    cv::Point3f(0, -LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT),  // 右下
-    cv::Point3f(0, LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT)    // 左下
-};
 
 class PoseSolver
 {
@@ -55,25 +28,32 @@ private:
 	cv::Mat distortion_coefficients_;		// 相机畸变系数
 	cv::Mat rectification_matrix_;			// 校正矩阵
 	cv::Mat projection_matrix_;				// 投影矩阵
+	//===== 坐标系装换 =====//
+	Eigen::Matrix3d R_world_gimbal_;
+	Eigen::Matrix3d R_gimbal_world_;
 
 	std::unordered_map<int, std::vector<LastArmorYawRecord>> record_;
 
-	static double calculateYawFromRvec(const cv::Mat & rvec);
-	static double calculatePitchFromRotation(const Eigen::Matrix3d & R);
 	static double calculateWorldPitchFromRvec(const cv::Mat & rvec, const GimbalData & gimbal);
-	static double calculateReprojectionError(
+	double calculateReprojectionError(
 		const std::vector<cv::Point3f> & object_points,
 		const std::vector<cv::Point2f> & image_points,
-		const cv::Mat & camera_matrix,
-		const cv::Mat & distortion_coefficients,
-		const cv::Mat & rvec,
-		const cv::Mat & tvec
+		const cv::Mat & rvec = cv::Mat(),
+		const cv::Mat & tvec = cv::Mat()
+	) const;
+
+	double calculateReprojectionError(
+		const DetectorArmor & armor,
+		const double & yaw
 	);
 	std::vector<PnPCandidate> createPnPCandidates(
 		const std::vector<cv::Point3f> & object_points,
 		const std::vector<cv::Point2f> & image_points,
 		const GimbalData & gimbal
 	) const;
+	// ===== pitch单自由度锁定 ===== //
+	void optimizeYaw(DetectorArmor & armor);
+	// ===== PNP双重解算 ===== //
 	static size_t selectByGeometry(const std::vector<PnPCandidate> & candidates);
 	static size_t selectByYawContinuity(const std::vector<PnPCandidate> & candidates, double nearest_yaw);
 	size_t selectBestCandidate(
@@ -98,6 +78,14 @@ public:
 
 	cv::Point2f xyzCameraToPixel(cv::Point3f point3D) const;
 	cv::Point2f xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const;
-	
+
+	std::vector<cv::Point2f> reprojectArmor(const ArmorPose & armor_pose) const;
+	std::vector<cv::Point2f> reprojectArmor(const ArmorPose & armor_pose, const GimbalData & gimbal) const;
+
 	float calculateImageDistanceToCenter(const cv::Point2f & target_center_point);
+
+private:
+	std::vector<cv::Point2f> reprojectArmorImpl(
+		const ArmorPose & armor_pose,
+		const Eigen::Matrix3d & R_gimbal_world) const;
 };

@@ -6,8 +6,8 @@
 void GuiWorker::drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors)
 {
     for (const auto& armor : armors) {
-        cv::line(img, armor.points_[0], armor.points_[2], cv::Scalar(255, 0, 255), 2);
-        cv::line(img, armor.points_[1], armor.points_[3], cv::Scalar(255, 0, 255), 2);
+        cv::line(img, armor.image_points_[0], armor.image_points_[2], cv::Scalar(255, 0, 255), 2);
+        cv::line(img, armor.image_points_[1], armor.image_points_[3], cv::Scalar(255, 0, 255), 2);
     }
 }
 

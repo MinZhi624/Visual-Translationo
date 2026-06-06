@@ -2,6 +2,8 @@
 #include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
 #include "armor_plate_tracker/TrackerArmor.hpp"
 
+#include <armor_plate_interfaces/ArmorPose.hpp>
+
 #include <array>
 #include <vector>
 
@@ -10,7 +12,8 @@ class Target
 {
 private:
     MyExtendedKalmanFilter ekf_;
-    std::array<Eigen::Vector<double, 4>, 4> armor_list_;
+    std::array<ArmorPose, 4> armor_list_;
+    ArmorName armor_name_ = ArmorName::NONE;
 
     bool is_divergent_;
     bool is_converged_;
@@ -36,7 +39,7 @@ public:
     size_t getSelectedArmorId() const { return selected_armor_id_; }
 
     size_t findArmorIdx(const TrackerArmor & armor);
-    const std::array<Eigen::Vector<double, 4>, 4> & getTargetArmorList() const { return armor_list_; }
+    const std::array<ArmorPose, 4> & getTargetArmorList() const { return armor_list_; }
     Eigen::Vector<double, 4> getArmorObservation(size_t armor_id);
     Eigen::Vector<double, 11> getEKFState() const { return ekf_.getState(); }
     Eigen::Vector<double, 4> getFilteredObservation() const { return ekf_.getFilteredObservation(); }
