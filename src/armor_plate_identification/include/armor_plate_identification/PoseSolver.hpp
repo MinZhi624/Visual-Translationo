@@ -2,40 +2,10 @@
 #include "armor_plate_identification/DetectorArmor.hpp"
 #include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
+#include <armor_plate_interfaces/armor_geometry.hpp>
 #include <opencv2/core.hpp>
 #include <Eigen/Geometry>
 #include <unordered_map>
-#include <vector>
-
-// 装甲板单位是mm
-static constexpr float SMALL_ARMOR_WIDTH = 135;
-static constexpr float SMALL_ARMOR_HEIGHT = 55;
-static constexpr float LARGE_ARMOR_WIDTH = 225;
-static constexpr float LARGE_ARMOR_HEIGHT = 55;
-
-// PNP解算的单位是m
-static constexpr double SMALL_HALF_WIDTH = SMALL_ARMOR_WIDTH / 2.0 / 1000.0;
-static constexpr double SMALL_HALF_HEIGHT = SMALL_ARMOR_HEIGHT / 2.0 / 1000.0;
-static constexpr double LARGE_HALF_WIDTH = LARGE_ARMOR_WIDTH / 2.0 / 1000.0;
-static constexpr double LARGE_HALF_HEIGHT = LARGE_ARMOR_HEIGHT / 2.0 / 1000.0;
-
-
-// 顺时针左上角是0，以X轴为法向量。x向前，y向左，z向上.
-static const std::vector<cv::Point3f> SMALL_ARMOR_POINTS = {
-    cv::Point3f(0, SMALL_HALF_WIDTH, SMALL_HALF_HEIGHT),    // 左上
-    cv::Point3f(0, -SMALL_HALF_WIDTH, SMALL_HALF_HEIGHT),   // 右上
-    cv::Point3f(0, -SMALL_HALF_WIDTH, -SMALL_HALF_HEIGHT),  // 右下
-    cv::Point3f(0, SMALL_HALF_WIDTH, -SMALL_HALF_HEIGHT)    // 左下
-};
-
-static const std::vector<cv::Point3f> LARGE_ARMOR_POINTS = {
-    cv::Point3f(0, LARGE_HALF_WIDTH, LARGE_HALF_HEIGHT),    // 左上
-    cv::Point3f(0, -LARGE_HALF_WIDTH, LARGE_HALF_HEIGHT),   // 右上
-    cv::Point3f(0, -LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT),  // 右下
-    cv::Point3f(0, LARGE_HALF_WIDTH, -LARGE_HALF_HEIGHT)    // 左下
-};
-
-static const double ARMOR_PITCH_DEGREE = 15.0f;
 
 class PoseSolver
 {
@@ -64,8 +34,6 @@ private:
 
 	std::unordered_map<int, std::vector<LastArmorYawRecord>> record_;
 
-	static double calculateYawFromRvec(const cv::Mat & rvec);
-	static double calculatePitchFromRotation(const Eigen::Matrix3d & R);
 	static double calculateWorldPitchFromRvec(const cv::Mat & rvec, const GimbalData & gimbal);
 	double calculateReprojectionError(
 		const std::vector<cv::Point3f> & object_points,

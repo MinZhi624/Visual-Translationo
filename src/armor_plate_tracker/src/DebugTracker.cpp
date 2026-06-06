@@ -1,4 +1,11 @@
 #include "armor_plate_tracker/DebugTracker.hpp"
+#include <armor_plate_interfaces/armor_geometry.hpp>
+
+using armor_plate_interfaces::SMALL_ARMOR_WIDTH;
+using armor_plate_interfaces::SMALL_ARMOR_HEIGHT;
+
+// 装甲板厚度（marker 深度，测试用平面模型）
+static constexpr float ARMOR_DEPTH = 0.010f;  // 10mm
 
 std::vector<Marker> createCarMarkers(
     const std::array<ArmorPose, 4> & armor_list,
@@ -125,10 +132,10 @@ visualization_msgs::msg::Marker createBoxMarker(
     marker.pose.orientation.x = orientation.x();
     marker.pose.orientation.y = orientation.y();
     marker.pose.orientation.z = orientation.z();
-    // 固定尺寸: 长度10mm, 宽度135mm, 高度55mm
-    marker.scale.x = 0.010f;
-    marker.scale.y = 0.135f;
-    marker.scale.z = 0.055f;
+    // 装甲板尺寸: 厚度10mm, 宽度135mm, 高度55mm
+    marker.scale.x = ARMOR_DEPTH;
+    marker.scale.y = SMALL_ARMOR_WIDTH;
+    marker.scale.z = SMALL_ARMOR_HEIGHT;
     marker.color.r = r;
     marker.color.g = g;
     marker.color.b = b;

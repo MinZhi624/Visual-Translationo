@@ -40,4 +40,21 @@ inline Eigen::Vector3d calculateYPD(const Eigen::Vector3d & xyz)
     return {yaw, pitch, distance};
 }
 
+inline Eigen::Vector3d calculateXYZ(const Eigen::Vector3d & ypd)
+{
+    /*
+        calculateYPD 的逆变换
+        输入: (yaw, pitch, distance)
+        输出: (x, y, z)
+    */
+    const double yaw   = ypd.x();
+    const double pitch = ypd.y();
+    const double dist  = ypd.z();
+    const double cos_p = std::cos(pitch);
+    return {
+        dist * cos_p * std::cos(yaw),
+        dist * cos_p * std::sin(yaw),
+        dist * std::sin(pitch)};
+}
+
 }  // namespace armor_plate_common

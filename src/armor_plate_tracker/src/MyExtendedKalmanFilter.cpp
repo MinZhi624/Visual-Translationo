@@ -1,10 +1,13 @@
 #include "armor_plate_tracker/MyExtendedKalmanFilter.hpp"
 #include "armor_plate_common/angle.hpp"
+#include <armor_plate_common/geometry.hpp>
 
 #include <Eigen/Dense>
 
 #include <algorithm>
 #include <cmath>
+
+namespace apc = armor_plate_common;
 
 /*
     EKF 状态定义:
@@ -77,7 +80,7 @@ void MyExtendedKalmanFilter::predict()
     error_cov_ = state_transition_matrix_ * error_cov_ * state_transition_matrix_.transpose()
                + process_noise_cov_;
 
-    state_[6] = armor_plate_common::normalizeRadAngle(state_[6]);
+    state_[6] = apc::normalizeRadAngle(state_[6]);
 }
 
 Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<double, 4>& measurement, int armor_id)
@@ -101,7 +104,7 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
         R_distance = log(abs(delta_angle) + 1) + 1
         R_angle    = log(abs(distance_to_armor) + 1) / 200 + 9e-2
     */
-    double delta_angle = armor_plate_common::normalizeRadAngle(measurement[3] - measurement[0]);
+    double delta_angle = apc::normalizeRadAngle(measurement[3] - measurement[0]);
     observation_noise_cov_.diagonal() <<
         4e-3,
         4e-3,
@@ -117,12 +120,12 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
 
     Eigen::Vector<double, 4> residual = measurement - predicted_obs;
     // yaw pitch与 armor_yaw 是角度量，残差必须落回 [-pi, pi]，避免跨 pi 时跳变。
-    residual[0] = armor_plate_common::normalizeRadAngle(residual[0]);
-    residual[1] = armor_plate_common::normalizeRadAngle(residual[1]);
-    residual[3] = armor_plate_common::normalizeRadAngle(residual[3]);
+    residual[0] = apc::normalizeRadAngle(residual[0]);
+    residual[1] = apc::normalizeRadAngle(residual[1]);
+    residual[3] = apc::normalizeRadAngle(residual[3]);
 
     state_ = state_ + kalman_gain_ * residual;
-    state_[6] = armor_plate_common::normalizeRadAngle(state_[6]);
+    state_[6] = apc::normalizeRadAngle(state_[6]);
 
     /*
         Joseph stabilized covariance update。
@@ -367,23 +370,18 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionStateToXYZA(
         x_c - radius * std::cos(car_yaw),
         y_c - radius * std::sin(car_yaw),
         armor_z,
-        armor_plate_common::normalizeRadAngle(car_yaw);
+        apc::normalizeRadAngle(car_yaw);
     return observation;
 }
 
 Eigen::Vector<double, 4> MyExtendedKalmanFilter::measurementFunctionXYZAToYPDA(const Eigen::Vector<double, 4>& xyza)
 {
-    double x = xyza[0];
-    double y = xyza[1];
-    double z = xyza[2];
-
-    double yaw = std::atan2(y, x);
-    double pitch = std::atan2(z, std::sqrt(x * x + y * y));
-    double distance = Eigen::Vector3d{x, y, z}.norm();
+    Eigen::Vector3d xyz = xyza.head<3>();
+    Eigen::Vector3d ypd = apc::calculateYPD(xyz);
     return {
-        yaw,
-        pitch,
-        distance,
-        armor_plate_common::normalizeRadAngle(xyza[3])
+        ypd.x(),
+        ypd.y(),
+        ypd.z(),
+        apc::normalizeRadAngle(xyza[3])
     };
 }

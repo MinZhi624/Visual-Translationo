@@ -5,7 +5,6 @@
 #include <opencv2/core.hpp>
 #include <map>
 #include <chrono>
-#include <vector>
 
 struct DebugBaseParams
 {

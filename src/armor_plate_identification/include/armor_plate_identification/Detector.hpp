@@ -2,8 +2,6 @@
 #include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/NumberClassifier.hpp"
 #include <opencv2/core.hpp>
-#include <string>
-#include <vector>
 
 // 传参结构体 //
 struct LightParams {
