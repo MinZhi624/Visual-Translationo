@@ -11,11 +11,13 @@ endif()
 set(  ArmorPlateIdentification
   src/ArmorPlateIdentification.cpp
   src/DetectorArmor.cpp
-  src/CameraDriver.cpp
+  src/camera/Camera.cpp
+  src/camera/GalaxyCamera.cpp
+  src/camera/MindVisionCamera.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
-  src/DebugIdentification.cpp
-  src/DebugTracker.cpp
+  src/debug/DebugIdentification.cpp
+  src/debug/DebugTracker.cpp
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
 )
@@ -24,11 +26,11 @@ set( Test
   src/DetectorArmor.cpp
   src/PoseSolver.cpp
   src/Detector.cpp
-  src/DebugIdentification.cpp
-  src/DebugTest.cpp
+  src/debug/DebugIdentification.cpp
+  src/debug/DebugTest.cpp
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
-  src/DebugTracker.cpp
+  src/debug/DebugTracker.cpp
 )
 # ======================
 # 依赖
@@ -39,7 +41,6 @@ find_package(rclcpp_components REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(camera_info_manager REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
 find_package(armor_plate_common REQUIRED)
 find_package(ament_index_cpp REQUIRED)
@@ -108,7 +109,6 @@ ament_target_dependencies(
   "rclcpp"
   "OpenCV"
   "sensor_msgs"
-  "camera_info_manager"
   "armor_plate_interfaces"
   "armor_plate_common"
   "ament_index_cpp"

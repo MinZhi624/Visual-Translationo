@@ -1,4 +1,4 @@
-#include "armor_plate_identification/DebugIdentification.hpp"
+#include "armor_plate_identification/debug/DebugIdentification.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>

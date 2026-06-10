@@ -1,4 +1,4 @@
-#include "armor_plate_identification/DebugTest.hpp"
+#include "armor_plate_identification/debug/DebugTest.hpp"
 
 #include <fstream>
 #include <filesystem>

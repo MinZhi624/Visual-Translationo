@@ -1,5 +1,5 @@
 #pragma once
-#include "armor_plate_identification/DebugIdentification.hpp"
+#include "armor_plate_identification/debug/DebugIdentification.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 
 struct DebugTestParams

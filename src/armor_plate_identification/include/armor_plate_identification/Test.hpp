@@ -3,8 +3,8 @@
 #include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
 #include "armor_plate_identification/GuiWorker.hpp"
-#include "armor_plate_identification/DebugTest.hpp"
-#include "armor_plate_identification/DebugTracker.hpp"
+#include "armor_plate_identification/debug/DebugTest.hpp"
+#include "armor_plate_identification/debug/DebugTracker.hpp"
 
 #include <armor_plate_interfaces/GimbalData.hpp>
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
@@ -15,6 +15,8 @@
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
+#include "armor_plate_common/thread_safe_queue.hpp"
 
 #include <deque>
 #include <mutex>
@@ -46,16 +48,13 @@ private:
 
     // TrackerDebug
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
-    std::mutex tracker_debug_mutex_;
-    std::deque<Record> img_buffs_;
+    ThreadSafeQueue<Record, true> img_queue_{50};
     int tracker_debug_count_ = 0;
-
-    std::mutex tracker_debug_queue_mutex_;
-    std::condition_variable tracker_debug_cv_;
-    std::deque<TrackerDebug::SharedPtr> tracker_debug_msgs_;
+    // TrackerDebug线程
+    ThreadSafeQueue<TrackerDebug::SharedPtr, true> tracker_debug_queue_{1};
     std::thread tracker_debug_thread_;
     bool tracker_debug_worker_running_ = false;
-
+    // GUI
     GuiWorker gui_worker_;
     DebugTracker debug_tracker_{&pose_solver_, &gui_worker_};
     bool headless_ = false;

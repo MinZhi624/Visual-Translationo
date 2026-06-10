@@ -77,42 +77,27 @@ bool Test::control(const KeyEvent& event)
 
 void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 {
-    {
-        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
-        tracker_debug_msgs_.clear();
-        tracker_debug_msgs_.push_back(msg);
-    }
-    tracker_debug_cv_.notify_one();
+    tracker_debug_queue_.push(msg);
 }
 
 void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
 {
-    std::deque<Record> images_buffs;
-    {
-        std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        if (img_buffs_.empty()) return;
-        images_buffs = img_buffs_;
-    }
-    auto to_ns = [](const auto& s) { return (int64_t)s.sec * 1000000000LL + s.nanosec; };
-    int64_t msg_ns = to_ns(msg->header.stamp);
-    // 最近邻匹配
-    auto it = images_buffs.begin();
-    int64_t best_diff = std::abs(to_ns(it->img_stamp) - msg_ns);
-    for (auto jt = std::next(it); jt != images_buffs.end(); ++jt) {
-        int64_t diff = std::abs(to_ns(jt->img_stamp) - msg_ns);
-        if (diff < best_diff) {
-            best_diff = diff;
-            it = jt;
+    Record rec;
+    Record matched;
+    bool found = false;
+    while (img_queue_.pop(rec, std::chrono::milliseconds(0))) {
+        if (rec.img_stamp == msg->header.stamp) {
+            matched = rec;
+            found = true;
+            break;
         }
     }
-    if (best_diff > 50000000) return;  // 超过 50ms 放弃
+    if (!found) return;
 
-    // DebugTracker::infoTrackerDebugMsg(msg);
+    cv::Mat debug_img = matched.img.clone();
 
-    cv::Mat debug_img = it->img.clone();
-
-    debug_tracker_.drawTragetPoints(debug_img, *msg, it->gimbal);
-    debug_tracker_.drawPredictedCar(debug_img, *msg, it->gimbal);
+    debug_tracker_.drawTragetPoints(debug_img, *msg, matched.gimbal);
+    debug_tracker_.drawPredictedCar(debug_img, *msg, matched.gimbal);
 
     if (!headless_ && debug_test_.shouldShow()) {
         debug_tracker_.pushTrackerDebugFrame(debug_img);
@@ -130,30 +115,16 @@ void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
 
 void Test::trackerDebugWorker()
 {
-    while (rclcpp::ok()) {
+    while (rclcpp::ok() && tracker_debug_worker_running_) {
         TrackerDebug::SharedPtr msg;
-        {
-            std::unique_lock<std::mutex> lock(tracker_debug_queue_mutex_);
-            tracker_debug_cv_.wait(lock, [this]() {
-                return !tracker_debug_worker_running_ || !tracker_debug_msgs_.empty();
-            });
-            // 防止虚假唤醒
-            if (!tracker_debug_worker_running_ && tracker_debug_msgs_.empty()) return;
-            msg = tracker_debug_msgs_.back();
-            tracker_debug_msgs_.clear();
-        }
+        if (!tracker_debug_queue_.pop(msg, std::chrono::milliseconds(100))) continue;
         if (msg) processTrackerDebug(msg);
     }
 }
 
 void Test::stopTrackerDebugWorker()
 {
-    {
-        std::lock_guard<std::mutex> lock(tracker_debug_queue_mutex_);
-        tracker_debug_worker_running_ = false;
-        tracker_debug_msgs_.clear();
-    }
-    tracker_debug_cv_.notify_all();
+    tracker_debug_worker_running_ = false;
     if (tracker_debug_thread_.joinable()) tracker_debug_thread_.join();
 }
 
@@ -241,12 +212,7 @@ void Test::publish()
 void Test::save()
 {
     debug_test_.save();
-    {
-        std::lock_guard<std::mutex> tracker_debug_lock(tracker_debug_mutex_);
-        // 这里图片浅拷贝
-        img_buffs_.push_back({read_stamp_, img_show_, test_gimbal_});
-        if (img_buffs_.size() > 50) img_buffs_.pop_front();
-    }
+    img_queue_.push({read_stamp_, img_show_, test_gimbal_});
 }
 
 void Test::show()

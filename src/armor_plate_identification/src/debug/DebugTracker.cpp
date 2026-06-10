@@ -1,4 +1,4 @@
-#include "armor_plate_identification/DebugTracker.hpp"
+#include "armor_plate_identification/debug/DebugTracker.hpp"
 
 #include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/ArmorTypes.hpp>
