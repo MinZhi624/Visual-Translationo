@@ -1,6 +1,8 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
 #include "armor_plate_identification/Test.hpp"
+#include "armor_plate_identification/debug/YawSearchBenchmark.hpp"
 #include <rclcpp/logging.hpp>
+#include <rclcpp/exceptions.hpp>
 
 #include <cmath>
 
@@ -159,6 +161,7 @@ void Test::init(const std::string& video_path)
     armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", rclcpp::SensorDataQoS());
 
     initDebug();
+    initYawBenchmark();
     if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
     if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
 }
@@ -244,6 +247,7 @@ Test::Test(std::string video_path) : Node("test_node_cpp")
 
 Test::~Test()
 {
+    pose_solver_.setYawSearchObserver(nullptr);
     stopTrackerDebugWorker();
 }
 
@@ -252,11 +256,12 @@ int main(int argc, char **argv)
     rclcpp::init(argc, argv);
     auto node = std::make_shared<Test>(argv[1]);
     std::thread spin_thread([&](){rclcpp::spin(node);});
-    node->run();
+    int status = node->runWithStatus();
     rclcpp::shutdown();
     if(spin_thread.joinable()) spin_thread.join();
     node->closeTrackerDebugFile();
-    return 0;
+    bool finalized = node->finalizeYawBenchmark();
+    return (status == 0 && finalized) ? 0 : (status != 0 ? status : 1);
 }
 
 void Test::initDebug()
@@ -324,4 +329,139 @@ void Test::initPoseSolver()
     cv::Mat distortion_coefficients = (cv::Mat_<double>(1, 5) <<
         -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
     pose_solver_ = PoseSolver(camera_matrix, distortion_coefficients);
+}
+
+void Test::initYawBenchmark()
+{
+    bool enabled = this->declare_parameter<bool>("yaw_benchmark_enabled", false);
+    if (!enabled) {
+        return;
+    }
+
+    auto throw_invalid = [this](const std::string& msg) {
+        RCLCPP_ERROR(this->get_logger(), "Benchmark 参数校验失败: %s", msg.c_str());
+        throw rclcpp::exceptions::InvalidParameterValueException(msg);
+    };
+
+    std::string output_csv = this->declare_parameter<std::string>("yaw_benchmark_output_csv", "");
+    if (output_csv.empty()) {
+        throw_invalid("yaw_benchmark_output_csv 必须非空");
+    }
+
+    std::vector<double> steps_deg = this->declare_parameter<std::vector<double>>(
+        "yaw_benchmark_steps_deg", {0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0});
+    for (double s : steps_deg) {
+        if (!std::isfinite(s) || s <= 0.0 || s > 60.0) {
+            throw_invalid("yaw_benchmark_steps_deg 每项必须在 (0, 60] 内");
+        }
+    }
+
+    std::vector<int64_t> iterations_raw = this->declare_parameter<std::vector<int64_t>>(
+        "yaw_benchmark_iterations", {5, 8, 10, 12, 15});
+    std::vector<int> iterations;
+    iterations.reserve(iterations_raw.size());
+    for (int64_t it : iterations_raw) {
+        if (it < 0 || it > 1000) {
+            throw_invalid("yaw_benchmark_iterations 每项必须在 [0, 1000] 内");
+        }
+        iterations.push_back(static_cast<int>(it));
+    }
+
+    int sample_stride = this->declare_parameter<int>("yaw_benchmark_sample_stride", 5);
+    if (sample_stride <= 0) {
+        throw_invalid("yaw_benchmark_sample_stride 必须 > 0");
+    }
+
+    int max_samples = this->declare_parameter<int>("yaw_benchmark_max_samples", 2000);
+    if (max_samples < 0) {
+        throw_invalid("yaw_benchmark_max_samples 必须 >= 0");
+    }
+
+    int warmup_samples = this->declare_parameter<int>("yaw_benchmark_warmup_samples", 50);
+    if (warmup_samples < 0) {
+        throw_invalid("yaw_benchmark_warmup_samples 必须 >= 0");
+    }
+
+    namespace adb = armor_plate_identification::debug;
+    adb::YawSearchBenchmarkParams params;
+    params.enabled = true;
+    params.steps_deg = std::move(steps_deg);
+    params.iterations = std::move(iterations);
+    params.sample_stride = sample_stride;
+    params.max_samples = max_samples;
+    params.warmup_samples = warmup_samples;
+    params.output_csv = std::move(output_csv);
+    params.video_name = test_name_;
+
+    yaw_benchmark_ = std::make_unique<adb::YawSearchBenchmark>(this, params);
+    pose_solver_.setYawSearchObserver(yaw_benchmark_.get());
+    RCLCPP_INFO(this->get_logger(), "Yaw 搜索 benchmark 已启用：stride=%d max=%d warmup=%d",
+                sample_stride, max_samples, warmup_samples);
+}
+
+bool Test::finalizeYawBenchmark()
+{
+    if (!yaw_benchmark_) {
+        return true;
+    }
+    return yaw_benchmark_->finalize();
+}
+
+int Test::runWithStatus()
+{
+    if (!headless_) {
+        gui_worker_.start();
+    }
+
+    cv::Mat frame;
+    while (rclcpp::ok()) {
+        if (yaw_benchmark_ && yaw_benchmark_->shouldStop()) {
+            RCLCPP_INFO(this->get_logger(), "Yaw benchmark 达到最大样本数，结束");
+            break;
+        }
+
+        c_ >> frame;
+        if (frame.empty()) {
+            RCLCPP_INFO(this->get_logger(), "视频播放结束");
+            gui_worker_.stop();
+            return 0;
+        }
+        img_show_ = frame.clone();
+
+        if (yaw_benchmark_) {
+            yaw_benchmark_->onFrameStart(raw_frame_index_);
+        }
+        ++raw_frame_index_;
+
+        debug_test_.onFrameStart();
+
+        // Test 模式用视频相对时间
+        double video_time = debug_test_.getFrameCount() / fps_;
+        read_stamp_.sec = static_cast<int>(video_time);
+        read_stamp_.nanosec = static_cast<uint32_t>((video_time - read_stamp_.sec) * 1e9);
+
+        identification(frame);
+        solvePose();
+        debug_test_.mark("solvePose");
+        publish();
+        debug_test_.mark("publish");
+        save();
+        debug_test_.mark("save");
+        show();
+        debug_test_.mark("show");
+        
+        debug_test_.onFrameEnd();
+
+        KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
+        if (control(event)) break;
+
+        if (debug_test_.shouldExit()) {
+            RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_test_.getDebugFrameCount());
+            gui_worker_.stop();
+            return 0;
+        }
+    }
+    RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
+    gui_worker_.stop();
+    return 0;
 }

@@ -228,7 +228,7 @@ void ArmorPlateIdentification::solvePose()
             break;
         }
     }
-
+    // 计算插值
     GimbalData gimbal;
     if (gimbal_has_data_) {
         int64_t t_a = to_ns(gimbal_ahead_.stamp);

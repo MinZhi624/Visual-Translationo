@@ -1,6 +1,8 @@
 #include "armor_plate_identification/PoseSolver.hpp"
 #include "armor_plate_common/angle.hpp"
 #include "armor_plate_common/transform.hpp"
+#include <armor_plate_identification/yaw/IYawSearchObserver.hpp>
+#include <armor_plate_identification/yaw/YawSearch.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
@@ -63,11 +65,13 @@ void PoseSolver::solve(std::vector<DetectorArmor> & armors, const GimbalData & g
     /*
         TODO:
         现在解决了pnp上下解问题，但是没有解决pnp小角度左右双解问题
+        但是好像没人去解决这个问题，所以暂时先不处理
     */
     R_world_gimbal_ = apc::calculateRWorldGimbal(gimbal.yaw_abs, gimbal.pitch_abs);
     R_gimbal_world_ = R_world_gimbal_.transpose();
     std::unordered_map<int, std::vector<LastArmorYawRecord>> new_record;
-    for (auto & armor : armors) {
+    for (std::size_t i = 0; i < armors.size(); ++i) {
+        auto& armor = armors[i];
         const auto& world_points = (armor.type_ == ArmorType::LARGE)
             ? LARGE_ARMOR_POINTS
             : SMALL_ARMOR_POINTS;
@@ -97,89 +101,58 @@ void PoseSolver::solve(std::vector<DetectorArmor> & armors, const GimbalData & g
         armor.ypr_world_ = apc::calculateYPR(R_world_camera * R_camera_armor);
 
         // 优化 yaw
-        optimizeYaw(armor);
+        optimizeYaw(armor, i);
 
         new_record[armor_name_key].push_back({candidates[best_id].yaw, target_center});
     }
     record_ = std::move(new_record);
 }
-void PoseSolver::optimizeYaw(DetectorArmor & armor)
+void PoseSolver::optimizeYaw(DetectorArmor & armor, std::size_t armor_index)
 {
-    // 这里采用以poseSolver结果为初始值进行优化
     double init_yaw = armor.ypr_world_.x();
-    // 枚举初次筛选
-    double coarse_yaw = searchYawByEnumeration(armor, init_yaw, apc::degToRad(30.0), apc::degToRad(1.0));
-    // 局部三分查找
-    double local_range = apc::degToRad(3.0);
-    double refined_yaw = searchYawByTernary(armor, coarse_yaw - local_range, coarse_yaw + local_range, 20);
-    // 可信度判断
-    double old_error = calculateReprojectionError(armor, init_yaw);
-    double new_error = calculateReprojectionError(armor, refined_yaw);
-    double delta_yaw = apc::normalizeRadAngle(refined_yaw - init_yaw);
+    ArmorPose armor_pose;
+    armor_pose.xyz_world = armor.xyz_world_;
+    armor_pose.type = armor.type_;
 
-    bool is_improved = new_error < old_error;
-    bool is_yaw_mutation = std::abs(delta_yaw) >= apc::degToRad(15.0);
-
-    // double coarse_error = calculateReprojectionError(armor, coarse_yaw);
-    // RCLCPP_INFO(rclcpp::get_logger("pose_solver"),
-    //             "yaw_opt name=%d init=%.6f coarse=%.6f refined=%.6f "
-    //             "old_err=%.6f coarse_err=%.6f new_err=%.6f delta=%.6f improved=%d mutated=%d",
-    //             static_cast<int>(armor.name_),
-    //             init_yaw, coarse_yaw, refined_yaw,
-    //             old_error, coarse_error, new_error, delta_yaw,
-    //             static_cast<int>(is_improved), static_cast<int>(is_yaw_mutation));
-
-    if (is_improved && !is_yaw_mutation) {
-        armor.ypr_world_[0] = refined_yaw;
-    } else {
-        RCLCPP_WARN(rclcpp::get_logger("pose_solver"), "YAW优化失败");
-    }
-}
-
-double PoseSolver::searchYawByEnumeration(
-        const DetectorArmor & armor,
-		double center_yaw,
-		double range_rad,
-		double step_rad
-	)
-{
-    double best_yaw = center_yaw;
-    double min_error = std::numeric_limits<double>::max();
-    double start_yaw = center_yaw - range_rad;
-     int steps = static_cast<int>(2.0 * range_rad / step_rad);
-    for (int i = 0; i <= steps; ++i) {
-        double yaw = apc::normalizeRadAngle(start_yaw + i * step_rad);
-        double error = calculateReprojectionError(armor, yaw);
-        if (error < min_error) {
-            min_error = error;
-            best_yaw = yaw;
+    auto error_func = [&](double yaw) -> double {
+        armor_pose.yaw = yaw;
+        auto image_points = reprojectArmor(armor_pose);
+        double error = 0.0;
+        for (int i = 0; i < 4; ++i) {
+            error += cv::norm(image_points[i] - armor.image_points_[i]);
         }
-    }
-    return best_yaw;
+        return error;
+    };
 
-}
-double PoseSolver::searchYawByTernary(
-    const DetectorArmor & armor,
-	double left_yaw,
-	double right_yaw,
-	int iterations
-)
-{
-    double l = left_yaw;
-    double r = right_yaw;
-    while(iterations--) 
-    {
-        double m1 = l + (r - l) / 3.0; 
-        double m2 = r - (r - l) / 3.0; 
-        double e1 = calculateReprojectionError(armor, apc::normalizeRadAngle(m1));
-        double e2 = calculateReprojectionError(armor, apc::normalizeRadAngle(m2));
-       if (e1 < e2) {
-            r = m2;
-        } else {
-            l = m1;
-        }
+    using armor_plate_identification::yaw::defaultYawSearchConfig;
+    using armor_plate_identification::yaw::runYawSearch;
+    using armor_plate_identification::yaw::YawSearchStatus;
+
+    const auto config = defaultYawSearchConfig();
+    auto result = runYawSearch(init_yaw, config, error_func);
+
+    switch (result.status) {
+        case YawSearchStatus::Ok:
+            armor.ypr_world_[0] = result.refined_yaw;
+            break;
+        case YawSearchStatus::RefinementFailed:
+            armor.ypr_world_[0] = result.coarse_yaw;
+            RCLCPP_WARN(rclcpp::get_logger("pose_solver"),
+                        "Yaw refinement failed, armor_index=%zu init_yaw=%.6f coarse_yaw=%.6f",
+                        armor_index, init_yaw, result.coarse_yaw);
+            break;
+        case YawSearchStatus::NoFiniteEvaluation:
+        case YawSearchStatus::InvalidConfig:
+            armor.ypr_world_[0] = init_yaw;
+            RCLCPP_ERROR(rclcpp::get_logger("pose_solver"),
+                         "Yaw search failed status=%d, armor_index=%zu init_yaw=%.6f",
+                         static_cast<int>(result.status), armor_index, init_yaw);
+            break;
     }
-    return apc::normalizeRadAngle((l + r) / 2.0);
+
+    if (yaw_observer_ != nullptr) {
+        yaw_observer_->onYawSearch(armor, init_yaw, config, result, error_func, armor_index);
+    }
 }
 
 

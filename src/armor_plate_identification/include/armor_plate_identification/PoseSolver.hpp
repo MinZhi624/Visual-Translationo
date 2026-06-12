@@ -1,5 +1,6 @@
 #pragma once
 #include "armor_plate_identification/DetectorArmor.hpp"
+#include <armor_plate_identification/yaw/IYawSearchObserver.hpp>
 #include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
 #include <armor_plate_interfaces/armor_geometry.hpp>
@@ -52,19 +53,8 @@ private:
 		const GimbalData & gimbal
 	) const;
 	// ===== pitch单自由度锁定 ===== //
-	void optimizeYaw(DetectorArmor & armor);
-	double searchYawByEnumeration(
-		const DetectorArmor & armor,
-		double center_yaw, 
-		double range_rad,
-		double step_rad 
-	);
-	double searchYawByTernary(
-		const DetectorArmor & armor,
-		double left_yaw,
-		double right_yaw,
-		int iterations
-	);
+	void optimizeYaw(DetectorArmor & armor, std::size_t armor_index);
+	IYawSearchObserver* yaw_observer_ = nullptr;
 	// ===== PNP双重解算 ===== //
 	static size_t selectByGeometry(const std::vector<PnPCandidate> & candidates);
 	static size_t selectByYawContinuity(const std::vector<PnPCandidate> & candidates, double nearest_yaw);
@@ -87,6 +77,8 @@ public:
 	);
 
 	void solve(std::vector<DetectorArmor> & armors, const GimbalData & gimbal = GimbalData{});
+
+	void setYawSearchObserver(IYawSearchObserver* observer) { yaw_observer_ = observer; }
 
 	cv::Point2f xyzCameraToPixel(cv::Point3f point3D) const;
 	cv::Point2f xyzWorldToPixel(Eigen::Vector3d & point3D, const GimbalData & gimbal) const;

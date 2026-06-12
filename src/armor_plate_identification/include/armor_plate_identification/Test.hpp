@@ -18,7 +18,9 @@
 
 #include "armor_plate_common/thread_safe_queue.hpp"
 
+#include <cstddef>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
@@ -27,6 +29,12 @@
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::TrackerDebug;
+
+namespace armor_plate_identification {
+namespace debug {
+class YawSearchBenchmark;
+}  // namespace debug
+}  // namespace armor_plate_identification
 
 class Test : public rclcpp::Node
 {
@@ -59,6 +67,10 @@ private:
     DebugTracker debug_tracker_{&pose_solver_, &gui_worker_};
     bool headless_ = false;
 
+    // Yaw 搜索 benchmark（仅 Test target 链接）
+    std::unique_ptr<armor_plate_identification::debug::YawSearchBenchmark> yaw_benchmark_;
+    std::size_t raw_frame_index_ = 0;
+
     void init(const std::string& video_path);
     void identification(cv::Mat& img_bgr);
     void solvePose();
@@ -75,9 +87,13 @@ private:
     void initDebug();
     void initDetector();
     void initPoseSolver();
+    void initYawBenchmark();
+
 public:
     Test(std::string video_path);
     ~Test();
     void run();
+    int runWithStatus();
+    bool finalizeYawBenchmark();
     void closeTrackerDebugFile();
 };

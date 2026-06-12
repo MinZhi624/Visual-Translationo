@@ -312,3 +312,49 @@ python src/train.py    # 数据增强 → 训练 → 导出 ONNX
 ```
 
 详见 `DeepLearning/README.md`。
+
+---
+
+## Yaw 搜索自动化调参（Benchmark）
+
+用于自动扫描 yaw 搜索参数（枚举步长、三分迭代次数），输出精度、稳定性和耗时统计，并推荐满足精度门槛后最快的参数组合。
+
+### 主入口
+
+```bash
+python3 Debug/run_yaw_search_benchmark.py --video path/to/video1.mp4 --video path/to/video2.mp4
+```
+
+可选参数：
+- `--build`：先构建工作空间再运行测试
+- `--force`：覆盖已有运行目录
+- `--repeats N`：每个视频重复运行次数（默认 3）
+
+### 运行产物
+
+输出到 `Debug/YawSearch/runs/<run_id>/`，每个视频目录下包含：
+- `repeat_0.csv`、`repeat_1.csv`、`repeat_2.csv`：原始采样数据
+- `summary.csv`：按参数组合聚合的精度/耗时统计
+- `recommendation.json`：推荐参数（或 null + Pareto 排行）
+- 热力图与 Pareto 图（PNG）
+
+### 评价规则
+
+每个参数组合在每个视频上需同时满足：
+- 可观测样本 yaw 误差 P99 ≤ 0.1°
+- 每角点误差增量 P99 ≤ 0.01 px
+- 至少 200 个 timing-valid 样本和 50 个 observable 样本
+
+> 注：0.01 px / 0.1° 是相对于稠密参考搜索的数值一致性，不代表真实 yaw 精度。
+
+推荐规则：选择各视频 P95 耗时最大值最低的组合。
+
+### 退出码
+
+| 退出码 | 含义 |
+|--------|------|
+| 0 | 成功并找到合格参数 |
+| 2 | 参数、视频或环境无效 |
+| 3 | Test 运行失败或没有有效样本 |
+| 4 | 分析成功，但没有参数通过门槛 |
+| 5 | CSV 缺列、版本错误或结果不完整 |

@@ -31,6 +31,7 @@ set( Test
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
   src/debug/DebugTracker.cpp
+  src/debug/YawSearchBenchmark.cpp
 )
 # ======================
 # 依赖
@@ -50,6 +51,21 @@ find_package(OpenVINO REQUIRED)
 # ======================
 add_executable(ArmorPlateIdentification ${ArmorPlateIdentification})
 add_executable(Test ${Test})
+
+# ======================
+# Yaw 搜索库（内部静态库）
+# ======================
+add_library(yaw_search STATIC
+  src/yaw/YawSearch.cpp
+)
+target_include_directories(yaw_search PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(yaw_search PUBLIC
+  armor_plate_common::armor_plate_common
+)
+target_compile_features(yaw_search PUBLIC cxx_std_17)
 
 # ======================
 # 大恒 SDK 路径
@@ -96,10 +112,12 @@ target_link_libraries(ArmorPlateIdentification
   openvino::runtime
   gxiapi
   MVSDK
+  yaw_search
 )
 target_link_libraries(Test
   ${OpenCV_LIBS}
   openvino::runtime
+  yaw_search
 )
 # ======================
 # 依赖关系
@@ -121,7 +139,7 @@ ament_target_dependencies(
   "armor_plate_common"
   "ament_index_cpp"
 )
-  
+
 # ======================
 # 安装第三方动态库
 # ======================
@@ -142,11 +160,11 @@ ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env-hooks/third_parties_lib
 # ======================
 # 安装
 # ======================
-install(TARGETS 
+install(TARGETS
   ArmorPlateIdentification Test
   DESTINATION lib/${PROJECT_NAME}
 )
-install(DIRECTORY 
+install(DIRECTORY
   include/
   DESTINATION include/${PROJECT_NAME}
 )
@@ -166,6 +184,15 @@ if(BUILD_TESTING)
   # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_yaw_search test/test_yaw_search.cpp)
+  target_link_libraries(test_yaw_search
+    yaw_search
+  )
+  ament_target_dependencies(test_yaw_search
+    "armor_plate_common"
+  )
 endif()
 
 ament_package()
