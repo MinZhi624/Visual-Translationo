@@ -4,9 +4,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
-#include <Eigen/src/Core/Matrix.h>
 #include <armor_plate_common/geometry.hpp>
-#include <cstddef>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/imgproc.hpp>
@@ -14,6 +12,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+
+#include <rclcpp/logging.hpp>
 
 namespace apc = armor_plate_common;
 using armor_plate_interfaces::SMALL_ARMOR_POINTS;
@@ -105,21 +105,84 @@ void PoseSolver::solve(std::vector<DetectorArmor> & armors, const GimbalData & g
 }
 void PoseSolver::optimizeYaw(DetectorArmor & armor)
 {
-    // 核心，利用pitch固定自由度来计算yaw
-    Eigen::Vector3d gimbal_ypr = apc::calculateYPR(R_world_gimbal_);
-    auto yaw0 = apc::normalizeRadAngle(gimbal_ypr[0] - apc::degToRad(SEARCH_RANGE / 2));
+    // 这里采用以poseSolver结果为初始值进行优化
+    double init_yaw = armor.ypr_world_.x();
+    // 枚举初次筛选
+    double coarse_yaw = searchYawByEnumeration(armor, init_yaw, apc::degToRad(30.0), apc::degToRad(1.0));
+    // 局部三分查找
+    double local_range = apc::degToRad(3.0);
+    double refined_yaw = searchYawByTernary(armor, coarse_yaw - local_range, coarse_yaw + local_range, 20);
+    // 可信度判断
+    double old_error = calculateReprojectionError(armor, init_yaw);
+    double coarse_error = calculateReprojectionError(armor, coarse_yaw);
+    double new_error = calculateReprojectionError(armor, refined_yaw);
+    double delta_yaw = apc::normalizeRadAngle(refined_yaw - init_yaw);
+
+    bool is_improved = new_error < old_error;
+    bool is_yaw_mutation = std::abs(delta_yaw) >= apc::degToRad(15.0);
+
+    RCLCPP_INFO(rclcpp::get_logger("pose_solver"),
+                "yaw_opt name=%d init=%.6f coarse=%.6f refined=%.6f "
+                "old_err=%.6f coarse_err=%.6f new_err=%.6f delta=%.6f improved=%d mutated=%d",
+                static_cast<int>(armor.name_),
+                init_yaw, coarse_yaw, refined_yaw,
+                old_error, coarse_error, new_error, delta_yaw,
+                static_cast<int>(is_improved), static_cast<int>(is_yaw_mutation));
+
+    if (is_improved && !is_yaw_mutation) {
+        armor.ypr_world_[0] = refined_yaw;
+    } else {
+        RCLCPP_WARN(rclcpp::get_logger("pose_solver"), "YAW优化失败");
+    }
+}
+
+double PoseSolver::searchYawByEnumeration(
+        const DetectorArmor & armor,
+		double center_yaw,
+		double range_rad,
+		double step_rad
+	)
+{
+    double best_yaw = center_yaw;
     double min_error = std::numeric_limits<double>::max();
-    double best_yaw = armor.ypr_world_[0];
-    for (int i = 0; i < SEARCH_RANGE; ++i) {
-        double yaw = apc::normalizeRadAngle(yaw0 + apc::degToRad(i));
+    double start_yaw = center_yaw - range_rad;
+     int steps = static_cast<int>(2.0 * range_rad / step_rad);
+    for (int i = 0; i <= steps; ++i) {
+        double yaw = apc::normalizeRadAngle(start_yaw + i * step_rad);
         double error = calculateReprojectionError(armor, yaw);
         if (error < min_error) {
             min_error = error;
             best_yaw = yaw;
         }
     }
-    armor.ypr_world_[0] = best_yaw;
+    return best_yaw;
+
 }
+double PoseSolver::searchYawByTernary(
+    const DetectorArmor & armor,
+	double left_yaw,
+	double right_yaw,
+	int iterations
+)
+{
+    double l = left_yaw;
+    double r = right_yaw;
+    while(iterations--) 
+    {
+        double m1 = l + (r - l) / 3.0; 
+        double m2 = r - (r - l) / 3.0; 
+        double e1 = calculateReprojectionError(armor, apc::normalizeRadAngle(m1));
+        double e2 = calculateReprojectionError(armor, apc::normalizeRadAngle(m2));
+       if (e1 < e2) {
+            r = m2;
+        } else {
+            l = m1;
+        }
+    }
+    return apc::normalizeRadAngle((l + r) / 2.0);
+}
+
+
 
 std::vector<cv::Point2f> PoseSolver::reprojectArmor(const ArmorPose & armor_pose) const
 {

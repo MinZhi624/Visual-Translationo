@@ -53,6 +53,18 @@ private:
 	) const;
 	// ===== pitch单自由度锁定 ===== //
 	void optimizeYaw(DetectorArmor & armor);
+	double searchYawByEnumeration(
+		const DetectorArmor & armor,
+		double center_yaw, 
+		double range_rad,
+		double step_rad 
+	);
+	double searchYawByTernary(
+		const DetectorArmor & armor,
+		double left_yaw,
+		double right_yaw,
+		int iterations
+	);
 	// ===== PNP双重解算 ===== //
 	static size_t selectByGeometry(const std::vector<PnPCandidate> & candidates);
 	static size_t selectByYawContinuity(const std::vector<PnPCandidate> & candidates, double nearest_yaw);
