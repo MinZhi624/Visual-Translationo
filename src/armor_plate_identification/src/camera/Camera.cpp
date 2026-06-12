@@ -4,6 +4,7 @@
 
 #include <opencv2/core/persistence.hpp>
 #include <stdexcept>
+#include <fstream>
 
 static cv::Mat readMatFromYamlNode(const cv::FileNode& node)
 {
@@ -22,7 +23,19 @@ static cv::Mat readMatFromYamlNode(const cv::FileNode& node)
 
 CameraIntrinsics CameraBase::loadIntrinsicsFromYaml(const std::string& path)
 {
-    cv::FileStorage fs(path, cv::FileStorage::READ);
+    {
+        std::ifstream file_check(path);
+        if (!file_check.is_open()) {
+            throw std::runtime_error("相机信息文件不存在或无法读取: " + path);
+        }
+    }
+
+    cv::FileStorage fs;
+    try {
+        fs.open(path, cv::FileStorage::READ);
+    } catch (const cv::Exception& e) {
+        throw std::runtime_error("相机信息文件格式错误: " + path + "，OpenCV: " + e.what());
+    }
     if (!fs.isOpened()) {
         throw std::runtime_error("没有成功打开相机信息文件: " + path);
     }

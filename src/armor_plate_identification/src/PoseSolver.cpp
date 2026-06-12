@@ -114,20 +114,20 @@ void PoseSolver::optimizeYaw(DetectorArmor & armor)
     double refined_yaw = searchYawByTernary(armor, coarse_yaw - local_range, coarse_yaw + local_range, 20);
     // 可信度判断
     double old_error = calculateReprojectionError(armor, init_yaw);
-    double coarse_error = calculateReprojectionError(armor, coarse_yaw);
     double new_error = calculateReprojectionError(armor, refined_yaw);
     double delta_yaw = apc::normalizeRadAngle(refined_yaw - init_yaw);
 
     bool is_improved = new_error < old_error;
     bool is_yaw_mutation = std::abs(delta_yaw) >= apc::degToRad(15.0);
 
-    RCLCPP_INFO(rclcpp::get_logger("pose_solver"),
-                "yaw_opt name=%d init=%.6f coarse=%.6f refined=%.6f "
-                "old_err=%.6f coarse_err=%.6f new_err=%.6f delta=%.6f improved=%d mutated=%d",
-                static_cast<int>(armor.name_),
-                init_yaw, coarse_yaw, refined_yaw,
-                old_error, coarse_error, new_error, delta_yaw,
-                static_cast<int>(is_improved), static_cast<int>(is_yaw_mutation));
+    // double coarse_error = calculateReprojectionError(armor, coarse_yaw);
+    // RCLCPP_INFO(rclcpp::get_logger("pose_solver"),
+    //             "yaw_opt name=%d init=%.6f coarse=%.6f refined=%.6f "
+    //             "old_err=%.6f coarse_err=%.6f new_err=%.6f delta=%.6f improved=%d mutated=%d",
+    //             static_cast<int>(armor.name_),
+    //             init_yaw, coarse_yaw, refined_yaw,
+    //             old_error, coarse_error, new_error, delta_yaw,
+    //             static_cast<int>(is_improved), static_cast<int>(is_yaw_mutation));
 
     if (is_improved && !is_yaw_mutation) {
         armor.ypr_world_[0] = refined_yaw;

@@ -382,10 +382,10 @@ builtin_interfaces::msg::Time ArmorPlateIdentification::convertSteadyToRosTime(
     auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now_steady - steady_stamp).count();
 
     // 每 100 帧打印一次 demosaicing / 格式转换延迟
-    static int frame_count = 0;
-    if (++frame_count % 100 == 0) {
-        RCLCPP_INFO(this->get_logger(), "Camera processing latency: %.3f ms", elapsed_ns / 1e6);
-    }
+    // static int frame_count = 0;
+    // if (++frame_count % 100 == 0) {
+    //     RCLCPP_INFO(this->get_logger(), "Camera processing latency: %.3f ms", elapsed_ns / 1e6);
+    // }
 
     return now_ros - rclcpp::Duration::from_nanoseconds(elapsed_ns);
 }

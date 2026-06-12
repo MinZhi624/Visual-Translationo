@@ -15,9 +15,18 @@ add_executable(serial_node
   src/serial_node.cpp
 )
 
+add_executable(serial_latency_test
+  src/serial_latency_test.cpp
+)
+
 ament_target_dependencies(serial_node
   rclcpp
   armor_plate_interfaces
+  serial_driver
+)
+
+ament_target_dependencies(serial_latency_test
+  rclcpp
   serial_driver
 )
 # ======================
@@ -27,11 +36,17 @@ target_include_directories(serial_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
+
+target_include_directories(serial_latency_test PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 # ======================
 # 安装
 # ======================
 install(TARGETS 
   serial_node
+  serial_latency_test
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY 

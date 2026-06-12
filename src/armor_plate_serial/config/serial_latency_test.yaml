@@ -1,0 +1,14 @@
+serial_latency_test:
+  ros__parameters:
+    # 串口配置
+    device_name: "/dev/ttyACM0"
+    baud_rate: 115200
+
+    # 测试配置：默认以 100 Hz 持续发送 60 秒
+    send_rate_hz: 100.0
+    duration_sec: 60.0
+    reply_timeout_ms: 100.0
+    warmup_count: 100
+
+    # 原始逐帧测试结果
+    output_csv: "/tmp/armor_plate_serial_latency.csv"
