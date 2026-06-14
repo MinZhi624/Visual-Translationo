@@ -6,7 +6,7 @@
 
 ## 项目简介
 
-完整的视觉处理链路：图像采集 → 预处理 → 灯条检测与配对 → 数字识别 → PnP 位姿解算 → 世界坐标系扩展卡尔曼滤波跟踪 → 串口通信。
+完整的视觉处理链路：图像采集 → 预处理 → 灯条检测与配对 → 数字识别 → PnP 位姿解算 → 世界坐标系扩展卡尔曼滤波跟踪 → 目标选择/预测/弹道解算 → 串口通信。
 
 支持**相机实时运行**与**离线视频调试**两种模式。
 
@@ -19,8 +19,11 @@ flowchart TD
     camera["相机/视频"] --> identification["armor_plate_identification<br/>识别 + PnP + 数字识别 + 云台数据打包"]
     ec_feedback["电控回传"] -->|"/gimbal_angle<br/>GimbalAngle"| identification
     identification -->|"/armor_plates<br/>ArmorPlates<br/>含 gimbal_yaw_abs / gimbal_pitch_abs"| tracker["armor_plate_tracker<br/>世界坐标系 11 维 EKF"]
-    tracker -->|"/aim_command<br/>AimCommand"| serial["armor_plate_serial<br/>串口发送"]
-    tracker -->|"/visualization_marker_array<br/>/tracker_debug<br/>/tracker_data"| visual["Foxglove / RViz"]
+    tracker -->|"/tracked_targets<br/>TrackedTargets"| planner["armor_plate_planner<br/>目标选择/预测/弹道解算"]
+    tracker -->|"/aim_command<br/>AimCommand (直传,未补偿)"| serial["armor_plate_serial<br/>串口发送"]
+    planner -->|"/aim_command<br/>AimCommand (弹道补偿)"| serial
+    planner -->|"/planner_debug<br/>PlannerDebug"| visual["Foxglove / RViz"]
+    tracker -->|"/visualization_marker_array<br/>/tracker_debug<br/>/tracker_data"| visual
     serial --> ec["电控"]
 ```
 
@@ -30,7 +33,9 @@ flowchart TD
 |-------|------|------|
 | `/armor_plates` | `ArmorPlates` | 检测到的装甲板数组（含位姿、数字、图像中心距、云台绝对角） |
 | `/gimbal_angle` | `GimbalAngle` | 电控回传的绝对 yaw/pitch（带时间戳） |
-| `/aim_command` | `AimCommand` | 控制指令（delta_yaw, delta_pitch，单位 rad） |
+| `/tracked_targets` | `TrackedTargets` | EKF 跟踪输出的全部目标列表（含中心、速度、yaw、几何参数、匹配装甲板） |
+| `/aim_command` | `AimCommand` | 控制指令（delta_yaw, delta_pitch，单位 rad）；Planner 弹道补偿后发布 |
+| `/planner_debug` | `PlannerDebug` | Planner 调试信息：原始/预测/弹道补偿世界坐标点、飞行时间、朝向评分 |
 | `/tracker_debug` | `TrackerDebug` | 相机系测量/滤波点 + 世界系四个预测装甲板 `xyza` 与 selected id（Identification/Test 侧按装甲板 pitch=15° 重投影） |
 | `/tracker_data` | `TrackerData` | measurement/filter 的 yaw/pitch |
 | `/visualization_marker_array` | `MarkerArray` | 旋转中心、速度、观测装甲板、滤波装甲板和四块预测装甲板 |
@@ -42,7 +47,8 @@ flowchart TD
 | 功能包 | 职责 | 节点 | 订阅 | 发布 |
 |--------|------|------|------|------|
 | `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别、云台数据打包 | `ArmorPlateIdentification` (相机) / `Test` (视频) | `/gimbal_angle` | `/armor_plates`, TF |
-| `armor_plate_tracker` | 目标选择、世界坐标系 11 维 EKF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracker_debug`, `/tracker_data`, `/visualization_marker_array` |
+| `armor_plate_tracker` | 目标选择、世界坐标系 11 维 EKF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracked_targets`, `/tracker_debug`, `/tracker_data`, `/visualization_marker_array` |
+| `armor_plate_planner` | 目标选择、运动预测、弹道解算、瞄准指令生成 | `armor_plate_planner_node` | `/tracked_targets`, `/gimbal_angle` | `/aim_command`, `/planner_debug` |
 | `armor_plate_serial` | 串口双向通信 | `serial_node` | `/aim_command` | `/gimbal_angle`, (串口) |
 | `armor_plate_interfaces` | 自定义消息定义 | — | — | — |
 | `armor_plate_common` | 公共数学/几何工具（角度、YPR/YPD、坐标系旋转） | — | — | — |
@@ -105,7 +111,15 @@ flowchart TD
 - **丢失处理**：无目标时只预测；`max_lost_time=0.5s` 超时重置。
 - **Debug 重投影**：`TrackerDebug` 回传四个预测装甲板 `xyza`（世界系中心点 + 世界系 yaw）和 `selected_armor_id`；Identification/Test 侧用图像缓存同步到的 `gimbal_yaw_abs/gimbal_pitch_abs`，并按参考工程假设普通装甲板自身 `pitch=15°`，重建 `135mm x 55mm` 矩形投影到 `tracker_debug` 图像窗口。Test 视频模式默认虚拟云台 `pitch=0°`，需要模拟云台姿态时通过参数覆盖。
 
-### 6. 串口双向通信
+### 6. Planner 弹道解算
+
+- **目标选择**：从 `TrackedTargets` 中选取最优跟踪目标。
+- **运动预测**：基于 EKF 状态预测目标在未来 `prediction_time` 时刻的位置。
+- **装甲板生成**：根据四装甲板几何模型生成候选装甲板位置。
+- **弹道补偿**：根据弹丸速度和重力计算弹道偏移，输出补偿后的瞄准点。
+- **调试输出**：`/planner_debug` 发布原始点、预测点、弹道补偿点，Foxglove 可视化。
+
+### 7. 串口双向通信
 
 **视觉 → 电控** (`0xA5 0x5A`)：
 ```c
@@ -193,6 +207,7 @@ colcon build --packages-select \
   armor_plate_identification \
   armor_plate_tracker \
   armor_plate_serial \
+  armor_plate_planner \
   armor_plate_bringup
 
 source install/setup.bash
@@ -225,6 +240,9 @@ ros2 launch armor_plate_identification test.launch.py video_path:=/path/to/video
 # Tracker / 串口
 ros2 launch armor_plate_tracker run.launch.py
 ros2 run armor_plate_serial serial_node
+
+# Planner（独立启动）
+ros2 launch armor_plate_planner run.launch.py
 ```
 
 ---
@@ -262,6 +280,40 @@ Tracker 参数在 `armor_plate_tracker/config/params.yaml`：
 | `max_lost_time` | 0.5 | 丢失超时（秒） |
 | `mutation_yaw_threshold` | 5° | 突变检测阈值（度） |
 
+Planner 参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `bullet_speed` | 25.0 | 弹丸初速（m/s） |
+| `gravity` | 9.81 | 重力加速度（m/s²） |
+| `max_armor_face_angle` | 1.0472 (60°) | 装甲板最大朝向角（rad） |
+| `prediction_time` | 0.0 | 运动预测时间（s），0 表示不预测 |
+| `shooter_offset_x` | 0.0 | 发射器偏移 X（m） |
+| `shooter_offset_y` | 0.0 | 发射器偏移 Y（m） |
+| `shooter_offset_z` | 0.3 | 发射器偏移 Z（m） |
+
+---
+
+## 调试可视化颜色
+
+Foxglove / RViz 中 Marker 颜色含义：
+
+| 颜色 | 含义 |
+|------|------|
+| **绿色** | EKF 预测装甲板（世界系几何模型）、中心点、旋转轴 |
+| **红色** | 观测装甲板（PnP 测量值） |
+| **蓝色** | 滤波装甲板（EKF 滤波后） |
+| **黄色** | 目标中心速度箭头 |
+| **白色** | 装甲板 ID 文字标签 |
+
+Planner 调试点（`/planner_debug`）：
+
+| 字段 | 说明 |
+|------|------|
+| `original_point_world` | 原始装甲板世界坐标（绿色） |
+| `predicted_point_world` | 运动预测后的世界坐标（黄色） |
+| `compensated_point_world` | 弹道补偿后的瞄准点（蓝色） |
+
 ---
 
 ## 目录结构
@@ -285,6 +337,11 @@ Visual-Translationo/
 │   │   │   ├── Tracker.cpp                # 目标选择 + 跟踪逻辑
 │   │   │   └── MyExtendedKalmanFilter.cpp # 11 状态 EKF
 │   │   └── launch/
+│   ├── armor_plate_planner/           # 弹道解算 + 瞄准指令生成
+│   │   ├── config/params.yaml
+│   │   ├── include/armor_plate_planner/
+│   │   ├── launch/
+│   │   └── src/
 │   ├── armor_plate_serial/            # 串口双向通信
 │   └── armor_plate_interfaces/        # 自定义消息
 ├── DeepLearning/                      # 数字识别模型训练工具链

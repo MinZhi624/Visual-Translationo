@@ -44,8 +44,21 @@ def generate_launch_description():
         parameters=[tracker_params_file]
     )
 
+    planner_node = Node(
+        package='armor_plate_planner',
+        executable='armor_plate_planner_node',
+        name='armor_plate_planner_node',
+        parameters=[{
+            'bullet_speed': 25.0,
+            'gravity': 9.81,
+            'max_armor_face_angle': 1.0472,
+            'prediction_time': 0.0,
+        }]
+    )
+
     return LaunchDescription([
         video_path_arg,
         test_node,
         tracker_node,
+        planner_node,
     ])

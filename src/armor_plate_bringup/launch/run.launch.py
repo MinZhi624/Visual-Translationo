@@ -56,6 +56,20 @@ def generate_launch_description():
         parameters=[serial_node_params_file]
     )
 
+    planner_node = Node(
+        package='armor_plate_planner',
+        executable='armor_plate_planner_node',
+        name='armor_plate_planner_node',
+        output='screen',
+        emulate_tty=True,
+        parameters=[{
+            'bullet_speed': 25.0,
+            'gravity': 9.81,
+            'max_armor_face_angle': 1.0472,
+            'prediction_time': 0.0,
+        }]
+    )
+
     foxglove_bridge_node = Node(
         package='foxglove_bridge',
         executable='foxglove_bridge',
@@ -72,6 +86,7 @@ def generate_launch_description():
         use_foxglove_arg,
         identification_node,
         tracker_node,
+        planner_node,
         serial_node,
         foxglove_bridge_node
     ])
