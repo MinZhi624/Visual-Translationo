@@ -2,7 +2,6 @@
 #include "armor_plate_identification/DetectorArmor.hpp"
 #include "armor_plate_identification/Detector.hpp"
 #include "armor_plate_identification/debug/DebugIdentification.hpp"
-#include "armor_plate_identification/debug/DebugTracker.hpp"
 #include "armor_plate_identification/PoseSolver.hpp"
 
 #include "armor_plate_identification/camera/Camera.hpp"
@@ -33,9 +32,6 @@ using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::TrackerDebug;
 using armor_plate_interfaces::msg::PlannerDebug;
 using armor_plate_interfaces::msg::GimbalAngle;
-using armor_plate_identification::KeyFrameCache;
-using armor_plate_identification::KeyFrame;
-using armor_plate_identification::KeyFrameRecord;
 
 struct GimbalRecord {
     builtin_interfaces::msg::Time stamp;
@@ -68,7 +64,6 @@ private:
     bool gimbal_has_data_ = false;
     // GUI
     GuiWorker gui_worker_;
-    DebugTracker debug_tracker_{&pose_solver_, &gui_worker_};
     bool headless_ = false;
     // Tracker Debug线程
     ThreadSafeQueue<TrackerDebug::SharedPtr, true> tracker_debug_queue_{1};
@@ -114,4 +109,3 @@ public:
     ~ArmorPlateIdentification();
     void run();
 };
-

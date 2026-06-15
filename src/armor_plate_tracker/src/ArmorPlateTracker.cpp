@@ -85,8 +85,6 @@ void ArmorPlateTracker::init()
     // ===== 装甲板跟踪器 ===== //
     tracker_.setMaxLostTime(max_lost_time_);
     tracker_.reset();
-
-    if (debug_) RCLCPP_INFO(this->get_logger(), "启动DEBUG模式");
 }
 
 void ArmorPlateTracker::publishMarkerArray(const rclcpp::Time& now)

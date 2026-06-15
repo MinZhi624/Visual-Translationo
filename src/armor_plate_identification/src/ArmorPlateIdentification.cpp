@@ -243,7 +243,6 @@ void ArmorPlateIdentification::identification(cv::Mat& img_bgr)
     debug_base_.mark("preprocess");
 
     lights_.detectArmors(img_thre, img_bgr);
-    GuiWorker::drawArmors(img_show_, lights_.getArmors());
     debug_base_.mark("detectArmors");
 
     armors_ = lights_.getArmors();
@@ -340,6 +339,7 @@ void ArmorPlateIdentification::save()
 
 void ArmorPlateIdentification::show()
 {
+    GuiWorker::drawArmors(img_show_, lights_.getArmors());
     debug_base_.draw(img_show_);
 
     if (!headless_) {
@@ -365,14 +365,6 @@ void ArmorPlateIdentification::compositeDebugOverlay(std::unique_ptr<KeyFrameRec
     // --- Tracker overlay ---
     if (record->tracker_debug) {
         const auto & td = *record->tracker_debug;
-
-        // Draw tracking state text (top-left)
-        const char * state_str = "LOST";
-        if (td.tracking_state == 1) state_str = "DETECTING";
-        else if (td.tracking_state == 2) state_str = "TRACKING";
-        else if (td.tracking_state == 3) state_str = "TEMP_LOST";
-        cv::putText(debug_img, state_str, cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.7,
-                    cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
 
         // Draw EKF car rotation center as RED filled circle
         Eigen::Vector3d center_world(td.center_world.x, td.center_world.y, td.center_world.z);
@@ -531,12 +523,6 @@ builtin_interfaces::msg::Time ArmorPlateIdentification::convertSteadyToRosTime(
     auto now_steady = std::chrono::steady_clock::now();
     auto now_ros = this->now();
     auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now_steady - steady_stamp).count();
-
-    // 每 100 帧打印一次 demosaicing / 格式转换延迟
-    // static int frame_count = 0;
-    // if (++frame_count % 100 == 0) {
-    //     RCLCPP_INFO(this->get_logger(), "Camera processing latency: %.3f ms", elapsed_ns / 1e6);
-    // }
 
     return now_ros - rclcpp::Duration::from_nanoseconds(elapsed_ns);
 }

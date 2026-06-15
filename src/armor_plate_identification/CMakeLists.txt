@@ -18,7 +18,6 @@ set(  ArmorPlateIdentification
   src/PoseSolver.cpp
   src/Detector.cpp
   src/debug/DebugIdentification.cpp
-  src/debug/DebugTracker.cpp
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
 )
@@ -32,7 +31,6 @@ set( Test
   src/debug/DebugTest.cpp
   src/NumberClassifier.cpp
   src/GuiWorker.cpp
-  src/debug/DebugTracker.cpp
   src/debug/YawSearchBenchmark.cpp
 )
 # ======================

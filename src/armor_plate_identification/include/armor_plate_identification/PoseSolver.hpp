@@ -61,7 +61,7 @@ private:
 	size_t selectBestCandidate(
 		const std::vector<PnPCandidate> & candidates,
 		int armor_name_key,
-		const cv::Point2f & target_center
+		const cv::Point2f & targetd_center
 	) const;
 public:
 
