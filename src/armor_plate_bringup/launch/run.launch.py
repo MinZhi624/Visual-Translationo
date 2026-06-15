@@ -66,7 +66,6 @@ def generate_launch_description():
             'bullet_speed': 25.0,
             'gravity': 9.81,
             'max_armor_face_angle': 1.0472,
-            'prediction_time': 0.0,
         }]
     )
 

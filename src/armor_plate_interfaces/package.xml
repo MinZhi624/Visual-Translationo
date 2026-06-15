@@ -15,7 +15,7 @@
        ======================================== -->
   <build_depend>rosidl_default_generators</build_depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
-  
+
   <!-- 本包消息依赖的其他消息包 -->
   <depend>geometry_msgs</depend>
   <depend>builtin_interfaces</depend>

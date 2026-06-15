@@ -21,6 +21,7 @@ private:
     // 发送数据
     float latest_yaw_ = 0.0f;
     float latest_pitch_ = 0.0f;
+    bool latest_is_valid_ = false;
     uint8_t latest_seq_ = 0;
     std::mutex data_mutex_;
     rclcpp::Subscription<AimCommand>::SharedPtr aim_command_sub_;
@@ -37,7 +38,7 @@ private:
     std::vector<uint8_t> recv_temp_buf_;
     // 时间补偿
     double timestamp_offset_ = 0.0;
-    
+
     void publishFrame(const std::array<uint8_t, 13> & frame)
     {
         const auto * packet = reinterpret_cast<const EcToVisionFrame_t *>(frame.data());
@@ -112,30 +113,41 @@ private:
     }
     void sendData(const AimCommand::SharedPtr msg)
     {
-        VisionToEcFrame_t frame;
+        std::lock_guard<std::mutex> lock(data_mutex_);
         latest_yaw_ = msg->delta_yaw;
         latest_pitch_ = msg->delta_pitch;
-        if(latest_pitch_ == 0.0f && latest_yaw_ == 0.0f) return;
+        latest_is_valid_ = msg->is_valid;
+
+        VisionToEcFrame_t frame{};
         frame.sof1 = 0xA5;
         frame.sof2 = 0x5A;
         frame.seq = latest_seq_++;
-        frame.target_valid = 1;
-        frame.delta_yaw_1e4rad = static_cast<int16_t>(latest_yaw_ * 10000.0f);
-        frame.delta_pitch_1e4rad = static_cast<int16_t>(latest_pitch_ * 10000.0f);
+        frame.target_valid = latest_is_valid_ ? 1 : 0;
+
+        int16_t delta_yaw_1e4 = static_cast<int16_t>(latest_yaw_ * 10000.0f);
+        int16_t delta_pitch_1e4 = static_cast<int16_t>(latest_pitch_ * 10000.0f);
+
+        if (!latest_is_valid_) {
+            delta_yaw_1e4 = 0;
+            delta_pitch_1e4 = 0;
+        }
+
+        frame.delta_yaw_1e4rad = delta_yaw_1e4;
+        frame.delta_pitch_1e4rad = delta_pitch_1e4;
+
         crc16::appendCrc16(frame);
+
         std::vector<uint8_t> data(
             reinterpret_cast<uint8_t *>(&frame),
             reinterpret_cast<uint8_t *>(&frame) + sizeof(frame));
         try {
             if(!sendAll(data)) {
                 RCLCPP_ERROR(this->get_logger(), "发送失败");
-            } else {
-                // RCLCPP_INFO(this->get_logger(), "发送数据： vaild = %d, yaw = %f, pitch = %f",target_valid, yaw, pitch);   
             }
         } catch (const std::exception & e) {
             RCLCPP_ERROR(this->get_logger(), "发送错误: %s", e.what());
         }
-    } 
+    }
     void init()
     {
         // ===== 串口初始化 =====

@@ -44,16 +44,16 @@ target_include_directories(serial_latency_test PUBLIC
 # ======================
 # 安装
 # ======================
-install(TARGETS 
+install(TARGETS
   serial_node
   serial_latency_test
   DESTINATION lib/${PROJECT_NAME}
 )
-install(DIRECTORY 
+install(DIRECTORY
   include/
   DESTINATION include/${PROJECT_NAME}
 )
-install(DIRECTORY 
+install(DIRECTORY
   launch config
   DESTINATION share/${PROJECT_NAME}
 )

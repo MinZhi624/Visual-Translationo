@@ -15,7 +15,7 @@ NumberClassifier::NumberClassifier(
 {
     // Opencv DNN
     net_ = cv::dnn::readNetFromONNX(config_path + "/model/number_cnn.onnx");
-    // OpenVINO 
+    // OpenVINO
     auto model = core_.read_model(config_path + "/model/number_cnn.onnx");
     compiled_model_ = core_.compile_model(model, "AUTO", ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
 }

@@ -5,9 +5,11 @@
 #include <armor_plate_interfaces/ArmorPose.hpp>
 #include <armor_plate_interfaces/ArmorTypes.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
+#include <armor_plate_interfaces/TrackerTypes.hpp>
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "armor_plate_interfaces/msg/tracked_armor.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -15,8 +17,7 @@
 
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
-
-enum class TrackerState{LOST, TEMP_LOST, DETECTING, TRACKING};
+using armor_plate_interfaces::TrackerState;
 
 /** @brief 状态管理 + 目标选择 */
 class Tracker
@@ -84,6 +85,12 @@ public:
     Eigen::Vector3d getCenterPointWorld() const { return center_point_world_; }
     Eigen::Vector3d getCenterVelocity() const { return center_velocity_; }
     int getSelectedArmorId() const { return selected_armor_id_; }
+    ArmorName getArmorName() const { return last_armor_name_; }
+    TrackerState getState() const { return state_; }
+
+    // EKF 状态
+    Eigen::Vector<double, 11> getEKFState() const { return target_.getEKFState(); }
+    std::vector<armor_plate_interfaces::msg::TrackedArmor> reconstructArmors() const;
 
     armor_plate_interfaces::msg::TrackerDebug CreatedebugMsg(const builtin_interfaces::msg::Time & stamp) const;
 };

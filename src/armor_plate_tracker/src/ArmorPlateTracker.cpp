@@ -19,32 +19,39 @@ void ArmorPlateTracker::ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
 
 void ArmorPlateTracker::publish(const ArmorPlates::SharedPtr armor_plates)
 {
-    const auto & measured = tracker_.getMeasuredArmor();
-    const auto & filtered = tracker_.getFilterArmor();
-    // AimCommand 和 TrackerData 仅在跟踪成功时发送
-    if (!tracker_.isLost()) {
-        if(tracker_.isSend()) {
-            AimCommand aim_command;
-            aim_command.delta_pitch = tracker_.getPitch();
-            aim_command.delta_yaw = tracker_.getYaw();
-            aim_command_pub_->publish(aim_command);
-        }
-        
+    // Always publish TrackedTargets
+    {
+        TrackedTargets targets_msg;
+        targets_msg.header = armor_plates->header;
 
-        // RCLCPP_INFO(this->get_logger(),
-        //     "delta_yaw=%.4f rad (%.2f deg), delta_pitch=%.4f rad (%.2f deg)",
-        //     aim_command.delta_yaw, aim_command.delta_yaw * 180.0 / M_PI,
-        //     aim_command.delta_pitch, aim_command.delta_pitch * 180.0 / M_PI);
+        // LOST 时 targets 为空数组；DETECTING/TRACKING/TEMP_LOST 时发布 EKF 数据
+        if (!tracker_.isLost()) {
+            armor_plate_interfaces::msg::TrackedTarget target;
+            target.track_id = 0;  // 第一版单目标
+            target.armor_name = static_cast<int32_t>(tracker_.getArmorName());
+            target.tracking_state = armor_plate_interfaces::trackerStateToUint8(tracker_.getState());
 
-        TrackerData tracker_data_msg;
-        tracker_data_msg.header = armor_plates->header;
-        tracker_data_msg.measurement_yaw = measured.ypd_gimbal_.x();
-        tracker_data_msg.measurement_pitch = measured.ypd_gimbal_.y();
-        tracker_data_msg.filter_yaw = filtered.ypd_gimbal_.x();
-        tracker_data_msg.filter_pitch = filtered.ypd_gimbal_.y();
-        if (tracker_data_pub_) {
-            tracker_data_pub_->publish(tracker_data_msg);
+            // Fill from EKF state
+            auto ekf_state = tracker_.getEKFState();
+            target.center_world.x = ekf_state[0];  // x_c
+            target.center_world.y = ekf_state[2];  // y_c
+            target.center_world.z = ekf_state[4];  // z_c
+            target.center_velocity.x = ekf_state[1];  // v_x
+            target.center_velocity.y = ekf_state[3];  // v_y
+            target.center_velocity.z = ekf_state[5];  // v_z
+            target.yaw = ekf_state[6];
+            target.yaw_rate = ekf_state[7];
+            target.radius = ekf_state[8];
+            target.radius_offset = ekf_state[9];
+            target.height_offset = ekf_state[10];
+
+            // Reconstruct armor plates from EKF state
+            target.armors = tracker_.reconstructArmors();
+
+            targets_msg.targets.push_back(target);
         }
+
+        tracked_targets_pub_->publish(targets_msg);
     }
 
     auto now = this->now();
@@ -67,8 +74,7 @@ void ArmorPlateTracker::init()
         rclcpp::SensorDataQoS(),
         std::bind(&ArmorPlateTracker::ArmorPlatesCallBack, this, std::placeholders::_1)
     );
-    aim_command_pub_ = this->create_publisher<AimCommand>("aim_command", rclcpp::SensorDataQoS());
-    tracker_data_pub_ = this->create_publisher<TrackerData>("tracker_data", 10);
+    tracked_targets_pub_ = this->create_publisher<TrackedTargets>("/tracked_targets", rclcpp::SensorDataQoS());
     marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("visualization_marker_array", 10);
     // ===== DEBUG ===== //
     debug_ = this->declare_parameter<bool>("debug", false);

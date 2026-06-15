@@ -21,9 +21,9 @@ struct CameraIntrinsics
 struct CameraConfig
 {
     enum Type { GALAXY, MINDVISION } type = Type::GALAXY;
-    double exposure = 3500.0;     
-    double gain = 1.0;            
-    std::string camera_info_url;  
+    double exposure = 3500.0;
+    double gain = 1.0;
+    std::string camera_info_url;
 };
 
 /** @brief 相机基类*/
@@ -48,7 +48,7 @@ public:
     explicit Camera(const CameraConfig& config);
     ~Camera();
 
-    // 存在unique_ptr 的对象，不能拷贝构造和赋值，只能移动构造和赋值 
+    // 存在unique_ptr 的对象，不能拷贝构造和赋值，只能移动构造和赋值
     Camera(Camera&&) = default;
     Camera& operator=(Camera&&) = default;
 

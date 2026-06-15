@@ -10,6 +10,7 @@ endif()
 # ======================
 set(  ArmorPlateIdentification
   src/ArmorPlateIdentification.cpp
+  src/KeyFrameCache.cpp
   src/DetectorArmor.cpp
   src/camera/Camera.cpp
   src/camera/GalaxyCamera.cpp
@@ -23,6 +24,7 @@ set(  ArmorPlateIdentification
 )
 set( Test
   src/Test.cpp
+  src/KeyFrameCache.cpp
   src/DetectorArmor.cpp
   src/PoseSolver.cpp
   src/Detector.cpp

@@ -14,7 +14,7 @@ private:
     Eigen::Matrix<double, 11, 11> error_cov_;
     // F 状态转移矩阵 --> 这里状态转移是线性化
     Eigen::Matrix<double, 11, 11> state_transition_matrix_;
-    // H 观测雅可比矩阵 
+    // H 观测雅可比矩阵
     Eigen::Matrix<double, 4, 11> observation_jacobian_;
     // Q 过程噪声协方差矩阵
     Eigen::Matrix<double, 11, 11> process_noise_cov_;
@@ -23,13 +23,13 @@ private:
     // K 卡尔曼增益
     Eigen::Matrix<double, 11, 4> kalman_gain_;
     // Z 观测值、滤波值
-    Eigen::Vector<double, 4> origin_observation_;    
-    Eigen::Vector<double, 4> filtered_observation_;  
+    Eigen::Vector<double, 4> origin_observation_;
+    Eigen::Vector<double, 4> filtered_observation_;
     // 状态评估
     std::deque<int> nis_failures_; // 这里采用int是为了方便统计
     static constexpr double NIS_THRESHOLD = 9.49; // 4维观测95%置信度下的标准NIS阈值
     int armor_id_ = 0;
-    
+
     Eigen::Matrix<double, 4, 11> calculateObservationJacobian();
     static Eigen::Matrix4d calculateXYZAToYPDAJacobian(const Eigen::Vector<double, 4> & xyza);
     static Eigen::Matrix<double, 4, 11> calculateStateToXYZAJacobian(const Eigen::Vector<double, 11> & state, int armor_id);

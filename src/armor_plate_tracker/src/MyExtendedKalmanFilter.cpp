@@ -92,7 +92,7 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     /*
         自适应 R 矩阵:
         核心原因，当装甲板侧过来的时候，位姿解算会不准，详细看Compare/Identification里面的图片.
-        会呈现出来椭圆的的现象。尤其是当我角点识别不好的preprocess的情况下  
+        会呈现出来椭圆的的现象。尤其是当我角点识别不好的preprocess的情况下
         z[0] = yaw_to_armor
         z[1] = pitch_to_armor
         z[2] = distance_to_armor
@@ -130,7 +130,7 @@ Eigen::Vector<double, 4> MyExtendedKalmanFilter::correct(const Eigen::Vector<dou
     /*
         Joseph stabilized covariance update。
         原本的 P = (I - K * H) * P
-        
+
         容易 P 浮点数计算不稳定，可能会破坏对称性
         但是 APA^T 更新方法更容易保持对称性
     */

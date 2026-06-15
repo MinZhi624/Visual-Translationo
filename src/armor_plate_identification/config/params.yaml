@@ -22,11 +22,11 @@ test_node_cpp:
     stats_interval: 50
     # === 帧调试 ===
     debug_frame: false
-    delay_time: 20 
+    delay_time: 20
     debug_frame_count: 0
     # === 记录模式 ===
     # debug_frame: true
-    # delay_time: 0 
+    # delay_time: 0
     # debug_frame_count: 500
 
 armor_plate_identification_node:

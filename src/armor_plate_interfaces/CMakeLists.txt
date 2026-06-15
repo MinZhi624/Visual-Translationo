@@ -39,9 +39,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArmorPlate.msg"
   "msg/ArmorPlates.msg"
   "msg/AimCommand.msg"
-  "msg/TrackerData.msg"
   "msg/TrackerDebug.msg"
   "msg/GimbalAngle.msg"
+  "msg/TrackedArmor.msg"
+  "msg/TrackedTarget.msg"
+  "msg/TrackedTargets.msg"
+  "msg/PlannerDebug.msg"
   DEPENDENCIES geometry_msgs std_msgs builtin_interfaces
 )
 

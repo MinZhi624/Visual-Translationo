@@ -161,7 +161,7 @@ std::vector<DetectorArmor> Detector::matchLights(std::vector<Light>& all_lights,
             candidates.push_back(std::move(armor));
         }
     }
-    
+
     // 去重：共享灯条的装甲板只保留最优解
     std::vector<bool> removed(candidates.size(), false);
     for (size_t i = 0; i < candidates.size(); i++) {
@@ -198,7 +198,7 @@ std::vector<DetectorArmor> Detector::matchLights(std::vector<Light>& all_lights,
 ////////// ===== CHECK 函数 ===== /////////
 bool Detector::checkLightGeometry(const std::vector<cv::Point>& contour) const
 {
-    // 检查轮廓点的个数 
+    // 检查轮廓点的个数
     if (contour.size() <= 6) return false;
     int area = cv::contourArea(contour);
     // 检查面积
@@ -230,7 +230,7 @@ cv::Mat Detector::getArmorPattern(const cv::Mat& img_bgr, const DetectorArmor& a
     if (armor.paired_lights_.size() != 2) return cv::Mat();
     const auto& left = armor.paired_lights_[0];
     const auto& right = armor.paired_lights_[1];
-    
+
     cv::Point2f left_tb = left.bottom_ - left.top_;
     cv::Point2f right_tb = right.bottom_ - right.top_;
 

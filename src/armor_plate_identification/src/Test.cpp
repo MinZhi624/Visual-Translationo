@@ -1,10 +1,32 @@
 // 这个主要是一个测试文件，在没有相机的时候测试
 #include "armor_plate_identification/Test.hpp"
 #include "armor_plate_identification/debug/YawSearchBenchmark.hpp"
+#include <armor_plate_interfaces/ArmorTypes.hpp>
+#include <armor_plate_interfaces/ArmorPose.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/exceptions.hpp>
 
 #include <cmath>
+
+static bool isValidProjection(const cv::Point2f & px)
+{
+    return std::isfinite(px.x) && std::isfinite(px.y) && px.x >= 0 && px.y >= 0;
+}
+
+static void drawArmorRect(cv::Mat & img, const std::vector<cv::Point2f> & points,
+                          const cv::Scalar & color, int id)
+{
+    if (points.size() != 4) return;
+    for (const auto & p : points) {
+        if (!std::isfinite(p.x) || !std::isfinite(p.y)) return;
+    }
+    for (int i = 0; i < 4; ++i) {
+        cv::line(img, points[i], points[(i + 1) % 4], color, 2, cv::LINE_AA);
+    }
+    cv::Point2f center = (points[0] + points[2]) * 0.5f;
+    cv::putText(img, std::to_string(id), center, cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1,
+                cv::LINE_AA);
+}
 
 void Test::run()
 {
@@ -37,7 +59,7 @@ void Test::run()
         debug_test_.mark("save");
         show();
         debug_test_.mark("show");
-        
+
         debug_test_.onFrameEnd();
 
         KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
@@ -84,25 +106,14 @@ void Test::trackerDebugCallBack(const TrackerDebug::SharedPtr msg)
 
 void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
 {
-    Record rec;
-    Record matched;
-    bool found = false;
-    while (img_queue_.pop(rec, std::chrono::milliseconds(0))) {
-        if (rec.img_stamp == msg->header.stamp) {
-            matched = rec;
-            found = true;
-            break;
-        }
-    }
-    if (!found) return;
+    stats_.tracker_debug_count++;
 
-    cv::Mat debug_img = matched.img.clone();
+    int64_t timestamp_ns = msg->header.stamp.sec * 1000000000LL +
+        msg->header.stamp.nanosec;
 
-    debug_tracker_.drawTragetPoints(debug_img, *msg, matched.gimbal);
-    debug_tracker_.drawPredictedCar(debug_img, *msg, matched.gimbal);
-
-    if (!headless_ && debug_test_.shouldShow()) {
-        debug_tracker_.pushTrackerDebugFrame(debug_img);
+    auto record = keyframe_cache_->submitTrackerDebug(timestamp_ns, msg);
+    if (record) {
+        compositeDebugOverlay(std::move(record));
     }
 
     if (debug_test_.isDebugFrameMode()) {
@@ -110,7 +121,7 @@ void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
         debug_test_.saveTrackerDebug(log_dir, *msg);
         if (++tracker_debug_count_ >= debug_test_.getDebugFrameCount()) {
             RCLCPP_INFO(this->get_logger(), "Tracker 已收到 %d 条消息，结束", tracker_debug_count_);
-            rclcpp::shutdown();
+            should_exit_ = true;
         }
     }
 }
@@ -128,6 +139,137 @@ void Test::stopTrackerDebugWorker()
 {
     tracker_debug_worker_running_ = false;
     if (tracker_debug_thread_.joinable()) tracker_debug_thread_.join();
+}
+
+void Test::plannerDebugCallBack(const PlannerDebug::SharedPtr msg)
+{
+    planner_debug_queue_.push(msg);
+}
+
+void Test::processPlannerDebug(const PlannerDebug::SharedPtr msg)
+{
+    // 统计收集
+    stats_.planner_debug_count++;
+    stats_.last_planner_debug_stamp = msg->header.stamp;
+    stats_.last_selected_track_id = msg->selected_track_id;
+    stats_.last_selected_armor_id = msg->selected_armor_id;
+    double pt = std::abs(msg->prediction_time);
+    if (pt > stats_.max_prediction_time_abs) {
+        stats_.max_prediction_time_abs = pt;
+    }
+
+    int64_t timestamp_ns = msg->header.stamp.sec * 1000000000LL +
+        msg->header.stamp.nanosec;
+
+    auto record = keyframe_cache_->submitPlannerDebug(timestamp_ns, msg);
+    if (record) {
+        compositeDebugOverlay(std::move(record));
+    }
+}
+
+void Test::plannerDebugWorker()
+{
+    while (rclcpp::ok() && planner_debug_worker_running_) {
+        PlannerDebug::SharedPtr msg;
+        if (!planner_debug_queue_.pop(msg, std::chrono::milliseconds(100))) continue;
+        if (msg) processPlannerDebug(msg);
+    }
+}
+
+void Test::stopPlannerDebugWorker()
+{
+    planner_debug_worker_running_ = false;
+    if (planner_debug_thread_.joinable()) planner_debug_thread_.join();
+}
+
+void Test::compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record)
+{
+    if (!record || !record->frame || record->frame->image.empty()) return;
+
+    cv::Mat & debug_img = record->frame->image;
+    const GimbalData & gimbal = record->frame->gimbal;
+
+    // --- Tracker overlay ---
+    if (record->tracker_debug) {
+        const auto & td = *record->tracker_debug;
+
+        // 绘制追踪状态文字
+        const char * state_str = "LOST";
+        if (td.tracking_state == 1) state_str = "DETECTING";
+        else if (td.tracking_state == 2) state_str = "TRACKING";
+        else if (td.tracking_state == 3) state_str = "TEMP_LOST";
+        cv::putText(debug_img, state_str, cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                    cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+
+        // 绘制车体旋转中心（红色实心圆）
+        Eigen::Vector3d center_world(td.center_world.x, td.center_world.y, td.center_world.z);
+        cv::Point2f center_px = pose_solver_.xyzWorldToPixel(center_world, gimbal);
+        if (isValidProjection(center_px)) {
+            cv::circle(debug_img, center_px, 5, cv::Scalar(0, 0, 255), -1);
+        }
+
+        // 绘制 4 个预测装甲板（黄色矩形）
+        ArmorName name_enum = intToArmorName(td.armor_name);
+        ArmorType type = armorNameToType(name_enum);
+        for (std::size_t i = 0; i < td.predicted_armor_points_world.size(); ++i) {
+            const auto & armor = td.predicted_armor_points_world[i];
+            Eigen::Vector3d armor_world(armor.x, armor.y, armor.z);
+
+            cv::Point2f armor_px = pose_solver_.xyzWorldToPixel(armor_world, gimbal);
+            if (!isValidProjection(armor_px)) continue;
+
+            ArmorPose armor_pose;
+            armor_pose.xyz_world = armor_world;
+            armor_pose.yaw = (i < td.predicted_armor_yaws_world.size())
+                                 ? td.predicted_armor_yaws_world[i]
+                                 : 0.0;
+            armor_pose.name = name_enum;
+            armor_pose.type = type;
+
+            auto corners = pose_solver_.reprojectArmor(armor_pose, gimbal);
+            drawArmorRect(debug_img, corners, cv::Scalar(0, 255, 255), static_cast<int>(i));
+        }
+    }
+
+    // --- Planner overlay ---
+    if (record->planner_debug) {
+        const auto & pd = *record->planner_debug;
+        if (!pd.is_valid) {
+            cv::putText(debug_img, "PLANNER INVALID", cv::Point(10, 55),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+        } else {
+            Eigen::Vector3d orig_world(pd.original_point_world.x, pd.original_point_world.y,
+                                       pd.original_point_world.z);
+            cv::Point2f orig_px = pose_solver_.xyzWorldToPixel(orig_world, gimbal);
+
+            Eigen::Vector3d pred_world(pd.predicted_point_world.x, pd.predicted_point_world.y,
+                                       pd.predicted_point_world.z);
+            cv::Point2f pred_px = pose_solver_.xyzWorldToPixel(pred_world, gimbal);
+
+            Eigen::Vector3d comp_world(pd.compensated_point_world.x, pd.compensated_point_world.y,
+                                       pd.compensated_point_world.z);
+            cv::Point2f comp_px = pose_solver_.xyzWorldToPixel(comp_world, gimbal);
+
+            bool orig_ok = isValidProjection(orig_px);
+            bool pred_ok = isValidProjection(pred_px);
+            bool comp_ok = isValidProjection(comp_px);
+
+            // 绿色=原始，黄色=预测，蓝色=补偿
+            if (orig_ok) cv::circle(debug_img, orig_px, 5, cv::Scalar(0, 255, 0), -1);
+            if (pred_ok) cv::circle(debug_img, pred_px, 5, cv::Scalar(0, 255, 255), -1);
+            if (comp_ok) cv::circle(debug_img, comp_px, 5, cv::Scalar(255, 0, 0), -1);
+
+            // 绿线：原始→预测
+            if (orig_ok && pred_ok) cv::line(debug_img, orig_px, pred_px, cv::Scalar(0, 255, 0), 2);
+            // 黄线：预测→补偿
+            if (pred_ok && comp_ok)
+                cv::line(debug_img, pred_px, comp_px, cv::Scalar(0, 255, 255), 2);
+        }
+    }
+
+    if (!headless_ && debug_test_.shouldShow()) {
+        gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, debug_img);
+    }
 }
 
 void Test::init(const std::string& video_path)
@@ -159,9 +301,13 @@ void Test::init(const std::string& video_path)
     initDetector();
     initPoseSolver();
     armor_plates_pub_ = this->create_publisher<ArmorPlates>("armor_plates", rclcpp::SensorDataQoS());
+    gimbal_angle_pub_ = this->create_publisher<armor_plate_interfaces::msg::GimbalAngle>("gimbal_angle", rclcpp::SensorDataQoS());
+
+    keyframe_cache_ = std::make_unique<KeyFrameCache>(100);
 
     initDebug();
     initYawBenchmark();
+    initStatsSubscriptions();
     if (target_color_ == "BLUE") RCLCPP_INFO(this->get_logger(), "目标颜色为蓝色");
     if (target_color_ == "RED") RCLCPP_INFO(this->get_logger(), "目标颜色为红色");
 }
@@ -210,12 +356,28 @@ void Test::publish()
     armor_plates_msg.gimbal_yaw_abs = test_gimbal_.yaw_abs;
     armor_plates_msg.gimbal_pitch_abs = test_gimbal_.pitch_abs;
     armor_plates_pub_->publish(armor_plates_msg);
+
+    // 同步发布 GimbalAngle，供 Planner 节点使用
+    armor_plate_interfaces::msg::GimbalAngle gimbal_msg;
+    gimbal_msg.stamp = read_stamp_;
+    gimbal_msg.yaw_abs = test_gimbal_.yaw_abs;
+    gimbal_msg.pitch_abs = test_gimbal_.pitch_abs;
+    gimbal_angle_pub_->publish(gimbal_msg);
 }
 
 void Test::save()
 {
     debug_test_.save();
-    img_queue_.push({read_stamp_, img_show_, test_gimbal_});
+
+    auto frame = std::make_unique<KeyFrame>();
+    frame->image = img_show_.clone();
+    frame->gimbal = test_gimbal_;
+    int64_t timestamp_ns = read_stamp_.sec * 1000000000LL + read_stamp_.nanosec;
+
+    auto record = keyframe_cache_->submitFrame(timestamp_ns, std::move(frame));
+    if (record) {
+        compositeDebugOverlay(std::move(record));
+    }
 }
 
 void Test::show()
@@ -249,6 +411,7 @@ Test::~Test()
 {
     pose_solver_.setYawSearchObserver(nullptr);
     stopTrackerDebugWorker();
+    stopPlannerDebugWorker();
 }
 
 int main(int argc, char **argv)
@@ -257,11 +420,14 @@ int main(int argc, char **argv)
     auto node = std::make_shared<Test>(argv[1]);
     std::thread spin_thread([&](){rclcpp::spin(node);});
     int status = node->runWithStatus();
+    node->stopTrackerDebugWorker();
+    node->stopPlannerDebugWorker();
     rclcpp::shutdown();
     if(spin_thread.joinable()) spin_thread.join();
     node->closeTrackerDebugFile();
+    bool pass = node->printSummary();
     bool finalized = node->finalizeYawBenchmark();
-    return (status == 0 && finalized) ? 0 : (status != 0 ? status : 1);
+    return (status == 0 && pass && finalized) ? 0 : (status != 0 ? status : 1);
 }
 
 void Test::initDebug()
@@ -288,6 +454,13 @@ void Test::initDebug()
     );
     tracker_debug_worker_running_ = true;
     tracker_debug_thread_ = std::thread(&Test::trackerDebugWorker, this);
+
+    planner_debug_sub_ = this->create_subscription<PlannerDebug>(
+        "planner_debug", rclcpp::SensorDataQoS(),
+        std::bind(&Test::plannerDebugCallBack, this, std::placeholders::_1)
+    );
+    planner_debug_worker_running_ = true;
+    planner_debug_thread_ = std::thread(&Test::plannerDebugWorker, this);
     if (base_params.debug_timecontrol_) RCLCPP_INFO(this->get_logger(), "时间控制DEBUG模式开启");
     if (base_params.debug_lights_) RCLCPP_INFO(this->get_logger(), "灯条匹配识别DEBUG模式开启");
     if (base_params.debug_preprocessing_) RCLCPP_INFO(this->get_logger(), "图像预处理DEBUG模式开启");
@@ -329,6 +502,67 @@ void Test::initPoseSolver()
     cv::Mat distortion_coefficients = (cv::Mat_<double>(1, 5) <<
         -0.059743, 0.355479, -0.000625, 0.001595, 0.000000);
     pose_solver_ = PoseSolver(camera_matrix, distortion_coefficients);
+}
+
+void Test::initStatsSubscriptions()
+{
+    tracked_targets_sub_ = this->create_subscription<armor_plate_interfaces::msg::TrackedTargets>(
+        "/tracked_targets", rclcpp::SensorDataQoS(),
+        [this](const armor_plate_interfaces::msg::TrackedTargets::SharedPtr /*msg*/) {
+            stats_.tracked_targets_count++;
+        });
+
+    // PlannerDebug 统计已在 processPlannerDebug() 中收集
+
+    aim_command_sub_ = this->create_subscription<armor_plate_interfaces::msg::AimCommand>(
+        "/aim_command", rclcpp::SensorDataQoS(),
+        [this](const armor_plate_interfaces::msg::AimCommand::SharedPtr msg) {
+            stats_.aim_command_count++;
+            stats_.last_aim_command_stamp = builtin_interfaces::msg::Time();
+            if (!msg->is_valid) {
+                stats_.aim_command_invalid_count++;
+            }
+        });
+
+    RCLCPP_INFO(this->get_logger(), "消息统计订阅已初始化");
+}
+
+bool Test::printSummary()
+{
+    RCLCPP_INFO(this->get_logger(), "============ 自动测试统计汇总 ============");
+    RCLCPP_INFO(this->get_logger(), "  TrackedTargets 消息数: %d", stats_.tracked_targets_count);
+    RCLCPP_INFO(this->get_logger(), "  TrackerDebug   消息数: %d", stats_.tracker_debug_count);
+    RCLCPP_INFO(this->get_logger(), "  PlannerDebug   消息数: %d", stats_.planner_debug_count);
+    RCLCPP_INFO(this->get_logger(), "  AimCommand     消息数: %d", stats_.aim_command_count);
+    RCLCPP_INFO(this->get_logger(), "  AimCommand invalid数: %d", stats_.aim_command_invalid_count);
+    RCLCPP_INFO(this->get_logger(), "  max|prediction_time|: %.6f", stats_.max_prediction_time_abs);
+    RCLCPP_INFO(this->get_logger(), "  最后 selected_track_id: %d", stats_.last_selected_track_id);
+    RCLCPP_INFO(this->get_logger(), "  最后 selected_armor_id: %d", stats_.last_selected_armor_id);
+
+    bool pass = true;
+    if (stats_.tracked_targets_count == 0) {
+        RCLCPP_WARN(this->get_logger(), "  [FAIL] 没有收到 TrackedTargets");
+        pass = false;
+    }
+    if (stats_.tracker_debug_count == 0) {
+        RCLCPP_WARN(this->get_logger(), "  [FAIL] 没有收到 TrackerDebug");
+        pass = false;
+    }
+    if (stats_.planner_debug_count == 0) {
+        RCLCPP_WARN(this->get_logger(), "  [FAIL] 没有收到 PlannerDebug");
+        pass = false;
+    }
+    if (stats_.aim_command_count == 0) {
+        RCLCPP_WARN(this->get_logger(), "  [FAIL] 没有收到 AimCommand");
+        pass = false;
+    }
+    if (stats_.max_prediction_time_abs > 1e-6) {
+        RCLCPP_WARN(this->get_logger(), "  [FAIL] prediction_time 不为 0: %.6f", stats_.max_prediction_time_abs);
+        pass = false;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "==========================================");
+    return pass;
 }
 
 void Test::initYawBenchmark()
@@ -415,6 +649,11 @@ int Test::runWithStatus()
 
     cv::Mat frame;
     while (rclcpp::ok()) {
+        if (should_exit_.load()) {
+            RCLCPP_INFO(this->get_logger(), "收到退出信号，结束");
+            break;
+        }
+
         if (yaw_benchmark_ && yaw_benchmark_->shouldStop()) {
             RCLCPP_INFO(this->get_logger(), "Yaw benchmark 达到最大样本数，结束");
             break;
@@ -449,7 +688,7 @@ int Test::runWithStatus()
         debug_test_.mark("save");
         show();
         debug_test_.mark("show");
-        
+
         debug_test_.onFrameEnd();
 
         KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();

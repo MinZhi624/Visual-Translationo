@@ -1,4 +1,28 @@
 #include "armor_plate_identification/ArmorPlateIdentification.hpp"
+#include <armor_plate_interfaces/ArmorTypes.hpp>
+#include <armor_plate_interfaces/ArmorPose.hpp>
+#include <cmath>
+
+static bool isValidProjection(const cv::Point2f & px)
+{
+    return std::isfinite(px.x) && std::isfinite(px.y) && px.x >= 0 && px.y >= 0;
+}
+
+static void drawArmorRect(cv::Mat & img, const std::vector<cv::Point2f> & points,
+                          const cv::Scalar & color, int id)
+{
+    if (points.size() != 4) return;
+    // 验证所有角点 finite
+    for (const auto & p : points) {
+        if (!std::isfinite(p.x) || !std::isfinite(p.y)) return;
+    }
+    for (int i = 0; i < 4; ++i) {
+        cv::line(img, points[i], points[(i + 1) % 4], color, 2, cv::LINE_AA);
+    }
+    cv::Point2f center = (points[0] + points[2]) * 0.5f;
+    cv::putText(img, std::to_string(id), center, cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 1,
+                cv::LINE_AA);
+}
 
 void ArmorPlateIdentification::run()
 {
@@ -56,27 +80,30 @@ void ArmorPlateIdentification::trackerDebugCallBack(const TrackerDebug::SharedPt
     tracker_debug_queue_.push(msg);
 }
 
+void ArmorPlateIdentification::plannerDebugCallBack(const PlannerDebug::SharedPtr msg)
+{
+    planner_debug_queue_.push(msg);
+}
+
 void ArmorPlateIdentification::processTrackerDebug(const TrackerDebug::SharedPtr msg)
 {
-    Record rec;
-    Record matched;
-    bool found = false;
-    while (img_queue_.pop(rec, std::chrono::milliseconds(0))) {
-        if (rec.img_stamp == msg->header.stamp) {
-            matched = rec;
-            found = true;
-            break;
-        }
+    int64_t timestamp_ns = msg->header.stamp.sec * 1000000000LL +
+      msg->header.stamp.nanosec;
+
+    auto record = keyframe_cache_->submitTrackerDebug(timestamp_ns, msg);
+    if (record) {
+        compositeDebugOverlay(std::move(record));
     }
-    if (!found) return;
+}
 
-    cv::Mat debug_img = matched.img.clone();
+void ArmorPlateIdentification::processPlannerDebug(const PlannerDebug::SharedPtr msg)
+{
+    int64_t timestamp_ns = msg->header.stamp.sec * 1000000000LL +
+      msg->header.stamp.nanosec;
 
-    debug_tracker_.drawTragetPoints(debug_img, *msg, matched.gimbal);
-    debug_tracker_.drawPredictedCar(debug_img, *msg, matched.gimbal);
-
-    if (!headless_) {
-        debug_tracker_.pushTrackerDebugFrame(debug_img);
+    auto record = keyframe_cache_->submitPlannerDebug(timestamp_ns, msg);
+    if (record) {
+        compositeDebugOverlay(std::move(record));
     }
 }
 
@@ -93,6 +120,21 @@ void ArmorPlateIdentification::stopTrackerDebugWorker()
 {
     tracker_debug_worker_running_ = false;
     if (tracker_debug_thread_.joinable()) tracker_debug_thread_.join();
+}
+
+void ArmorPlateIdentification::plannerDebugWorker()
+{
+    while (rclcpp::ok() && planner_debug_worker_running_) {
+        PlannerDebug::SharedPtr msg;
+        if (!planner_debug_queue_.pop(msg, std::chrono::milliseconds(100))) continue;
+        if (msg) processPlannerDebug(msg);
+    }
+}
+
+void ArmorPlateIdentification::stopPlannerDebugWorker()
+{
+    planner_debug_worker_running_ = false;
+    if (planner_debug_thread_.joinable()) planner_debug_thread_.join();
 }
 
 void ArmorPlateIdentification::cameraCaptureWorker()
@@ -173,12 +215,21 @@ void ArmorPlateIdentification::init()
     initPoseSolver();
     initDebug();
 
+    keyframe_cache_ = std::make_unique<KeyFrameCache>();
+
     tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
-        "tracker_debug", 10,
+        "tracker_debug", rclcpp::SensorDataQoS(),
         std::bind(&ArmorPlateIdentification::trackerDebugCallBack, this, std::placeholders::_1)
     );
     tracker_debug_worker_running_ = true;
     tracker_debug_thread_ = std::thread(&ArmorPlateIdentification::trackerDebugWorker, this);
+
+    planner_debug_sub_ = this->create_subscription<PlannerDebug>(
+        "planner_debug", rclcpp::SensorDataQoS(),
+        std::bind(&ArmorPlateIdentification::plannerDebugCallBack, this, std::placeholders::_1)
+    );
+    planner_debug_worker_running_ = true;
+    planner_debug_thread_ = std::thread(&ArmorPlateIdentification::plannerDebugWorker, this);
 
     RCLCPP_INFO(this->get_logger(), "识别节点已启动，相机类型: %s", camera_type.c_str());
     RCLCPP_INFO(this->get_logger(), "通用控制：ESC-退出  P-暂停");
@@ -276,7 +327,15 @@ void ArmorPlateIdentification::save()
 {
     debug_base_.save();
 
-    img_queue_.push({read_stamp_, img_show_, matched_gimbal_});
+    auto frame = std::make_unique<KeyFrame>();
+    frame->image = img_show_.clone();
+    frame->gimbal = matched_gimbal_;
+    int64_t timestamp_ns = read_stamp_.sec * 1000000000LL + read_stamp_.nanosec;
+
+    auto record = keyframe_cache_->submitFrame(timestamp_ns, std::move(frame));
+    if (record) {
+        compositeDebugOverlay(std::move(record));
+    }
 }
 
 void ArmorPlateIdentification::show()
@@ -296,6 +355,97 @@ void ArmorPlateIdentification::show()
     }
 }
 
+void ArmorPlateIdentification::compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record)
+{
+    if (!record || !record->frame || record->frame->image.empty()) return;
+
+    cv::Mat & debug_img = record->frame->image;
+    const GimbalData & gimbal = record->frame->gimbal;
+
+    // --- Tracker overlay ---
+    if (record->tracker_debug) {
+        const auto & td = *record->tracker_debug;
+
+        // Draw tracking state text (top-left)
+        const char * state_str = "LOST";
+        if (td.tracking_state == 1) state_str = "DETECTING";
+        else if (td.tracking_state == 2) state_str = "TRACKING";
+        else if (td.tracking_state == 3) state_str = "TEMP_LOST";
+        cv::putText(debug_img, state_str, cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.7,
+                    cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+
+        // Draw EKF car rotation center as RED filled circle
+        Eigen::Vector3d center_world(td.center_world.x, td.center_world.y, td.center_world.z);
+        cv::Point2f center_px = pose_solver_.xyzWorldToPixel(center_world, gimbal);
+        if (isValidProjection(center_px)) {
+            cv::circle(debug_img, center_px, 5, cv::Scalar(0, 0, 255), -1);
+        }
+
+        // Draw 4 predicted armors as YELLOW rectangles using reprojectArmor
+        ArmorName name_enum = intToArmorName(td.armor_name);
+        ArmorType type = armorNameToType(name_enum);
+        for (std::size_t i = 0; i < td.predicted_armor_points_world.size(); ++i) {
+            const auto & armor = td.predicted_armor_points_world[i];
+            Eigen::Vector3d armor_world(armor.x, armor.y, armor.z);
+
+            // Check if the center projects into the image before drawing the rectangle
+            cv::Point2f armor_px = pose_solver_.xyzWorldToPixel(armor_world, gimbal);
+            if (!isValidProjection(armor_px)) continue;
+
+            ArmorPose armor_pose;
+            armor_pose.xyz_world = armor_world;
+            armor_pose.yaw = (i < td.predicted_armor_yaws_world.size())
+                                 ? td.predicted_armor_yaws_world[i]
+                                 : 0.0;
+            armor_pose.name = name_enum;
+            armor_pose.type = type;
+
+            auto corners = pose_solver_.reprojectArmor(armor_pose, gimbal);
+            drawArmorRect(debug_img, corners, cv::Scalar(0, 255, 255), static_cast<int>(i));
+        }
+    }
+
+    // --- Planner overlay ---
+    if (record->planner_debug) {
+        const auto & pd = *record->planner_debug;
+        if (!pd.is_valid) {
+            cv::putText(debug_img, "PLANNER INVALID", cv::Point(10, 55),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
+        } else {
+
+        Eigen::Vector3d orig_world(pd.original_point_world.x, pd.original_point_world.y,
+                                   pd.original_point_world.z);
+        cv::Point2f orig_px = pose_solver_.xyzWorldToPixel(orig_world, gimbal);
+
+        Eigen::Vector3d pred_world(pd.predicted_point_world.x, pd.predicted_point_world.y,
+                                   pd.predicted_point_world.z);
+        cv::Point2f pred_px = pose_solver_.xyzWorldToPixel(pred_world, gimbal);
+
+        Eigen::Vector3d comp_world(pd.compensated_point_world.x, pd.compensated_point_world.y,
+                                   pd.compensated_point_world.z);
+        cv::Point2f comp_px = pose_solver_.xyzWorldToPixel(comp_world, gimbal);
+
+        bool orig_ok = isValidProjection(orig_px);
+        bool pred_ok = isValidProjection(pred_px);
+        bool comp_ok = isValidProjection(comp_px);
+
+        // GREEN = original, YELLOW = predicted, BLUE = compensated
+        if (orig_ok) cv::circle(debug_img, orig_px, 5, cv::Scalar(0, 255, 0), -1);
+        if (pred_ok) cv::circle(debug_img, pred_px, 5, cv::Scalar(0, 255, 255), -1);
+        if (comp_ok) cv::circle(debug_img, comp_px, 5, cv::Scalar(255, 0, 0), -1);
+
+        // GREEN line: original -> predicted
+        if (orig_ok && pred_ok) cv::line(debug_img, orig_px, pred_px, cv::Scalar(0, 255, 0), 2);
+        // YELLOW line: predicted -> compensated
+        if (pred_ok && comp_ok)
+            cv::line(debug_img, pred_px, comp_px, cv::Scalar(0, 255, 255), 2);
+
+        } // if (pd.is_valid)
+    }
+
+    gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, debug_img);
+}
+
 ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identification_node")
 {
     init();
@@ -304,6 +454,7 @@ ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identif
 ArmorPlateIdentification::~ArmorPlateIdentification()
 {
     stopTrackerDebugWorker();
+    stopPlannerDebugWorker();
     stopCameraCaptureWorker();
     gui_worker_.stop();
 }

@@ -48,10 +48,10 @@ public:
 	std::vector<cv::Point2f> image_points_; 		// 按照顺时针顺序排列的四个点
 	float image_distance_to_center_;
 
-	Eigen::Vector3d xyz_camera_; 		
+	Eigen::Vector3d xyz_camera_;
 	Eigen::Vector3d ypr_camera_;
-	Eigen::Quaterniond q_camrea_armor_; 			
-	
+	Eigen::Quaterniond q_camrea_armor_;
+
 	Eigen::Vector3d xyz_world_;
 	Eigen::Vector3d ypr_world_;
 	Eigen::Quaterniond q_world_armor_;

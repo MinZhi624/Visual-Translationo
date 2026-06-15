@@ -17,9 +17,9 @@ private :
     size_t max_size_;
     std::function<void ()> full_handler_; //队列满时的回调函数
     std::mutex mtx_;
-    
+
     /*
-        这里是生产者-消费者的同步机制 
+        这里是生产者-消费者的同步机制
         当消费者线程在队列为空时等待。
         当生产者来数据才唤醒消费者线程。
     */
@@ -31,7 +31,7 @@ public:
         full_handler_(full_handler)
     {}
 
-    void push(const T & value) 
+    void push(const T & value)
     {
         std::unique_lock<std::mutex> lock(mtx_);
         if (queue_.size() >= max_size_) {
@@ -48,13 +48,13 @@ public:
     void pop(T & value)
     {
         std::unique_lock<std::mutex> lock(mtx_);
-        
+
         /*
-            [this]{return !queue_.empty();} 
+            [this]{return !queue_.empty();}
             用来防止虚假唤醒.
             原因：
             操作系统可能会无缘无故的唤醒线程。
-        */ 
+        */
         not_empty_condition_.wait(lock, [this]{return !queue_.empty();});
         if (queue_.empty()) {
             std::cerr << "无法从空的队列中弹出元素" << std::endl;
@@ -62,7 +62,7 @@ public:
         }
         value = queue_.front();
         queue_.pop();
-    } 
+    }
 
     T pop()
     {
@@ -100,7 +100,7 @@ public:
         queue_.pop();
         return true;
     }
-    bool empty() 
+    bool empty()
     {
         std::unique_lock<std::mutex> lock(mtx_);
         return queue_.empty();

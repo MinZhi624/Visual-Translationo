@@ -1,0 +1,5 @@
+armor_plate_planner_node:
+  ros__parameters:
+    bullet_speed: 25.0
+    gravity: 9.81
+    max_armor_face_angle: 1.0472  # 60 degrees in radians

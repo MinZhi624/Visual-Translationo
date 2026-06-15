@@ -1,0 +1,11 @@
+uint32 track_id
+int32 armor_name
+uint8 tracking_state
+geometry_msgs/Point center_world
+geometry_msgs/Vector3 center_velocity
+float64 yaw
+float64 yaw_rate
+float64 radius
+float64 radius_offset
+float64 height_offset
+TrackedArmor[] armors

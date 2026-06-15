@@ -8,9 +8,9 @@ namespace armor_plate_interfaces
 enum class TrackerState : uint8_t
 {
   LOST = 0,
-  TEMP_LOST = 1,
-  DETECTING = 2,
-  TRACKING = 3
+  DETECTING = 1,
+  TRACKING = 2,
+  TEMP_LOST = 3
 };
 
 inline uint8_t trackerStateToUint8(TrackerState state)
@@ -20,7 +20,18 @@ inline uint8_t trackerStateToUint8(TrackerState state)
 
 inline TrackerState uint8ToTrackerState(uint8_t value)
 {
-  return static_cast<TrackerState>(value);
+  switch (value) {
+    case 0:
+      return TrackerState::LOST;
+    case 1:
+      return TrackerState::DETECTING;
+    case 2:
+      return TrackerState::TRACKING;
+    case 3:
+      return TrackerState::TEMP_LOST;
+    default:
+      return TrackerState::LOST;
+  }
 }
 
 }  // namespace armor_plate_interfaces

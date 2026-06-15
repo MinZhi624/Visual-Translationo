@@ -1,7 +1,9 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler, EmitEvent
 from launch.substitutions import LaunchConfiguration
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from ament_index_python import get_package_share_directory
 import os
 
@@ -52,8 +54,15 @@ def generate_launch_description():
             'bullet_speed': 25.0,
             'gravity': 9.81,
             'max_armor_face_angle': 1.0472,
-            'prediction_time': 0.0,
         }]
+    )
+
+    # Test 退出时触发整个 LaunchDescription 关闭
+    shutdown_on_test_exit = RegisterEventHandler(
+        OnProcessExit(
+            target_action=test_node,
+            on_exit=[EmitEvent(event=Shutdown())],
+        )
     )
 
     return LaunchDescription([
@@ -61,4 +70,5 @@ def generate_launch_description():
         test_node,
         tracker_node,
         planner_node,
+        shutdown_on_test_exit,
     ])

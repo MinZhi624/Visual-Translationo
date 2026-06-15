@@ -9,7 +9,7 @@ class NumberClassifier
 {
 private:
     std::string config_path_;
-    // Opencv 
+    // Opencv
     cv::dnn::Net net_;
     // OpenVINO
     ov::Core core_;
@@ -24,7 +24,7 @@ public:
 
     void classifyFromOpenVino(DetectorArmor& armor);
     void classify(DetectorArmor& armor);
-    
+
     bool checkArmorName(const DetectorArmor& armor) const;
 
     static bool checkArmorType(const DetectorArmor& armor);

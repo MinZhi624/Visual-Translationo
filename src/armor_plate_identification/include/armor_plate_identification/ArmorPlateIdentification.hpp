@@ -11,6 +11,7 @@
 #include "armor_plate_interfaces/msg/armor_plate.hpp"
 #include "armor_plate_interfaces/msg/armor_plates.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "armor_plate_interfaces/msg/planner_debug.hpp"
 #include "armor_plate_interfaces/msg/gimbal_angle.hpp"
 #include <rclcpp/rclcpp.hpp>
 
@@ -19,6 +20,7 @@
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include "armor_plate_identification/GuiWorker.hpp"
+#include "armor_plate_identification/KeyFrameCache.hpp"
 
 #include <mutex>
 #include <deque>
@@ -29,7 +31,11 @@
 using armor_plate_interfaces::msg::ArmorPlate;
 using armor_plate_interfaces::msg::ArmorPlates;
 using armor_plate_interfaces::msg::TrackerDebug;
+using armor_plate_interfaces::msg::PlannerDebug;
 using armor_plate_interfaces::msg::GimbalAngle;
+using armor_plate_identification::KeyFrameCache;
+using armor_plate_identification::KeyFrame;
+using armor_plate_identification::KeyFrameRecord;
 
 struct GimbalRecord {
     builtin_interfaces::msg::Time stamp;
@@ -50,10 +56,10 @@ private:
 
     rclcpp::Publisher<ArmorPlates>::SharedPtr armor_plates_pub_;
     rclcpp::Subscription<GimbalAngle>::SharedPtr gimbal_angle_sub_;
-    
+
     rclcpp::Subscription<TrackerDebug>::SharedPtr tracker_debug_sub_;
-    // 图像队列
-    ThreadSafeQueue<Record, true> img_queue_{50};
+    rclcpp::Subscription<PlannerDebug>::SharedPtr planner_debug_sub_;
+    std::unique_ptr<KeyFrameCache> keyframe_cache_;
     // gimbal队列
     ThreadSafeQueue<GimbalRecord, false> gimbal_queue_{200};
     GimbalRecord gimbal_ahead_;
@@ -68,6 +74,10 @@ private:
     ThreadSafeQueue<TrackerDebug::SharedPtr, true> tracker_debug_queue_{1};
     std::thread tracker_debug_thread_;
     bool tracker_debug_worker_running_ = false;
+    // Planner Debug线程
+    ThreadSafeQueue<PlannerDebug::SharedPtr, true> planner_debug_queue_{1};
+    std::thread planner_debug_thread_;
+    bool planner_debug_worker_running_ = false;
     // Camera线程
     ThreadSafeQueue<Frame, true> frame_queue_{1};
     std::thread camera_capture_thread_;
@@ -81,8 +91,13 @@ private:
     void show();
     void trackerDebugCallBack(const TrackerDebug::SharedPtr msg);
     void processTrackerDebug(const TrackerDebug::SharedPtr msg);
+    void plannerDebugCallBack(const PlannerDebug::SharedPtr msg);
+    void processPlannerDebug(const PlannerDebug::SharedPtr msg);
+    void compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record);
     void trackerDebugWorker();
     void stopTrackerDebugWorker();
+    void plannerDebugWorker();
+    void stopPlannerDebugWorker();
     void cameraCaptureWorker();
     void stopCameraCaptureWorker();
     bool control(const KeyEvent& event);

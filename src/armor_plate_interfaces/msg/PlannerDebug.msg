@@ -1,0 +1,10 @@
+std_msgs/Header header
+bool is_valid
+int32 selected_track_id
+int32 selected_armor_id
+geometry_msgs/Point original_point_world
+geometry_msgs/Point predicted_point_world
+geometry_msgs/Point compensated_point_world
+float64 prediction_time
+float64 flight_time
+float64 facing_score

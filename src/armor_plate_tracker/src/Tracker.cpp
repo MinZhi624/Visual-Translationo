@@ -5,6 +5,7 @@
 #include <rclcpp/logger.hpp>
 #include <vector>
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
+#include "armor_plate_interfaces/msg/tracked_armor.hpp"
 #include "rclcpp/logging.hpp"
 
 using armor_plate_interfaces::msg::TrackerDebug;
@@ -180,24 +181,25 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
     TrackerDebug msg;
     msg.header.stamp = stamp;
 
-    auto toVec3 = [](const Eigen::Vector3d &v) {
-        geometry_msgs::msg::Vector3 vec;
-        vec.x = v.x();
-        vec.y = v.y();
-        vec.z = v.z();
-        return vec;
+    auto toPoint = [](const Eigen::Vector3d &v) {
+        geometry_msgs::msg::Point p;
+        p.x = v.x();
+        p.y = v.y();
+        p.z = v.z();
+        return p;
     };
 
     msg.is_lost = isLost();
+    msg.tracking_state = trackerStateToUint8(state_);
 
     if (!isLost()) {
-        msg.filtered_point_world = toVec3(filter_armor_.xyz_world_);
+        msg.filtered_point_world = toPoint(filter_armor_.xyz_world_);
     } else {
-        geometry_msgs::msg::Vector3 center;
-        center.x = 0.0;
-        center.y = 0.0;
-        center.z = 1.0;
-        msg.filtered_point_world = center;
+        geometry_msgs::msg::Point p;
+        p.x = 0.0;
+        p.y = 0.0;
+        p.z = 1.0;
+        msg.filtered_point_world = p;
     }
 
     msg.selected_armor_id = selected_armor_id_;
@@ -208,7 +210,7 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
         msg.predicted_armor_points_world.reserve(armor_list.size());
         msg.predicted_armor_yaws_world.reserve(armor_list.size());
         for (const auto &armor : armor_list) {
-            msg.predicted_armor_points_world.push_back(toVec3(armor.xyz_world));
+            msg.predicted_armor_points_world.push_back(toPoint(armor.xyz_world));
             msg.predicted_armor_yaws_world.push_back(static_cast<float>(armor.yaw));
         }
     }
@@ -216,15 +218,28 @@ TrackerDebug Tracker::CreatedebugMsg(const builtin_interfaces::msg::Time &stamp)
     msg.raw_yaw = measured_armor_.ypr_world_.x();
     msg.filter_yaw = filter_armor_.ypr_world_.x();
 
-    msg.center_x = static_cast<float>(center_point_world_.x());
-    msg.center_y = static_cast<float>(center_point_world_.y());
-    msg.center_z = static_cast<float>(center_point_world_.z());
-    msg.center_r = center_r_;
-    msg.center_v_x = static_cast<float>(center_velocity_.x());
-    msg.center_v_y = static_cast<float>(center_velocity_.y());
-    msg.center_v_z = static_cast<float>(center_velocity_.z());
-    msg.center_l = static_cast<float>(target_.getL());
-    msg.center_h = static_cast<float>(target_.getH());
+    if (!isLost()) {
+        auto ekf_state = target_.getEKFState();
+        msg.center_world.x = static_cast<float>(ekf_state[0]);  // x_c
+        msg.center_world.y = static_cast<float>(ekf_state[2]);  // y_c
+        msg.center_world.z = static_cast<float>(ekf_state[4]);  // z_c
+        msg.center_r = static_cast<float>(ekf_state[8]);  // r
+        msg.center_velocity.x = static_cast<float>(ekf_state[1]);  // v_x
+        msg.center_velocity.y = static_cast<float>(ekf_state[3]);  // v_y
+        msg.center_velocity.z = static_cast<float>(ekf_state[5]);  // v_z
+        msg.center_l = static_cast<float>(ekf_state[9]);  // l
+        msg.center_h = static_cast<float>(ekf_state[10]);  // h
+    } else {
+        msg.center_world.x = 0.0f;
+        msg.center_world.y = 0.0f;
+        msg.center_world.z = 1.0f;
+        msg.center_r = 0.0f;
+        msg.center_velocity.x = 0.0f;
+        msg.center_velocity.y = 0.0f;
+        msg.center_velocity.z = 0.0f;
+        msg.center_l = 0.0f;
+        msg.center_h = 0.0f;
+    }
     msg.armor_name = static_cast<int32_t>(last_armor_name_);
 
     return msg;
@@ -275,5 +290,28 @@ std::vector<TrackerArmor> Tracker::ArmorPlateToTrackerArmor(const std::vector<Ar
         TrackerArmor armor = ArmorPlateToTrackerArmor(plate);
         armors.push_back(armor);
     }
+    return armors;
+}
+
+std::vector<armor_plate_interfaces::msg::TrackedArmor> Tracker::reconstructArmors() const
+{
+    std::vector<armor_plate_interfaces::msg::TrackedArmor> armors;
+    if (isLost()) {
+        return armors;
+    }
+
+    auto armor_list = target_.getTargetArmorList();
+    armors.reserve(armor_list.size());
+
+    for (size_t i = 0; i < armor_list.size(); ++i) {
+        armor_plate_interfaces::msg::TrackedArmor armor;
+        armor.position_world.x = armor_list[i].xyz_world.x();
+        armor.position_world.y = armor_list[i].xyz_world.y();
+        armor.position_world.z = armor_list[i].xyz_world.z();
+        armor.yaw_world = armor_list[i].yaw;
+        armor.armor_id = static_cast<int32_t>(i);
+        armors.push_back(armor);
+    }
+
     return armors;
 }

@@ -85,8 +85,8 @@ void DebugTracker::infoTrackerDebugMsg(const armor_plate_interfaces::msg::Tracke
         "EKF状态: 中心点(%.4f,%.4f,%.4f) 中心速度(%.4f,%.4f,%.4f), "
         "r = %.4f, l = %.4f, h = %.4f, 是否丢失:%d",
         msg.filtered_point_world.x, msg.filtered_point_world.y, msg.filtered_point_world.z, msg.filter_yaw,
-        msg.center_x, msg.center_y, msg.center_z,
-        msg.center_v_x, msg.center_v_y, msg.center_v_z,
+        msg.center_world.x, msg.center_world.y, msg.center_world.z,
+        msg.center_velocity.x, msg.center_velocity.y, msg.center_velocity.z,
         msg.center_r, msg.center_l, msg.center_h,
         msg.is_lost ? 1 : 0);
 }
@@ -126,7 +126,7 @@ void DebugTracker::drawPredictedArmorPoints(
     }
 
     // 绘制车中心点
-    Eigen::Vector3d car_center_world(msg.center_x, msg.center_y, msg.center_z);
+    Eigen::Vector3d car_center_world(msg.center_world.x, msg.center_world.y, msg.center_world.z);
     cv::Point2f car_center_px = pose_solver.xyzWorldToPixel(car_center_world, gimbal);
     if (car_center_px.x >= 0) {
         cv::circle(img, car_center_px, 8, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
