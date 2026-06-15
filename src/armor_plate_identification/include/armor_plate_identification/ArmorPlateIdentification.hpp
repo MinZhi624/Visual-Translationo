@@ -68,11 +68,15 @@ private:
     // Tracker Debug线程
     ThreadSafeQueue<TrackerDebug::SharedPtr, true> tracker_debug_queue_{1};
     std::thread tracker_debug_thread_;
-    bool tracker_debug_worker_running_ = false;
+    std::atomic<bool> tracker_debug_worker_running_{false};
     // Planner Debug线程
     ThreadSafeQueue<PlannerDebug::SharedPtr, true> planner_debug_queue_{1};
     std::thread planner_debug_thread_;
-    bool planner_debug_worker_running_ = false;
+    std::atomic<bool> planner_debug_worker_running_{false};
+    // 组合调试绘图线程
+    ThreadSafeQueue<std::unique_ptr<KeyFrameRecord>, true> overlay_queue_{1};
+    std::thread overlay_thread_;
+    std::atomic<bool> overlay_worker_running_{false};
     // Camera线程
     ThreadSafeQueue<Frame, true> frame_queue_{1};
     std::thread camera_capture_thread_;
@@ -88,11 +92,16 @@ private:
     void processTrackerDebug(const TrackerDebug::SharedPtr msg);
     void plannerDebugCallBack(const PlannerDebug::SharedPtr msg);
     void processPlannerDebug(const PlannerDebug::SharedPtr msg);
+    void enqueueOverlay(std::unique_ptr<KeyFrameRecord> record);
     void compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record);
+    void submitFrameToCache(std::unique_ptr<KeyFrame> frame);
+    void flushRealtimeFrame();
     void trackerDebugWorker();
     void stopTrackerDebugWorker();
     void plannerDebugWorker();
     void stopPlannerDebugWorker();
+    void overlayWorker();
+    void stopOverlayWorker();
     void cameraCaptureWorker();
     void stopCameraCaptureWorker();
     bool control(const KeyEvent& event);

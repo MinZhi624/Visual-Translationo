@@ -35,10 +35,10 @@ void ArmorPlateIdentification::run()
         if (!frame_queue_.pop(frame, std::chrono::milliseconds(100))) continue;
         read_stamp_ = convertSteadyToRosTime(frame.timestamp);
 
-        img_show_ = frame.img;
+        img_show_ = std::move(frame.img);
         debug_base_.onFrameStart();
 
-        identification(frame.img);
+        identification(img_show_);
         solvePose();
         publish();
         save();
@@ -48,6 +48,16 @@ void ArmorPlateIdentification::run()
         KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
         if (control(event)) break;
     }
+    stopCameraCaptureWorker();
+    flushRealtimeFrame();
+    rclcpp::shutdown();
+    stopTrackerDebugWorker();
+    stopPlannerDebugWorker();
+    stopOverlayWorker();
+    tracker_debug_queue_.clear();
+    planner_debug_queue_.clear();
+    overlay_queue_.clear();
+    if (keyframe_cache_) keyframe_cache_->clear();
     gui_worker_.stop();
 }
 
@@ -91,9 +101,7 @@ void ArmorPlateIdentification::processTrackerDebug(const TrackerDebug::SharedPtr
       msg->header.stamp.nanosec;
 
     auto record = keyframe_cache_->submitTrackerDebug(timestamp_ns, msg);
-    if (record) {
-        compositeDebugOverlay(std::move(record));
-    }
+    enqueueOverlay(std::move(record));
 }
 
 void ArmorPlateIdentification::processPlannerDebug(const PlannerDebug::SharedPtr msg)
@@ -102,9 +110,24 @@ void ArmorPlateIdentification::processPlannerDebug(const PlannerDebug::SharedPtr
       msg->header.stamp.nanosec;
 
     auto record = keyframe_cache_->submitPlannerDebug(timestamp_ns, msg);
-    if (record) {
-        compositeDebugOverlay(std::move(record));
-    }
+    enqueueOverlay(std::move(record));
+}
+
+void ArmorPlateIdentification::enqueueOverlay(std::unique_ptr<KeyFrameRecord> record)
+{
+    if (record) overlay_queue_.push(std::move(record));
+}
+
+void ArmorPlateIdentification::submitFrameToCache(std::unique_ptr<KeyFrame> frame)
+{
+    if (!frame || !keyframe_cache_) return;
+    enqueueOverlay(keyframe_cache_->submitFrame(std::move(frame)));
+}
+
+void ArmorPlateIdentification::flushRealtimeFrame()
+{
+    if (headless_) return;
+    submitFrameToCache(gui_worker_.takeKeyFrame(DebugWindow::IDENTIFICATION));
 }
 
 void ArmorPlateIdentification::trackerDebugWorker()
@@ -137,6 +160,21 @@ void ArmorPlateIdentification::stopPlannerDebugWorker()
     if (planner_debug_thread_.joinable()) planner_debug_thread_.join();
 }
 
+void ArmorPlateIdentification::overlayWorker()
+{
+    while (overlay_worker_running_.load() || !overlay_queue_.empty()) {
+        std::unique_ptr<KeyFrameRecord> record;
+        if (!overlay_queue_.pop(record, std::chrono::milliseconds(100))) continue;
+        if (record) compositeDebugOverlay(std::move(record));
+    }
+}
+
+void ArmorPlateIdentification::stopOverlayWorker()
+{
+    overlay_worker_running_ = false;
+    if (overlay_thread_.joinable()) overlay_thread_.join();
+}
+
 void ArmorPlateIdentification::cameraCaptureWorker()
 {
     int fail_count = 0;
@@ -152,7 +190,7 @@ void ArmorPlateIdentification::cameraCaptureWorker()
             continue;
         }
         fail_count = 0;
-        frame_queue_.push(frame);
+        frame_queue_.push(std::move(frame));
     }
 }
 
@@ -216,6 +254,8 @@ void ArmorPlateIdentification::init()
     initDebug();
 
     keyframe_cache_ = std::make_unique<KeyFrameCache>();
+    overlay_worker_running_ = true;
+    overlay_thread_ = std::thread(&ArmorPlateIdentification::overlayWorker, this);
 
     tracker_debug_sub_ = this->create_subscription<TrackerDebug>(
         "tracker_debug", rclcpp::SensorDataQoS(),
@@ -325,16 +365,6 @@ void ArmorPlateIdentification::publish()
 void ArmorPlateIdentification::save()
 {
     debug_base_.save();
-
-    auto frame = std::make_unique<KeyFrame>();
-    frame->image = img_show_.clone();
-    frame->gimbal = matched_gimbal_;
-    int64_t timestamp_ns = read_stamp_.sec * 1000000000LL + read_stamp_.nanosec;
-
-    auto record = keyframe_cache_->submitFrame(timestamp_ns, std::move(frame));
-    if (record) {
-        compositeDebugOverlay(std::move(record));
-    }
 }
 
 void ArmorPlateIdentification::show()
@@ -342,16 +372,23 @@ void ArmorPlateIdentification::show()
     GuiWorker::drawArmors(img_show_, lights_.getArmors());
     debug_base_.draw(img_show_);
 
-    if (!headless_) {
-        cv::Mat show_img;
-        cv::resize(img_show_, show_img, cv::Size(), 0.5, 0.5);
-        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, show_img);
-    }
-
     debug_base_.show();
     auto frames = debug_base_.getDisplayFrames();
     for (const auto& [name, img] : frames) {
         gui_worker_.pushFrame(name, img);
+    }
+
+    auto frame = std::make_unique<KeyFrame>();
+    frame->timestamp_ns = read_stamp_.sec * 1000000000LL + read_stamp_.nanosec;
+    frame->image = std::move(img_show_);
+    frame->gimbal = matched_gimbal_;
+
+    if (headless_) {
+        submitFrameToCache(std::move(frame));
+    } else {
+        auto previous = gui_worker_.exchangeKeyFrame(
+            DebugWindow::IDENTIFICATION, std::move(frame), 0.5);
+        submitFrameToCache(std::move(previous));
     }
 }
 
@@ -435,7 +472,9 @@ void ArmorPlateIdentification::compositeDebugOverlay(std::unique_ptr<KeyFrameRec
         } // if (pd.is_valid)
     }
 
-    gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, debug_img);
+    if (!headless_) {
+        gui_worker_.exchangeKeyFrame(DebugWindow::TRACKER_DEBUG, std::move(record->frame));
+    }
 }
 
 ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identification_node")
@@ -445,9 +484,10 @@ ArmorPlateIdentification::ArmorPlateIdentification() : Node("armor_plate_identif
 
 ArmorPlateIdentification::~ArmorPlateIdentification()
 {
+    stopCameraCaptureWorker();
     stopTrackerDebugWorker();
     stopPlannerDebugWorker();
-    stopCameraCaptureWorker();
+    stopOverlayWorker();
     gui_worker_.stop();
 }
 
@@ -457,8 +497,8 @@ int main(int argc, char** argv)
     auto node = std::make_shared<ArmorPlateIdentification>();
     std::thread spin_thread([&]() { rclcpp::spin(node); });
     node->run();
-    if (spin_thread.joinable()) spin_thread.join();
     rclcpp::shutdown();
+    if (spin_thread.joinable()) spin_thread.join();
     return 0;
 }
 

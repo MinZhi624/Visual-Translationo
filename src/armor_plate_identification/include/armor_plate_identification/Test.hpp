@@ -75,6 +75,10 @@ private:
     ThreadSafeQueue<PlannerDebug::SharedPtr, true> planner_debug_queue_{1};
     std::thread planner_debug_thread_;
     std::atomic<bool> planner_debug_worker_running_{false};
+    // 组合调试绘图线程
+    ThreadSafeQueue<std::unique_ptr<KeyFrameRecord>, true> overlay_queue_{1};
+    std::thread overlay_thread_;
+    std::atomic<bool> overlay_worker_running_{false};
     // GUI
     GuiWorker gui_worker_;
     bool headless_ = false;
@@ -99,7 +103,12 @@ private:
     void processPlannerDebug(const PlannerDebug::SharedPtr msg);
     void plannerDebugWorker();
 
+    void enqueueOverlay(std::unique_ptr<KeyFrameRecord> record);
     void compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record);
+    void submitFrameToCache(std::unique_ptr<KeyFrame> frame);
+    void flushRealtimeFrame();
+    void overlayWorker();
+    void stopOverlayWorker();
 
     void initDebug();
     void initDetector();

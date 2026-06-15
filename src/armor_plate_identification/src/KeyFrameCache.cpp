@@ -6,9 +6,11 @@ KeyFrameCache::KeyFrameCache(size_t max_size)
 {
 }
 
-std::unique_ptr<KeyFrameRecord> KeyFrameCache::submitFrame(
-    int64_t timestamp_ns, std::unique_ptr<KeyFrame> frame)
+std::unique_ptr<KeyFrameRecord> KeyFrameCache::submitFrame(std::unique_ptr<KeyFrame> frame)
 {
+  if (!frame) return nullptr;
+
+  const int64_t timestamp_ns = frame->timestamp_ns;
   std::lock_guard<std::mutex> lock(mutex_);
   auto & entry = cache_[timestamp_ns];
   if (!entry.record) {
@@ -69,6 +71,12 @@ size_t KeyFrameCache::size() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return cache_.size();
+}
+
+void KeyFrameCache::clear()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  cache_.clear();
 }
 
 void KeyFrameCache::evict()

@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler, EmitEvent
+from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
 from launch.substitutions import LaunchConfiguration
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
@@ -36,7 +36,7 @@ def generate_launch_description():
             {"debug_frame": True},
             {"debug_frame_count": 150},
             {"delay_time": 0},
-        ]
+        ],
     )
 
     tracker_node = Node(
@@ -57,7 +57,6 @@ def generate_launch_description():
         }]
     )
 
-    # Test 退出时触发整个 LaunchDescription 关闭
     shutdown_on_test_exit = RegisterEventHandler(
         OnProcessExit(
             target_action=test_node,

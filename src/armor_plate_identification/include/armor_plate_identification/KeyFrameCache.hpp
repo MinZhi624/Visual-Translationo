@@ -4,17 +4,9 @@
 #include <memory>
 #include <mutex>
 #include <cstdint>
-#include <opencv2/core.hpp>
+#include "armor_plate_identification/KeyFrame.hpp"
 #include "armor_plate_interfaces/msg/tracker_debug.hpp"
 #include "armor_plate_interfaces/msg/planner_debug.hpp"
-#include "armor_plate_interfaces/GimbalData.hpp"
-
-/** @brief 关键帧，包含图像和云台数据 */
-struct KeyFrame
-{
-  cv::Mat image;
-  GimbalData gimbal;
-};
 
 /** @brief 关键帧完整记录，包含图像帧、Tracker 调试数据和 Planner 调试数据 */
 struct KeyFrameRecord
@@ -73,11 +65,10 @@ public:
 
   /**
    * @brief 提交图像帧
-   * @param timestamp_ns 时间戳（纳秒）
    * @param frame 图像帧（所有权转移）
    * @return 三者到齐时返回完整记录，否则返回 nullptr
    */
-  std::unique_ptr<KeyFrameRecord> submitFrame(int64_t timestamp_ns, std::unique_ptr<KeyFrame> frame);
+  std::unique_ptr<KeyFrameRecord> submitFrame(std::unique_ptr<KeyFrame> frame);
 
   /**
    * @brief 提交 Tracker 调试数据
@@ -99,4 +90,7 @@ public:
 
   /** @brief 当前缓存中的条目数 */
   size_t size() const;
+
+  /** @brief 清空所有尚未聚合完成的记录 */
+  void clear();
 };

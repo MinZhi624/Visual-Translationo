@@ -3,6 +3,7 @@
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 #include <thread>
+#include <utility>
 
 #define GX_SUCCESS(X) (X == GX_STATUS_SUCCESS)
 
@@ -122,7 +123,7 @@ Frame GalaxyCamera::read()
     cv::Mat bgr_img;
     cv::cvtColor(rgb_img, bgr_img, cv::COLOR_RGB2BGR);
 
-    return Frame{bgr_img.clone(), timestamp};
+    return Frame{std::move(bgr_img), timestamp};
 }
 
 void GalaxyCamera::close()

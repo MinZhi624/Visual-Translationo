@@ -1,5 +1,7 @@
 #pragma once
 
+#include "armor_plate_identification/KeyFrame.hpp"
+
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 
@@ -30,12 +32,17 @@ struct KeyEvent {
  */
 class GuiWorker {
 private:
+    struct DisplaySlot {
+        cv::Mat display;
+        std::unique_ptr<KeyFrame> key_frame;
+    };
+
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<KeyAction> last_action_{KeyAction::None};
     std::atomic<int> last_raw_key_{-1};
 
-    std::unordered_map<std::string, cv::Mat> frames_;
+    std::unordered_map<std::string, DisplaySlot> frames_;
     std::mutex frames_mutex_;
 
     void loop();
@@ -47,6 +54,10 @@ public:
     void stop();
 
     void pushFrame(const std::string& window_name, const cv::Mat& img);
+    std::unique_ptr<KeyFrame> exchangeKeyFrame(
+        const std::string& window_name, std::unique_ptr<KeyFrame> frame,
+        double display_scale = 1.0);
+    std::unique_ptr<KeyFrame> takeKeyFrame(const std::string& window_name);
     KeyEvent consumeKey();
 
     bool isRunning() const { return running_.load(); }

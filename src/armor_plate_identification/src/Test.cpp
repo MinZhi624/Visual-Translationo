@@ -28,6 +28,73 @@ static void drawArmorRect(cv::Mat & img, const std::vector<cv::Point2f> & points
                 cv::LINE_AA);
 }
 
+int Test::run()
+{
+    if (!headless_) {
+        gui_worker_.start();
+    }
+
+    cv::Mat frame;
+    while (rclcpp::ok()) {
+        if (yaw_benchmark_ && yaw_benchmark_->shouldStop()) {
+            RCLCPP_INFO(this->get_logger(), "Yaw benchmark 达到最大样本数，结束");
+            break;
+        }
+
+        c_ >> frame;
+        if (frame.empty()) {
+            RCLCPP_INFO(this->get_logger(), "视频播放结束");
+            break;
+        }
+        img_show_ = std::move(frame);
+
+        if (yaw_benchmark_) {
+            yaw_benchmark_->onFrameStart(raw_frame_index_);
+        }
+        ++raw_frame_index_;
+
+        debug_test_.onFrameStart();
+
+        // Test 模式用视频相对时间
+        double video_time = debug_test_.getFrameCount() / fps_;
+        read_stamp_.sec = static_cast<int>(video_time);
+        read_stamp_.nanosec = static_cast<uint32_t>((video_time - read_stamp_.sec) * 1e9);
+
+        identification(img_show_);
+        solvePose();
+        debug_test_.mark("solvePose");
+        publish();
+        debug_test_.mark("publish");
+        save();
+        debug_test_.mark("save");
+        show();
+        debug_test_.mark("show");
+
+        debug_test_.onFrameEnd();
+
+        KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
+        if (control(event)) break;
+
+        if (debug_test_.shouldExit()) {
+            RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_test_.getDebugFrameCount());
+            break;
+        }
+    }
+    RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
+    flushRealtimeFrame();
+    rclcpp::shutdown();
+    stopTrackerDebugWorker();
+    stopPlannerDebugWorker();
+    stopOverlayWorker();
+    tracker_debug_queue_.clear();
+    planner_debug_queue_.clear();
+    overlay_queue_.clear();
+    if (keyframe_cache_) keyframe_cache_->clear();
+    gui_worker_.stop();
+    return 0;
+}
+
+
 bool Test::control(const KeyEvent& event)
 {
     debug_test_.control(event);
@@ -63,9 +130,7 @@ void Test::processTrackerDebug(const TrackerDebug::SharedPtr msg)
         msg->header.stamp.nanosec;
 
     auto record = keyframe_cache_->submitTrackerDebug(timestamp_ns, msg);
-    if (record) {
-        compositeDebugOverlay(std::move(record));
-    }
+    enqueueOverlay(std::move(record));
 }
 
 void Test::trackerDebugWorker()
@@ -94,9 +159,24 @@ void Test::processPlannerDebug(const PlannerDebug::SharedPtr msg)
         msg->header.stamp.nanosec;
 
     auto record = keyframe_cache_->submitPlannerDebug(timestamp_ns, msg);
-    if (record) {
-        compositeDebugOverlay(std::move(record));
-    }
+    enqueueOverlay(std::move(record));
+}
+
+void Test::enqueueOverlay(std::unique_ptr<KeyFrameRecord> record)
+{
+    if (record) overlay_queue_.push(std::move(record));
+}
+
+void Test::submitFrameToCache(std::unique_ptr<KeyFrame> frame)
+{
+    if (!frame || !keyframe_cache_) return;
+    enqueueOverlay(keyframe_cache_->submitFrame(std::move(frame)));
+}
+
+void Test::flushRealtimeFrame()
+{
+    if (headless_) return;
+    submitFrameToCache(gui_worker_.takeKeyFrame(DebugWindow::IDENTIFICATION));
 }
 
 void Test::plannerDebugWorker()
@@ -112,6 +192,21 @@ void Test::stopPlannerDebugWorker()
 {
     planner_debug_worker_running_ = false;
     if (planner_debug_thread_.joinable()) planner_debug_thread_.join();
+}
+
+void Test::overlayWorker()
+{
+    while (overlay_worker_running_.load() || !overlay_queue_.empty()) {
+        std::unique_ptr<KeyFrameRecord> record;
+        if (!overlay_queue_.pop(record, std::chrono::milliseconds(100))) continue;
+        if (record) compositeDebugOverlay(std::move(record));
+    }
+}
+
+void Test::stopOverlayWorker()
+{
+    overlay_worker_running_ = false;
+    if (overlay_thread_.joinable()) overlay_thread_.join();
 }
 
 void Test::compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record)
@@ -192,7 +287,7 @@ void Test::compositeDebugOverlay(std::unique_ptr<KeyFrameRecord> record)
     }
 
     if (!headless_ && debug_test_.shouldShow()) {
-        gui_worker_.pushFrame(DebugWindow::TRACKER_DEBUG, debug_img);
+        gui_worker_.exchangeKeyFrame(DebugWindow::TRACKER_DEBUG, std::move(record->frame));
     }
 }
 
@@ -228,6 +323,8 @@ void Test::init(const std::string& video_path)
     gimbal_angle_pub_ = this->create_publisher<armor_plate_interfaces::msg::GimbalAngle>("gimbal_angle", rclcpp::SensorDataQoS());
 
     keyframe_cache_ = std::make_unique<KeyFrameCache>(100);
+    overlay_worker_running_ = true;
+    overlay_thread_ = std::thread(&Test::overlayWorker, this);
 
     initDebug();
     initYawBenchmark();
@@ -290,14 +387,6 @@ void Test::publish()
 void Test::save()
 {
     debug_test_.save();
-
-    auto frame = std::make_unique<KeyFrame>();
-    frame->image = img_show_.clone();
-    frame->gimbal = test_gimbal_;
-    int64_t timestamp_ns = read_stamp_.sec * 1000000000LL + read_stamp_.nanosec;
-
-    auto record = keyframe_cache_->submitFrame(timestamp_ns, std::move(frame));
-    if (record) compositeDebugOverlay(std::move(record));
 }
 
 void Test::show()
@@ -305,14 +394,23 @@ void Test::show()
     GuiWorker::drawArmors(img_show_, lights_.getArmors());
     debug_test_.draw(img_show_);
 
-    if (!headless_ && debug_test_.shouldShow()) {
-        gui_worker_.pushFrame(DebugWindow::IDENTIFICATION, img_show_);
-    }
-
     debug_test_.show();
     auto frames = debug_test_.getDisplayFrames();
     for (const auto& [name, img] : frames) {
         gui_worker_.pushFrame(name, img);
+    }
+
+    auto frame = std::make_unique<KeyFrame>();
+    frame->timestamp_ns = read_stamp_.sec * 1000000000LL + read_stamp_.nanosec;
+    frame->image = std::move(img_show_);
+    frame->gimbal = test_gimbal_;
+
+    if (headless_) {
+        submitFrameToCache(std::move(frame));
+    } else {
+        auto previous = gui_worker_.exchangeKeyFrame(
+            DebugWindow::IDENTIFICATION, std::move(frame), 0.5);
+        submitFrameToCache(std::move(previous));
     }
 }
 
@@ -333,6 +431,12 @@ Test::~Test()
     pose_solver_.setYawSearchObserver(nullptr);
     stopTrackerDebugWorker();
     stopPlannerDebugWorker();
+    stopOverlayWorker();
+    tracker_debug_queue_.clear();
+    planner_debug_queue_.clear();
+    overlay_queue_.clear();
+    if (keyframe_cache_) keyframe_cache_->clear();
+    gui_worker_.stop();
 }
 
 int main(int argc, char **argv)
@@ -500,61 +604,3 @@ bool Test::finalizeYawBenchmark()
     return yaw_benchmark_->finalize();
 }
 
-int Test::run()
-{
-    if (!headless_) {
-        gui_worker_.start();
-    }
-
-    cv::Mat frame;
-    while (rclcpp::ok()) {
-        if (yaw_benchmark_ && yaw_benchmark_->shouldStop()) {
-            RCLCPP_INFO(this->get_logger(), "Yaw benchmark 达到最大样本数，结束");
-            break;
-        }
-
-        c_ >> frame;
-        if (frame.empty()) {
-            RCLCPP_INFO(this->get_logger(), "视频播放结束");
-            gui_worker_.stop();
-            return 0;
-        }
-        img_show_ = frame.clone();
-
-        if (yaw_benchmark_) {
-            yaw_benchmark_->onFrameStart(raw_frame_index_);
-        }
-        ++raw_frame_index_;
-
-        debug_test_.onFrameStart();
-
-        // Test 模式用视频相对时间
-        double video_time = debug_test_.getFrameCount() / fps_;
-        read_stamp_.sec = static_cast<int>(video_time);
-        read_stamp_.nanosec = static_cast<uint32_t>((video_time - read_stamp_.sec) * 1e9);
-
-        identification(frame);
-        solvePose();
-        debug_test_.mark("solvePose");
-        publish();
-        debug_test_.mark("publish");
-        save();
-        debug_test_.mark("save");
-        show();
-        debug_test_.mark("show");
-
-        debug_test_.onFrameEnd();
-
-        KeyEvent event = headless_ ? KeyEvent{} : gui_worker_.consumeKey();
-        if (control(event)) break;
-
-        if (debug_test_.shouldExit()) {
-            RCLCPP_INFO(this->get_logger(), "帧调试：已播放到第 %d 帧，结束", debug_test_.getDebugFrameCount());
-            gui_worker_.stop();
-            return 0;
-        }
-    }
-    RCLCPP_INFO(this->get_logger(), "测试节点已经结束");
-    gui_worker_.stop();
-    return 0;
-}

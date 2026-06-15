@@ -1,6 +1,7 @@
 #include "armor_plate_identification/GuiWorker.hpp"
 #include "armor_plate_identification/DetectorArmor.hpp"
 
+#include <cmath>
 #include <opencv2/imgproc.hpp>
 
 void GuiWorker::drawArmors(cv::Mat& img, const std::vector<DetectorArmor>& armors)
@@ -48,9 +49,44 @@ void GuiWorker::stop()
 
 void GuiWorker::pushFrame(const std::string& window_name, const cv::Mat& img)
 {
-    std::lock_guard<std::mutex> lock(frames_mutex_);
     if (img.empty()) return;
-    frames_[window_name] = img.clone();
+
+    DisplaySlot next;
+    next.display = img.clone();
+
+    std::lock_guard<std::mutex> lock(frames_mutex_);
+    frames_[window_name] = std::move(next);
+}
+
+std::unique_ptr<KeyFrame> GuiWorker::exchangeKeyFrame(
+    const std::string& window_name, std::unique_ptr<KeyFrame> frame, double display_scale)
+{
+    if (!frame || frame->image.empty()) return nullptr;
+
+    DisplaySlot next;
+    next.key_frame = std::move(frame);
+    if (display_scale > 0.0 && std::abs(display_scale - 1.0) > 1e-6) {
+        cv::resize(next.key_frame->image, next.display, cv::Size(), display_scale, display_scale);
+    } else {
+        next.display = next.key_frame->image;
+    }
+
+    std::lock_guard<std::mutex> lock(frames_mutex_);
+    auto & current = frames_[window_name];
+    auto previous = std::move(current.key_frame);
+    current = std::move(next);
+    return previous;
+}
+
+std::unique_ptr<KeyFrame> GuiWorker::takeKeyFrame(const std::string& window_name)
+{
+    std::lock_guard<std::mutex> lock(frames_mutex_);
+    auto it = frames_.find(window_name);
+    if (it == frames_.end()) return nullptr;
+
+    auto frame = std::move(it->second.key_frame);
+    frames_.erase(it);
+    return frame;
 }
 
 KeyEvent GuiWorker::consumeKey()
@@ -65,9 +101,9 @@ void GuiWorker::loop()
     while (running_.load()) {
         {
             std::lock_guard<std::mutex> lock(frames_mutex_);
-            for (const auto& [name, img] : frames_) {
-                if (!img.empty()) {
-                    cv::imshow(name, img);
+            for (const auto& [name, slot] : frames_) {
+                if (!slot.display.empty()) {
+                    cv::imshow(name, slot.display);
                 }
             }
         }
