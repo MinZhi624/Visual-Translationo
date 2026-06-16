@@ -20,4 +20,10 @@ inline Eigen::Matrix3d calculateRWorldGimbal(double yaw, double pitch)
     return R_yaw * R_pitch;
 }
 
+// 计算从世界系到云台系的旋转矩阵
+inline Eigen::Matrix3d calculateRGimbalWorld(double yaw, double pitch)
+{
+    return calculateRWorldGimbal(yaw, pitch).transpose();
+}
+
 }  // namespace armor_plate_common

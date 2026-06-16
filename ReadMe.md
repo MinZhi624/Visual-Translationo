@@ -48,7 +48,7 @@ flowchart TD
 |--------|------|------|------|------|
 | `armor_plate_identification` | 图像采集、预处理、灯条检测、PnP、数字识别、云台数据打包 | `ArmorPlateIdentification` (相机) / `Test` (视频) | `/gimbal_angle` | `/armor_plates`, TF |
 | `armor_plate_tracker` | 目标选择、世界坐标系 11 维 EKF | `armor_plate_tracker_node` | `/armor_plates` | `/aim_command`, `/tracked_targets`, `/tracker_debug`, `/tracker_data`, `/visualization_marker_array` |
-| `armor_plate_planner` | 目标选择、运动预测、弹道解算、瞄准指令生成 | `armor_plate_planner_node` | `/tracked_targets`, `/gimbal_angle` | `/aim_command`, `/planner_debug` |
+| `armor_plate_planner` | 目标选择、运动预测、弹道解算、瞄准指令生成 | `armor_plate_planner_node_cpp` | `/tracked_targets`, `/gimbal_angle` | `/aim_command`, `/planner_debug` |
 | `armor_plate_serial` | 串口双向通信 | `serial_node` | `/aim_command` | `/gimbal_angle`, (串口) |
 | `armor_plate_interfaces` | 自定义消息定义 | — | — | — |
 | `armor_plate_common` | 公共数学/几何工具（角度、YPR/YPD、坐标系旋转） | — | — | — |
@@ -114,9 +114,10 @@ flowchart TD
 ### 6. Planner 弹道解算
 
 - **目标选择**：从 `TrackedTargets` 中选取最优跟踪目标。
-- **运动预测**：基于 EKF 状态预测目标在未来 `prediction_time` 时刻的位置。
-- **装甲板生成**：根据四装甲板几何模型生成候选装甲板位置。
-- **弹道补偿**：根据弹丸速度和重力计算弹道偏移，输出补偿后的瞄准点。
+- **运动预测**：基于 EKF 状态预测目标在未来 `prediction_time` 时刻的位置（当前未实现，dt=0）。
+- **装甲板选择**：根据 `cos(armor_yaw - yaw_to_armor)` 朝向评分选择正对射手的装甲板（详见 [facing_score 公式](docs/不用讨论/armor_plate_planner/facing_score公式.md)）。
+- **弹道补偿**：无阻力低弹道解析解，输出补偿后的瞄准点。
+- **坐标变换**：`CommandGenerator` 使用 `R_gimbal_world` 矩阵将目标从世界系变换到云台系，再用 `calculateYPD` 计算 delta 角度。
 - **调试输出**：`/planner_debug` 发布原始点、预测点、弹道补偿点，Foxglove 可视化。
 
 ### 7. 串口双向通信
@@ -287,10 +288,6 @@ Planner 参数：
 | `bullet_speed` | 25.0 | 弹丸初速（m/s） |
 | `gravity` | 9.81 | 重力加速度（m/s²） |
 | `max_armor_face_angle` | 1.0472 (60°) | 装甲板最大朝向角（rad） |
-| `prediction_time` | 0.0 | 运动预测时间（s），0 表示不预测 |
-| `shooter_offset_x` | 0.0 | 发射器偏移 X（m） |
-| `shooter_offset_y` | 0.0 | 发射器偏移 Y（m） |
-| `shooter_offset_z` | 0.3 | 发射器偏移 Z（m） |
 
 ---
 

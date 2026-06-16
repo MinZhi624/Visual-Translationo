@@ -9,16 +9,15 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(armor_plate_interfaces REQUIRED)
+find_package(armor_plate_common REQUIRED)
 
 add_executable(armor_plate_planner_node
   src/TargetSelector.cpp
   src/TargetPredictor.cpp
-  src/ArmorGenerator.cpp
   src/ArmorSelector.cpp
   src/BallisticSolver.cpp
   src/CommandGenerator.cpp
-  src/PlannerNode.cpp
-  src/planner_node_main.cpp
+  src/ArmorPlatePlanner.cpp
 )
 
 target_include_directories(armor_plate_planner_node PUBLIC
@@ -33,6 +32,7 @@ ament_target_dependencies(
   "rclcpp"
   "geometry_msgs"
   "armor_plate_interfaces"
+  "armor_plate_common"
 )
 
 install(TARGETS armor_plate_planner_node

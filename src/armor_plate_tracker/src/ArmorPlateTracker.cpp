@@ -19,40 +19,41 @@ void ArmorPlateTracker::ArmorPlatesCallBack(const ArmorPlates::SharedPtr msg)
 
 void ArmorPlateTracker::publish(const ArmorPlates::SharedPtr armor_plates)
 {
-    // Always publish TrackedTargets
-    {
-        TrackedTargets targets_msg;
-        targets_msg.header = armor_plates->header;
+    TrackedTargets targets_msg;
+    targets_msg.header = armor_plates->header;
 
-        // LOST 时 targets 为空数组；DETECTING/TRACKING/TEMP_LOST 时发布 EKF 数据
-        if (!tracker_.isLost()) {
-            armor_plate_interfaces::msg::TrackedTarget target;
-            target.track_id = 0;  // 第一版单目标
-            target.armor_name = static_cast<int32_t>(tracker_.getArmorName());
-            target.tracking_state = armor_plate_interfaces::trackerStateToUint8(tracker_.getState());
+    // LOST 时 targets 为空数组；DETECTING/TRACKING/TEMP_LOST 时发布 EKF 数据
+    if (!tracker_.isLost()) {
+        /*
+            TODO:
+            现在目前是单车检测，所以这里只发布一个目标，后续可以扩展为多个目标
+        */
+        armor_plate_interfaces::msg::TrackedTarget target;
+        target.track_id = 0;  
+        target.armor_name = static_cast<int32_t>(tracker_.getArmorName());
+        target.tracking_state = armor_plate_interfaces::trackerStateToUint8(tracker_.getState());
 
-            // Fill from EKF state
-            auto ekf_state = tracker_.getEKFState();
-            target.center_world.x = ekf_state[0];  // x_c
-            target.center_world.y = ekf_state[2];  // y_c
-            target.center_world.z = ekf_state[4];  // z_c
-            target.center_velocity.x = ekf_state[1];  // v_x
-            target.center_velocity.y = ekf_state[3];  // v_y
-            target.center_velocity.z = ekf_state[5];  // v_z
-            target.yaw = ekf_state[6];
-            target.yaw_rate = ekf_state[7];
-            target.radius = ekf_state[8];
-            target.radius_offset = ekf_state[9];
-            target.height_offset = ekf_state[10];
+        // EKF 数据
+        auto ekf_state = tracker_.getEKFState();
+        target.center_world.x = ekf_state[0];  // x_c
+        target.center_world.y = ekf_state[2];  // y_c
+        target.center_world.z = ekf_state[4];  // z_c
+        target.center_velocity.x = ekf_state[1];  // v_x
+        target.center_velocity.y = ekf_state[3];  // v_y
+        target.center_velocity.z = ekf_state[5];  // v_z
+        target.yaw = ekf_state[6];
+        target.yaw_rate = ekf_state[7];
+        target.radius = ekf_state[8];
+        target.radius_offset = ekf_state[9];
+        target.height_offset = ekf_state[10];
 
-            // Reconstruct armor plates from EKF state
-            target.armors = tracker_.reconstructArmors();
+        // Reconstruct armor plates from EKF state
+        target.armors = tracker_.reconstructArmors();
 
-            targets_msg.targets.push_back(target);
-        }
-
-        tracked_targets_pub_->publish(targets_msg);
+        targets_msg.targets.push_back(target);
     }
+
+    tracked_targets_pub_->publish(targets_msg);
 
     auto now = this->now();
     // 发布可视化数据

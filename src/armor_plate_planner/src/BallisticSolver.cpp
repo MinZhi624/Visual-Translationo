@@ -8,8 +8,7 @@ BallisticSolver::BallisticSolver(double bullet_speed, double gravity)
 }
 
 BallisticResult BallisticSolver::solve(
-    const geometry_msgs::msg::Point & target_point,
-    const geometry_msgs::msg::Point & shooter_origin) const
+    const geometry_msgs::msg::Point & target_point) const
 {
     BallisticResult result;
 
@@ -19,11 +18,11 @@ BallisticResult BallisticSolver::solve(
         return result;
     }
 
-    double dx = target_point.x - shooter_origin.x;
-    double dy = target_point.y - shooter_origin.y;
-    double dz = target_point.z - shooter_origin.z;
+    double dx = target_point.x;
+    double dy = target_point.y;
+    double dz = target_point.z;
 
-    // 输入 finite 检查
+    // 输入 finite 检查 -- 防止上游数据出现问题
     if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
         result.valid = false;
         return result;
@@ -75,7 +74,7 @@ BallisticResult BallisticSolver::solve(
     // 虚拟补偿点: 沿射击方向在水平距离处的瞄准高度
     result.compensated_point.x = target_point.x;
     result.compensated_point.y = target_point.y;
-    result.compensated_point.z = shooter_origin.z + horizontal_dist * tan_pitch;
+    result.compensated_point.z = horizontal_dist * tan_pitch;
 
     // 结果 finite 检查
     if (!std::isfinite(result.compensated_point.x) ||

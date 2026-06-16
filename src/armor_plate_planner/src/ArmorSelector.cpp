@@ -1,5 +1,10 @@
 #include "armor_plate_planner/ArmorSelector.hpp"
+#include <armor_plate_interfaces/GimbalData.hpp>
+#include <armor_plate_common/geometry.hpp>
+#include <armor_plate_common/angle.hpp>
 #include <cmath>
+
+namespace apc = armor_plate_common;
 
 ArmorSelector::ArmorSelector(double max_face_angle)
     : max_face_angle_(max_face_angle)
@@ -8,44 +13,21 @@ ArmorSelector::ArmorSelector(double max_face_angle)
 
 double ArmorSelector::computeFacingScore(
     const geometry_msgs::msg::Point & armor_position,
-    const geometry_msgs::msg::Point & target_center,
-    const geometry_msgs::msg::Point & shooter_origin) const
+    double armor_yaw) const
 {
-    double ox = armor_position.x - target_center.x;
-    double oy = armor_position.y - target_center.y;
-    double oz = armor_position.z - target_center.z;
-    double out_len = std::sqrt(ox * ox + oy * oy + oz * oz);
-    if (out_len < 1e-6) return 0.0;
-    ox /= out_len;
-    oy /= out_len;
-    oz /= out_len;
+    // 计算射手→装甲板方向角 yaw_to_armor
+    Eigen::Vector3d armor_xyz(armor_position.x, armor_position.y, armor_position.z);
+    double yaw_to_armor = apc::calculateYPD(armor_xyz).x();
 
-    double tx = shooter_origin.x - armor_position.x;
-    double ty = shooter_origin.y - armor_position.y;
-    double tz = shooter_origin.z - armor_position.z;
-    double to_len = std::sqrt(tx * tx + ty * ty + tz * tz);
-    if (to_len < 1e-6) return 0.0;
-    tx /= to_len;
-    ty /= to_len;
-    tz /= to_len;
+    // 朝向差: 装甲板法线与射手方向的夹角
+    double delta_angle = apc::normalizeRadAngle(armor_yaw - yaw_to_armor);
 
-    // 从车辆旋转中心指向装甲板中心，表示装甲板朝向车外的法向。
-    // outward = normalize(armor_position - target_center);
-
-    // 从装甲板中心指向我方射击原点。
-    // to_shooter = normalize(shooter_origin - armor_position);
-
-    // 点积接近 1 表示正面朝向我方，接近 0 表示侧面，
-    // 接近 -1 表示背面朝向我方。
-    // facing_score = dot(outward, to_shooter);
-
-    return ox * tx + oy * ty + oz * tz;
+    // cos(delta_angle): 越正对射手得分越高（最大 1，最小 -1）
+    return std::cos(delta_angle);
 }
 
 std::optional<armor_plate_interfaces::msg::TrackedArmor> ArmorSelector::select(
-    const std::vector<armor_plate_interfaces::msg::TrackedArmor> & armors,
-    const geometry_msgs::msg::Point & shooter_origin,
-    const geometry_msgs::msg::Point & target_center) const
+    const std::vector<armor_plate_interfaces::msg::TrackedArmor> & armors) const
 {
     if (armors.empty()) return std::nullopt;
 
@@ -54,7 +36,7 @@ std::optional<armor_plate_interfaces::msg::TrackedArmor> ArmorSelector::select(
     bool found = false;
 
     for (size_t i = 0; i < armors.size(); ++i) {
-        double score = computeFacingScore(armors[i].position_world, target_center, shooter_origin);
+        double score = computeFacingScore(armors[i].position_world, armors[i].yaw_world);
 
         if (score >= std::cos(max_face_angle_) && score > best_score) {
             best_score = score;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <geometry_msgs/msg/point.hpp>
-#include <armor_plate_interfaces/msg/gimbal_angle.hpp>
+#include <armor_plate_interfaces/GimbalData.hpp>
 
 struct GimbalDelta
 {
@@ -21,6 +21,5 @@ public:
 
     GimbalDelta generate(
         const geometry_msgs::msg::Point & target_point_world,
-        const geometry_msgs::msg::Point & shooter_origin,
-        const armor_plate_interfaces::msg::GimbalAngle & current_gimbal);
+        const GimbalData & current_gimbal);
 };

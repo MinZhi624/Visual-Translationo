@@ -1,8 +1,8 @@
 #include "armor_plate_tracker/Target.hpp"
 #include "armor_plate_common/angle.hpp"
+#include <armor_plate_common/geometry.hpp>
 
 #include <algorithm>
-#include <armor_plate_common/geometry.hpp>
 #include <numeric>
 
 void Target::updateArmorList()
@@ -47,7 +47,7 @@ size_t Target::findArmorIdx(const TrackerArmor & armor)
     const double armor_yaw_world = armor.ypd_world_.x();
 
     size_t best_idx = distance_index_list[0].second;
-    double min_score = 1e10;
+    double min_score = std::numeric_limits<double>::max();
     for (size_t candidate_idx = 0; candidate_idx < 3; ++candidate_idx) {
         size_t i = distance_index_list[candidate_idx].second;
 

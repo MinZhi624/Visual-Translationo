@@ -19,6 +19,5 @@ public:
     BallisticSolver(double bullet_speed = 25.0, double gravity = 9.81);
 
     BallisticResult solve(
-        const geometry_msgs::msg::Point & target_point,
-        const geometry_msgs::msg::Point & shooter_origin) const;
+        const geometry_msgs::msg::Point & target_point) const;
 };
