@@ -7,8 +7,8 @@
 namespace apc = armor_plate_common;
 
 GimbalDelta CommandGenerator::generate(
-    const geometry_msgs::msg::Point & target_point_world,
-    const GimbalData & current_gimbal)
+    const Eigen::Vector3d& target_point_world,
+    const GimbalData& current_gimbal)
 {
     GimbalDelta delta;
 
@@ -20,11 +20,9 @@ GimbalDelta CommandGenerator::generate(
         return delta;
     }
 
-    Eigen::Vector3d target_world(target_point_world.x, target_point_world.y, target_point_world.z);
-
     // World -> Gimbal 坐标变换
     Eigen::Matrix3d R_gimbal_world = apc::calculateRGimbalWorld(current_gimbal.yaw_abs, current_gimbal.pitch_abs);
-    Eigen::Vector3d target_gimbal = R_gimbal_world * target_world;
+    Eigen::Vector3d target_gimbal = R_gimbal_world * target_point_world;
 
     Eigen::Vector3d ypd = apc::calculateYPD(target_gimbal);
 

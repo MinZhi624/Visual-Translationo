@@ -1,5 +1,4 @@
 #include "armor_plate_planner/ArmorSelector.hpp"
-#include <armor_plate_interfaces/GimbalData.hpp>
 #include <armor_plate_common/geometry.hpp>
 #include <armor_plate_common/angle.hpp>
 #include <cmath>
@@ -12,12 +11,11 @@ ArmorSelector::ArmorSelector(double max_face_angle)
 }
 
 double ArmorSelector::computeFacingScore(
-    const geometry_msgs::msg::Point & armor_position,
+    const Eigen::Vector3d& armor_position,
     double armor_yaw) const
 {
     // 计算射手→装甲板方向角 yaw_to_armor
-    Eigen::Vector3d armor_xyz(armor_position.x, armor_position.y, armor_position.z);
-    double yaw_to_armor = apc::calculateYPD(armor_xyz).x();
+    double yaw_to_armor = apc::calculateYPD(armor_position).x();
 
     // 朝向差: 装甲板法线与射手方向的夹角
     double delta_angle = apc::normalizeRadAngle(armor_yaw - yaw_to_armor);
@@ -26,8 +24,8 @@ double ArmorSelector::computeFacingScore(
     return std::cos(delta_angle);
 }
 
-std::optional<armor_plate_interfaces::msg::TrackedArmor> ArmorSelector::select(
-    const std::vector<armor_plate_interfaces::msg::TrackedArmor> & armors) const
+std::optional<PlannerArmor> ArmorSelector::select(
+    const std::vector<PlannerArmor>& armors) const
 {
     if (armors.empty()) return std::nullopt;
 
@@ -36,7 +34,7 @@ std::optional<armor_plate_interfaces::msg::TrackedArmor> ArmorSelector::select(
     bool found = false;
 
     for (size_t i = 0; i < armors.size(); ++i) {
-        double score = computeFacingScore(armors[i].position_world, armors[i].yaw_world);
+        double score = computeFacingScore(armors[i].pose.xyz_world, armors[i].pose.yaw);
 
         if (score >= std::cos(max_face_angle_) && score > best_score) {
             best_score = score;

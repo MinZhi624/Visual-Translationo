@@ -1,10 +1,10 @@
 #pragma once
 
-#include <geometry_msgs/msg/point.hpp>
+#include <Eigen/Core>
 
 struct BallisticResult
 {
-    geometry_msgs::msg::Point compensated_point;
+    Eigen::Vector3d compensated_point = Eigen::Vector3d::Zero();
     double flight_time = 0.0;
     bool valid = false;
 };
@@ -16,11 +16,10 @@ private:
     double gravity_;
 
     // 抛物线弹道解（无阻力低弹道）
-    BallisticResult solveByParabola(const geometry_msgs::msg::Point & target_point) const;
+    BallisticResult solveByParabola(const Eigen::Vector3d& target_point) const;
 
 public:
     BallisticSolver(double bullet_speed = 25.0, double gravity = 9.81);
 
-    BallisticResult solve(
-        const geometry_msgs::msg::Point & target_point) const;
+    BallisticResult solve(const Eigen::Vector3d& target_point) const;
 };

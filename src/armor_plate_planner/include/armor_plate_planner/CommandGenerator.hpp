@@ -1,7 +1,7 @@
 #pragma once
 
-#include <geometry_msgs/msg/point.hpp>
 #include <armor_plate_interfaces/GimbalData.hpp>
+#include <Eigen/Core>
 
 struct GimbalDelta
 {
@@ -20,6 +20,6 @@ public:
     void setGimbalReceived(bool received) { gimbal_received_ = received; }
 
     GimbalDelta generate(
-        const geometry_msgs::msg::Point & target_point_world,
-        const GimbalData & current_gimbal);
+        const Eigen::Vector3d& target_point_world,
+        const GimbalData& current_gimbal);
 };

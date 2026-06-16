@@ -1,8 +1,9 @@
 #pragma once
 
-#include <armor_plate_interfaces/msg/tracked_targets.hpp>
+#include "armor_plate_planner/TargetPredictor.hpp"
 #include <optional>
-#include <cstdint>
+#include <vector>
+#include <cstddef>
 
 class TargetSelector
 {
@@ -12,6 +13,6 @@ private:
 public:
     TargetSelector() = default;
 
-    std::optional<size_t> selectIndex(const armor_plate_interfaces::msg::TrackedTargets & targets);
+    std::optional<size_t> selectIndex(const std::vector<TargetState>& targets);
     void reset() { last_selected_index_ = 0; }
 };
