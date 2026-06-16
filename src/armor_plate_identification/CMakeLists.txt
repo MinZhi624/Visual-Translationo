@@ -38,7 +38,6 @@ set( Test
 # ======================
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclcpp_components REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -90,16 +89,8 @@ target_include_directories(Test PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-target_include_directories(ArmorPlateIdentification PUBLIC
-  ${OpenCV_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIR}
-)
-target_include_directories(Test PUBLIC
-  ${OpenCV_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIR}
-)
-target_compile_features(ArmorPlateIdentification PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
-target_compile_features(Test PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
+target_compile_features(ArmorPlateIdentification PUBLIC cxx_std_20)
+target_compile_features(Test PUBLIC cxx_std_20)
 # ======================
 # 链接库
 # ======================
@@ -108,14 +99,12 @@ target_link_directories(ArmorPlateIdentification PUBLIC
   ${MINDVISION_SDK_ROOT}/lib/amd64
 )
 target_link_libraries(ArmorPlateIdentification
-  ${OpenCV_LIBS}
   openvino::runtime
   gxiapi
   MVSDK
   yaw_search
 )
 target_link_libraries(Test
-  ${OpenCV_LIBS}
   openvino::runtime
   yaw_search
 )

@@ -18,7 +18,9 @@
 
   <!-- 本包消息依赖的其他消息包 -->
   <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>builtin_interfaces</depend>
+  <depend>eigen</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

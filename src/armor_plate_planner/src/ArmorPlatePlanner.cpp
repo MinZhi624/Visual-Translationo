@@ -32,7 +32,7 @@ void ArmorPlatePlanner::targetsCallback(const TrackedTargets::SharedPtr msg)
     }
     GimbalData current_gimbal = GimbalAngleToData(gimbal_msg);
 
-    // 车辆选择
+    //////////  车辆选择 /////////
      
     // 选择目标（第一版只接受 TRACKING） -- 同时也只是选则一个
     auto index = target_selector_.selectIndex(*msg);
@@ -41,7 +41,7 @@ void ArmorPlatePlanner::targetsCallback(const TrackedTargets::SharedPtr msg)
         return;
     }
 
-    // 装甲板选择
+    ////////// 装甲板选择 /////////
     const auto & selected_target = msg->targets[index.value()];
 
     const auto & current_armors = selected_target.armors;
@@ -67,17 +67,17 @@ void ArmorPlatePlanner::targetsCallback(const TrackedTargets::SharedPtr msg)
     double prediction_time = 0.0;
     auto predicted = target_predictor_.predict(selected_target, prediction_time);
 
-    // 5. 在预测帧中选择装甲板，优先保持同一 armor_id -- 这里先看一下外推效果(还没实现）)
+    // 在预测帧中选择装甲板，优先保持同一 armor_id -- 这里先看一下外推效果(还没实现）)
     auto selected_armor = armor_selector_.select(predicted.armors);
     if (!selected_armor.has_value()) {
         publishInvalidCommand(stamp);
         return;
     }
 
-    // 6. 弹道求解
+    // 弹道求解
     auto ballistic_result = ballistic_solver_.solve(selected_armor->position_world);
 
-    // 7. 只有弹道有效时才生成指令
+    // 只有弹道有效时才生成指令
     AimCommand aim_cmd;
     PlannerDebug debug;
     debug.header.stamp = stamp;

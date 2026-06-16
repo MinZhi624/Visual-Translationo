@@ -15,6 +15,9 @@ private:
     double bullet_speed_;
     double gravity_;
 
+    // 抛物线弹道解（无阻力低弹道）
+    BallisticResult solveByParabola(const geometry_msgs::msg::Point & target_point) const;
+
 public:
     BallisticSolver(double bullet_speed = 25.0, double gravity = 9.81);
 
