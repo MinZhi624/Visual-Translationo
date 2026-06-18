@@ -14,12 +14,15 @@ class BallisticSolver
 private:
     double bullet_speed_;
     double gravity_;
+    double drag_coeff_;  // 空气阻力系数 k = 0.5*ρ*A/m
 
-    // 抛物线弹道解（无阻力低弹道）
-    BallisticResult solveByParabola(const Eigen::Vector3d& target_point) const;
+    // 有阻力解析法（主要方法）
+    BallisticResult solveByDirectDrag(const Eigen::Vector3d& target_point) const;
+    // 有阻力牛顿迭代法（备用方法）
+    BallisticResult solveByNewtonDrag(const Eigen::Vector3d& target_point) const;
 
 public:
-    BallisticSolver(double bullet_speed = 25.0, double gravity = 9.81);
+    BallisticSolver(double bullet_speed = 25.0, double gravity = 9.81, double drag_coeff = 0.0);
 
     BallisticResult solve(const Eigen::Vector3d& target_point) const;
 };

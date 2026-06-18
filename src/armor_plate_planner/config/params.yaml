@@ -2,4 +2,5 @@ armor_plate_planner_node:
   ros__parameters:
     bullet_speed: 25.0
     gravity: 9.81
+    drag_coeff: 0.0207            # 空气阻力系数 k = 0.5*ρ*A/m
     max_armor_face_angle: 1.0472  # 60 degrees in radians

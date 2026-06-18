@@ -205,9 +205,10 @@ void ArmorPlatePlanner::init()
     // ===== 参数获取 ===== //
     double bullet_speed = this->declare_parameter<double>("bullet_speed", 25.0);
     double gravity = this->declare_parameter<double>("gravity", 9.81);
+    double drag_coeff = this->declare_parameter<double>("drag_coeff", 0.0);
     double max_face_angle = this->declare_parameter<double>("max_armor_face_angle", 1.0472);
 
-    ballistic_solver_ = BallisticSolver(bullet_speed, gravity);
+    ballistic_solver_ = BallisticSolver(bullet_speed, gravity, drag_coeff);
     armor_selector_ = ArmorSelector(max_face_angle);
 
     // ===== ROS 相关 ===== //
